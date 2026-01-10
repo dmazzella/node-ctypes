@@ -1,0 +1,239 @@
+cmake_minimum_required(VERSION 3.15)
+project(node_ctypes)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+add_compile_definitions(NAPI_VERSION=8)
+add_compile_definitions(NAPI_CPP_EXCEPTIONS)
+
+include(FetchContent)
+
+# ============================================================================
+# Determina architettura
+# ============================================================================
+
+if(WIN32)
+    if(CMAKE_VS_PLATFORM_NAME)
+        if(CMAKE_VS_PLATFORM_NAME STREQUAL "ARM64")
+            set(FFI_ARCH "arm64")
+        elseif(CMAKE_VS_PLATFORM_NAME STREQUAL "x64")
+            set(FFI_ARCH "amd64")
+        elseif(CMAKE_VS_PLATFORM_NAME STREQUAL "Win32")
+            set(FFI_ARCH "win32")
+        endif()
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64")
+        set(FFI_ARCH "arm64")
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
+        set(FFI_ARCH "amd64")
+    else()
+        set(FFI_ARCH "win32")
+    endif()
+else()
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+        set(FFI_ARCH "aarch64")
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
+        set(FFI_ARCH "x86_64")
+    else()
+        set(FFI_ARCH "x86")
+    endif()
+endif()
+
+message(STATUS "Target architecture: ${FFI_ARCH}")
+
+# ============================================================================
+# Trova/Scarica libffi
+# ============================================================================
+
+set(FFI_FOUND FALSE)
+
+if(WIN32)
+    # Su Windows, scarica i binari precompilati direttamente (molto più veloce del clone Git)
+    message(STATUS "Downloading prebuilt libffi for Windows ${FFI_ARCH}...")
+    
+    # URL base dei file libffi da GitHub (raw files, non git clone)
+    set(LIBFFI_BASE_URL "https://raw.githubusercontent.com/python/cpython-bin-deps/libffi/${FFI_ARCH}")
+    
+    # Directory di destinazione
+    set(LIBFFI_BIN_DIR ${CMAKE_BINARY_DIR}/_deps/libffi-${FFI_ARCH})
+    
+    # Scarica i file necessari (solo se non esistono già)
+    if(NOT EXISTS ${LIBFFI_BIN_DIR}/libffi-8.lib)
+        message(STATUS "Downloading libffi files (${FFI_ARCH})...")
+        file(MAKE_DIRECTORY ${LIBFFI_BIN_DIR}/include)
+        
+        # Scarica library (.lib)
+        file(DOWNLOAD 
+            "${LIBFFI_BASE_URL}/libffi-8.lib"
+            "${LIBFFI_BIN_DIR}/libffi-8.lib"
+            SHOW_PROGRESS
+            STATUS DOWNLOAD_STATUS
+        )
+        list(GET DOWNLOAD_STATUS 0 STATUS_CODE)
+        if(NOT STATUS_CODE EQUAL 0)
+            message(FATAL_ERROR "Failed to download libffi-8.lib")
+        endif()
+        
+        # Scarica DLL
+        file(DOWNLOAD 
+            "${LIBFFI_BASE_URL}/libffi-8.dll"
+            "${LIBFFI_BIN_DIR}/libffi-8.dll"
+            SHOW_PROGRESS
+            STATUS DOWNLOAD_STATUS
+        )
+        list(GET DOWNLOAD_STATUS 0 STATUS_CODE)
+        if(NOT STATUS_CODE EQUAL 0)
+            message(FATAL_ERROR "Failed to download libffi-8.dll")
+        endif()
+        
+        # Scarica headers
+        file(DOWNLOAD 
+            "${LIBFFI_BASE_URL}/include/ffi.h"
+            "${LIBFFI_BIN_DIR}/include/ffi.h"
+            SHOW_PROGRESS
+            STATUS DOWNLOAD_STATUS
+        )
+        list(GET DOWNLOAD_STATUS 0 STATUS_CODE)
+        if(NOT STATUS_CODE EQUAL 0)
+            message(FATAL_ERROR "Failed to download ffi.h")
+        endif()
+        
+        file(DOWNLOAD 
+            "${LIBFFI_BASE_URL}/include/ffitarget.h"
+            "${LIBFFI_BIN_DIR}/include/ffitarget.h"
+            SHOW_PROGRESS
+            STATUS DOWNLOAD_STATUS
+        )
+        list(GET DOWNLOAD_STATUS 0 STATUS_CODE)
+        if(NOT STATUS_CODE EQUAL 0)
+            message(FATAL_ERROR "Failed to download ffitarget.h")
+        endif()
+        
+        message(STATUS "libffi download completed")
+    else()
+        message(STATUS "Using cached libffi files")
+    endif()
+    
+    if(EXISTS ${LIBFFI_BIN_DIR})
+        message(STATUS "Found libffi binaries at: ${LIBFFI_BIN_DIR}")
+        
+        # Trova i file
+        file(GLOB FFI_DLL "${LIBFFI_BIN_DIR}/libffi*.dll")
+        file(GLOB FFI_LIB "${LIBFFI_BIN_DIR}/libffi*.lib")
+        
+        if(FFI_LIB)
+            set(FFI_FOUND TRUE)
+            set(FFI_INCLUDE_DIRS ${LIBFFI_BIN_DIR}/include)
+            set(FFI_LIBRARIES ${FFI_LIB})
+            set(FFI_DLL_FILE ${FFI_DLL})
+            
+            message(STATUS "libffi library: ${FFI_LIBRARIES}")
+            message(STATUS "libffi DLL: ${FFI_DLL_FILE}")
+            message(STATUS "libffi includes: ${FFI_INCLUDE_DIRS}")
+        endif()
+    endif()
+    
+else()
+    # Su Linux/macOS, usa pkg-config
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(FFI QUIET libffi)
+        if(FFI_FOUND)
+            message(STATUS "Found libffi via pkg-config")
+        endif()
+    endif()
+    
+    # Fallback: cerca manualmente
+    if(NOT FFI_FOUND)
+        find_path(FFI_INCLUDE_DIR ffi.h
+            PATHS /usr/include /usr/local/include /opt/homebrew/include
+        )
+        find_library(FFI_LIBRARY NAMES ffi
+            PATHS /usr/lib /usr/local/lib /opt/homebrew/lib
+        )
+        if(FFI_INCLUDE_DIR AND FFI_LIBRARY)
+            set(FFI_FOUND TRUE)
+            set(FFI_INCLUDE_DIRS ${FFI_INCLUDE_DIR})
+            set(FFI_LIBRARIES ${FFI_LIBRARY})
+        endif()
+    endif()
+endif()
+
+if(NOT FFI_FOUND)
+    message(FATAL_ERROR "libffi not found!")
+endif()
+
+# ============================================================================
+# node-ctypes module
+# ============================================================================
+
+set(SOURCE_FILES
+    src/ctypes.cc
+    src/library.cc
+    src/function.cc
+    src/types.cc
+    src/callback.cc
+)
+
+add_library(${PROJECT_NAME} SHARED ${SOURCE_FILES})
+
+set_target_properties(${PROJECT_NAME} PROPERTIES PREFIX "" SUFFIX ".node")
+
+# Include directories
+if(CMAKE_JS_INC)
+    target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_JS_INC})
+endif()
+
+# node-addon-api
+execute_process(
+    COMMAND node -p "require('node-addon-api').include"
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE NODE_ADDON_API_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(NODE_ADDON_API_DIR)
+    string(REPLACE "\"" "" NODE_ADDON_API_DIR ${NODE_ADDON_API_DIR})
+    target_include_directories(${PROJECT_NAME} PRIVATE ${NODE_ADDON_API_DIR})
+endif()
+
+# libffi
+target_include_directories(${PROJECT_NAME} PRIVATE ${FFI_INCLUDE_DIRS})
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+# Link
+if(CMAKE_JS_LIB)
+    target_link_libraries(${PROJECT_NAME} PRIVATE ${CMAKE_JS_LIB})
+endif()
+
+target_link_libraries(${PROJECT_NAME} PRIVATE ${FFI_LIBRARIES})
+
+# Windows specifiche
+if(WIN32)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE _CRT_SECURE_NO_WARNINGS)
+    
+    # Copia DLL nella directory di output
+    if(FFI_DLL_FILE)
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${FFI_DLL_FILE}"
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+            COMMENT "Copying libffi DLL..."
+        )
+    endif()
+endif()
+
+if(MSVC)
+    target_compile_options(${PROJECT_NAME} PRIVATE /wd4996)
+endif()
+
+# ============================================================================
+# Info
+# ============================================================================
+
+message(STATUS "")
+message(STATUS "=== node-ctypes ===")
+message(STATUS "  Platform: ${CMAKE_SYSTEM_NAME}")
+message(STATUS "  Architecture: ${FFI_ARCH}")
+message(STATUS "  libffi: ${FFI_LIBRARIES}")
+message(STATUS "===================")

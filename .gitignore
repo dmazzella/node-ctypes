@@ -1,0 +1,9 @@
+/dist
+/build
+/.vscode
+/.idea
+/.DS_Store
+/.env*
+/node_modules
+/test/python
+package-lock.json
