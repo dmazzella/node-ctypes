@@ -1,10 +1,11 @@
 // Test per Windows - MessageBoxA
 const ctypes = require("../lib");
+const { CDLL, WinDLL } = ctypes;
 
 console.log("=== node-ctypes Windows Test ===\n");
 
-// Carica user32.dll
-const user32 = new ctypes.CDLL("user32.dll");
+// Carica user32.dll (WinDLL per stdcall)
+const user32 = new WinDLL("user32.dll");
 console.log("Loaded:", user32.path);
 
 // Imposta il processo come DPI-aware per evitare finestre sgranate su schermi ad alta risoluzione
@@ -94,7 +95,7 @@ console.log("Result:", result, "(1 = OK, 2 = Cancel)\n");
 
 // Bonus: Beep!
 console.log("Bonus: Playing system beep...");
-const kernel32 = new ctypes.CDLL("kernel32.dll");
+const kernel32 = new WinDLL("kernel32.dll");
 const Beep = kernel32.func("Beep", "bool", ["uint32", "uint32"]);
 // Beep(frequency_hz, duration_ms)
 Beep(800, 200); // 800 Hz per 200ms
@@ -118,7 +119,7 @@ console.log("  ✓ sizeof works\n");
 console.log("Test: Loading msvcrt.dll (C Runtime)");
 let msvcrt;
 try {
-  msvcrt = new ctypes.CDLL("msvcrt.dll");
+  msvcrt = new CDLL("msvcrt.dll");
   console.log("  Loaded: msvcrt.dll");
   console.log("  ✓ msvcrt loaded\n");
 } catch (e) {
