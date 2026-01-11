@@ -130,6 +130,48 @@ const abs = libc.func("abs", "int32", ["int32"]);
 const result = abs(-42);
 ```
 
+### Esempio errcheck
+
+```python
+# Python
+from ctypes import CDLL, c_void_p, c_size_t, WinError
+
+libc = CDLL("msvcrt")
+malloc = libc.malloc
+malloc.restype = c_void_p
+malloc.argtypes = [c_size_t]
+
+# Aggiungi error checking
+def check_null(result, func, args):
+    if result is None or result == 0:
+        raise MemoryError("malloc failed")
+    return result
+
+malloc.errcheck = check_null
+
+# Ora malloc solleva automaticamente MemoryError se fallisce
+ptr = malloc(1024)  # OK
+```
+
+```javascript
+// node-ctypes
+const { CDLL } = require('node-ctypes');
+
+const libc = new CDLL("msvcrt");
+const malloc = libc.func("malloc", "pointer", ["size_t"]);
+
+// Aggiungi error checking ✅ IDENTICO A PYTHON!
+malloc.errcheck = function(result, func, args) {
+    if (!result || result === 0n) {
+        throw new Error("malloc failed");
+    }
+    return result;
+};
+
+// Ora malloc solleva automaticamente Error se fallisce
+const ptr = malloc(1024);  // OK
+```
+
 ---
 
 ## 4. Structures & Unions
