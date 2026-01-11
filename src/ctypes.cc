@@ -4,6 +4,8 @@
 #include "library.h"
 #include "function.h"
 #include "callback.h"
+#include "struct.h"
+#include "array.h"
 
 namespace ctypes
 {
@@ -405,6 +407,8 @@ namespace ctypes
         FFIFunction::Init(env, exports);
         Callback::Init(env, exports);
         ThreadSafeCallback::Init(env, exports);
+        StructType::Init(env, exports);
+        ArrayType::Init(env, exports);
 
         // Esporta funzioni helper
         exports.Set("load", Napi::Function::New(env, LoadLibrary));

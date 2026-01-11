@@ -32,8 +32,11 @@ namespace ctypes
         BOOL,
         SIZE_T,
         SSIZE_T,
-        LONG, // platform-dependent: 32-bit su Windows, 32/64-bit su Unix
-        ULONG // platform-dependent: 32-bit su Windows, 32/64-bit su Unix
+        LONG,   // platform-dependent: 32-bit su Windows, 32/64-bit su Unix
+        ULONG,  // platform-dependent: 32-bit su Windows, 32/64-bit su Unix
+        STRUCT, // struttura composta (come CPython Structure)
+        UNION,  // union composta (come CPython Union)
+        ARRAY   // array a dimensione fissa (come CPython c_int * 5)
     };
 
     // Mappa nome stringa -> CType

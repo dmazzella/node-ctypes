@@ -8,6 +8,7 @@
 | Basic Types | 19 | 0 | 1 |
 | Functions | 3 | 1 | 1 |
 | Structures | 7 | 0 | 1 |
+| Arrays | 6 | 0 | 1 |
 | Pointers | 7 | 0 | 0 |
 | Callbacks | 2 | 0 | 0 |
 | Memory | 12 | 0 | 0 |
@@ -298,7 +299,118 @@ console.log(
 
 ---
 
-## 5. Pointers
+## 5. Arrays
+
+### ✅ Supportato
+
+| Python | node-ctypes | Note |
+|--------|-------------|------|
+| `c_int * 5` | `array('int32', 5)` | Fixed-size arrays |
+| `(c_int * 5)(1,2,3,4,5)` | `IntArray5.create([1,2,3,4,5])` | Initialization |
+| `sizeof(arr)` | `ArrayType.getSize()` | Size in bytes |
+| `len(arr)` | `ArrayType.getLength()` | Number of elements |
+| `arr[i]` | `buf.readInt32LE(i*4)` | Element access (Buffer API) |
+| Partial init | `create([1,2,3])` | Rest filled with zeros |
+
+### 🟡 Differenze
+
+| Python | node-ctypes | Note |
+|--------|-------------|------|
+| Array indexing (`arr[i]`) | Buffer API (`readInt32LE()`) | Python-like indexing non implementato |
+
+### ❌ Mancante
+
+| Python | Descrizione |
+|--------|-------------|
+| `arr[i] = value` | Direct element assignment |
+
+### Esempio Comparativo
+
+```python
+# Python
+from ctypes import c_int, c_float, c_char
+
+# Create array types
+IntArray5 = c_int * 5
+FloatArray3 = c_float * 3
+CharArray100 = c_char * 100
+
+# Initialize arrays
+ints = IntArray5(1, 2, 3, 4, 5)
+floats = FloatArray3(1.5, 2.5, 3.5)
+chars = CharArray100(b"Hello")
+
+# Access elements
+print(ints[0])          # 1
+ints[0] = 42
+
+# Size
+print(sizeof(ints))     # 20 (5 * 4 bytes)
+
+# Partial init
+partial = IntArray5(1, 2, 3)  # rest is 0
+```
+
+```javascript
+// node-ctypes
+const { array } = require('node-ctypes');
+
+// Create array types
+const IntArray5 = array('int32', 5);
+const FloatArray3 = array('float', 3);
+const CharArray100 = array('int8', 100);
+
+// Initialize arrays
+const ints = IntArray5.create([1, 2, 3, 4, 5]);
+const floats = FloatArray3.create([1.5, 2.5, 3.5]);
+const chars = CharArray100.create('Hello');
+
+// Access elements (using Buffer API)
+console.log(ints.readInt32LE(0));  // 1
+ints.writeInt32LE(42, 0);
+
+// Size
+console.log(IntArray5.getSize());   // 20 (5 * 4 bytes)
+console.log(IntArray5.getLength()); // 5
+
+// Partial init
+const partial = IntArray5.create([1, 2, 3]);  // rest is 0
+```
+
+### Arrays in Functions
+
+```python
+# Python
+from ctypes import CDLL, c_int
+
+libc = CDLL("msvcrt")
+memcpy = libc.memcpy
+memcpy.argtypes = [c_void_p, c_void_p, c_size_t]
+
+IntArray10 = c_int * 10
+src = IntArray10(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+dst = IntArray10()
+
+memcpy(dst, src, sizeof(src))
+```
+
+```javascript
+// node-ctypes
+const { CDLL, array } = require('node-ctypes');
+
+const msvcrt = new CDLL('msvcrt.dll');
+const memcpy = msvcrt.func('memcpy', 'pointer', ['pointer', 'pointer', 'size_t']);
+
+const IntArray10 = array('int32', 10);
+const src = IntArray10.create([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+const dst = IntArray10.create();
+
+memcpy(dst, src, IntArray10.getSize());
+```
+
+---
+
+## 6. Pointers
 
 ### ✅ Supportato
 
@@ -367,7 +479,7 @@ const addr = addressOf(buf);
 
 ---
 
-## 6. Callbacks
+## 7. Callbacks
 
 ### ✅ Supportato
 
@@ -422,7 +534,7 @@ const threadProc = threadSafeCallback((param) => {
 
 ---
 
-## 7. Memory Management
+## 8. Memory Management
 
 ### ✅ Supportato
 
@@ -509,7 +621,7 @@ memset(buf, 0, 100);
 
 ---
 
-## 8. Error Handling
+## 9. Error Handling
 
 ### ✅ Supportato
 
@@ -556,7 +668,7 @@ throw WinError(code);
 
 ---
 
-## 9. Feature Comparison Matrix
+## 10. Feature Comparison Matrix
 
 | Feature | Python ctypes | node-ctypes | Note |
 |---------|---------------|-------------|------|

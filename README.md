@@ -6,6 +6,7 @@ A Python ctypes-like FFI (Foreign Function Interface) for Node.js, built on top 
 
 - Load shared libraries (.so, .dll, .dylib)
 - Call C functions with automatic type conversion
+- Support for variadic functions (printf, sprintf, etc.)
 - Create callbacks from JavaScript functions callable from C
 - Support for basic C types (int, float, double, pointers, strings)
 - Simple struct helper for basic structures
@@ -163,6 +164,37 @@ const MessageBoxA = user32.func('MessageBoxA', 'int32', [
 MessageBoxA(null, 'Hello!', 'Title', 0);
 ```
 
+### Variadic Functions
+
+Node-ctypes supports variadic functions (like `printf`, `sprintf`) with automatic detection, just like Python ctypes:
+
+```javascript
+const { CDLL, alloc, cstring, readCString } = require('node-ctypes');
+
+const libc = new CDLL('msvcrt.dll'); // Windows
+
+// Define only the fixed parameters
+const sprintf = libc.func('sprintf', 'int32', ['pointer', 'pointer']);
+
+const buffer = alloc(256);
+
+// Pass extra arguments - automatically handled as variadic
+sprintf(buffer, cstring('Hello %s!'), cstring('World'));
+sprintf(buffer, cstring('Number: %d'), 42);
+sprintf(buffer, cstring('%s: %d + %d = %d'), cstring('Sum'), 10, 20, 30);
+sprintf(buffer, cstring('Pi is approximately %.2f'), 3.14159);
+
+console.log(readCString(buffer)); // Last result: "Pi is approximately 3.14"
+```
+
+When you pass more arguments than specified in the function signature, node-ctypes automatically:
+- Detects the extra arguments
+- Infers their types (string, int32, double, pointer)
+- Uses `ffi_prep_cif_var` to prepare the variadic call
+- Calls the function with the correct argument types
+
+This matches Python ctypes behavior exactly!
+
 ## Supported Types
 
 | Type Name | Aliases | Size |
@@ -234,10 +266,10 @@ Create a simple struct definition.
 | `lib.func.restype = c_int` | (included in func() call) |
 | `c_char_p(b"hello")` | `cstring("hello")` |
 | `POINTER(c_int)` | `"pointer"` |
+| `sprintf(buf, b"%d", 42)` | `sprintf(buf, format, 42)` (auto-variadic) |
 
 ## Limitations
 
-- No support for variadic functions (yet)
 - No automatic struct alignment (fields are packed)
 - Callbacks must be released manually
 - No support for unions

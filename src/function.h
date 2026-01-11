@@ -5,7 +5,10 @@
 #include <ffi.h>
 #include <vector>
 #include <string>
+#include <memory>
 #include "types.h"
+#include "struct.h"
+#include "array.h"
 
 namespace ctypes
 {
@@ -27,6 +30,41 @@ namespace ctypes
     static constexpr size_t MAX_INLINE_ARGS = 16;
     static constexpr size_t ARG_SLOT_SIZE = 16; // Abbastanza per qualsiasi tipo base
     static constexpr size_t RETURN_BUFFER_SIZE = 64;
+    static constexpr size_t MAX_VARIADIC_EXTRA_ARGS = 8;  // Per stack allocation
+    static constexpr size_t MAX_CACHED_VARIADIC_CIFS = 4; // Cache per pattern comuni
+    static constexpr size_t SMALL_STRING_BUFFER = 256;    // Stack buffer per stringhe piccole
+    static constexpr int MAX_AS_PARAMETER_DEPTH = 100;    // Ricorsione _as_parameter_ (come CPython)
+
+    // Union per return value (come CPython - migliore cache locality)
+    union ReturnValue
+    {
+        char c;
+        int8_t i8;
+        uint8_t u8;
+        int16_t i16;
+        uint16_t u16;
+        int32_t i32;
+        uint32_t u32;
+        int64_t i64;
+        uint64_t u64;
+        float f;
+        double d;
+        void *p;
+        char *str;
+        wchar_t *wstr;
+    };
+
+    // Cache entry per CIF variadici (es. sprintf con 1-2 argomenti extra)
+    struct VariadicCifCache
+    {
+        size_t total_args; // Numero totale argomenti (fissi + variadici)
+        ffi_cif cif;
+        std::vector<ffi_type *> ffi_types;
+        std::vector<CType> extra_types; // Tipi degli argomenti extra
+        bool valid;
+
+        VariadicCifCache() : total_args(0), valid(false) {}
+    };
 
     // Wrapper per una funzione C chiamabile da JavaScript
     class FFIFunction : public Napi::ObjectWrap<FFIFunction>
@@ -57,6 +95,12 @@ namespace ctypes
         // Tipi
         CType return_type_;
         std::vector<CType> arg_types_;
+        
+        // Struct/Array info per argomenti e return (se STRUCT/UNION/ARRAY)
+        std::shared_ptr<StructInfo> return_struct_info_;
+        std::shared_ptr<ArrayInfo> return_array_info_;
+        std::vector<std::shared_ptr<StructInfo>> arg_struct_infos_;
+        std::vector<std::shared_ptr<ArrayInfo>> arg_array_infos_;
 
         // Cache dei tipi FFI
         ffi_type *ffi_return_type_;
@@ -70,8 +114,8 @@ namespace ctypes
         alignas(16) uint8_t inline_arg_storage_[MAX_INLINE_ARGS * ARG_SLOT_SIZE];
         void *inline_arg_values_[MAX_INLINE_ARGS];
 
-        // Buffer inline per return value
-        alignas(16) uint8_t inline_return_buffer_[RETURN_BUFFER_SIZE];
+        // Union per return value (ottimizza cache locality)
+        alignas(16) ReturnValue return_value_;
 
         // Buffer per stringhe (riutilizzato, resize se necessario)
         std::vector<char> string_buffer_;
@@ -82,6 +126,12 @@ namespace ctypes
 
         // Flag per sapere se usare inline o heap
         bool use_inline_storage_;
+
+        // ============================================================
+        // Cache per CIF variadici (ottimizzazione chiamate ripetute)
+        // ============================================================
+        VariadicCifCache variadic_cache_[MAX_CACHED_VARIADIC_CIFS];
+        size_t next_cache_slot_; // Round-robin replacement
     };
 
 } // namespace ctypes

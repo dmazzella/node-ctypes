@@ -62,7 +62,8 @@ namespace ctypes
           abi_(FFI_DEFAULT_ABI),
           return_type_(CType::VOID),
           ffi_return_type_(nullptr),
-          use_inline_storage_(true)
+          use_inline_storage_(true),
+          next_cache_slot_(0)
     {
         Napi::Env env = info.Env();
 
@@ -105,6 +106,18 @@ namespace ctypes
                 {
                     return_type_ = Napi::ObjectWrap<TypeInfo>::Unwrap(obj)->GetCType();
                 }
+                else if (obj.InstanceOf(StructType::constructor.Value()))
+                {
+                    // Return type è struct
+                    return_type_ = CType::STRUCT;
+                    return_struct_info_ = Napi::ObjectWrap<StructType>::Unwrap(obj)->GetStructInfo();
+                }
+                else if (obj.InstanceOf(ArrayType::constructor.Value()))
+                {
+                    // Return type è array
+                    return_type_ = CType::ARRAY;
+                    return_array_info_ = Napi::ObjectWrap<ArrayType>::Unwrap(obj)->GetArrayInfo();
+                }
                 else
                 {
                     throw std::runtime_error("Invalid return type object");
@@ -127,6 +140,8 @@ namespace ctypes
         {
             Napi::Array arr = info[3].As<Napi::Array>();
             arg_types_.reserve(arr.Length());
+            arg_struct_infos_.resize(arr.Length()); // Resize to match, null by default
+            arg_array_infos_.resize(arr.Length());
 
             for (uint32_t i = 0; i < arr.Length(); i++)
             {
@@ -137,6 +152,8 @@ namespace ctypes
                     if (elem.IsString())
                     {
                         arg_types_.push_back(StringToCType(elem.As<Napi::String>().Utf8Value()));
+                        arg_struct_infos_[i] = nullptr;
+                        arg_array_infos_[i] = nullptr;
                     }
                     else if (elem.IsObject())
                     {
@@ -145,6 +162,22 @@ namespace ctypes
                         {
                             arg_types_.push_back(
                                 Napi::ObjectWrap<TypeInfo>::Unwrap(obj)->GetCType());
+                            arg_struct_infos_[i] = nullptr;
+                            arg_array_infos_[i] = nullptr;
+                        }
+                        else if (obj.InstanceOf(StructType::constructor.Value()))
+                        {
+                            // Argument type è struct
+                            arg_types_.push_back(CType::STRUCT);
+                            arg_struct_infos_[i] = Napi::ObjectWrap<StructType>::Unwrap(obj)->GetStructInfo();
+                            arg_array_infos_[i] = nullptr;
+                        }
+                        else if (obj.InstanceOf(ArrayType::constructor.Value()))
+                        {
+                            // Argument type è array
+                            arg_types_.push_back(CType::ARRAY);
+                            arg_struct_infos_[i] = nullptr;
+                            arg_array_infos_[i] = Napi::ObjectWrap<ArrayType>::Unwrap(obj)->GetArrayInfo();
                         }
                         else
                         {
@@ -180,12 +213,13 @@ namespace ctypes
         // Determina se usare storage inline o heap
         use_inline_storage_ = (arg_types_.size() <= MAX_INLINE_ARGS);
 
-        // Pre-alloca heap storage se necessario
+        // Pre-alloca heap storage se necessario (come CPython - pool struct argument)
         if (!use_inline_storage_)
         {
             heap_arg_storage_.resize(arg_types_.size() * ARG_SLOT_SIZE);
             heap_arg_values_.resize(arg_types_.size());
         }
+        // Per arg counts piccoli usiamo sempre inline_arg_values_ (stack allocation)
 
         // Pre-alloca string buffer (stima iniziale)
         size_t string_count = 0;
@@ -209,13 +243,37 @@ namespace ctypes
 
     bool FFIFunction::PrepareFFI(Napi::Env env)
     {
-        ffi_return_type_ = CTypeToFFI(return_type_);
+        // Return type FFI
+        if (return_type_ == CType::STRUCT && return_struct_info_)
+        {
+            ffi_return_type_ = return_struct_info_->GetFFIType();
+        }
+        else if (return_type_ == CType::ARRAY && return_array_info_)
+        {
+            ffi_return_type_ = return_array_info_->GetFFIType();
+        }
+        else
+        {
+            ffi_return_type_ = CTypeToFFI(return_type_);
+        }
 
+        // Argument types FFI
         ffi_arg_types_.clear();
         ffi_arg_types_.reserve(arg_types_.size());
-        for (const auto &type : arg_types_)
+        for (size_t i = 0; i < arg_types_.size(); i++)
         {
-            ffi_arg_types_.push_back(CTypeToFFI(type));
+            if (arg_types_[i] == CType::STRUCT && arg_struct_infos_[i])
+            {
+                ffi_arg_types_.push_back(arg_struct_infos_[i]->GetFFIType());
+            }
+            else if (arg_types_[i] == CType::ARRAY && arg_array_infos_[i])
+            {
+                ffi_arg_types_.push_back(arg_array_infos_[i]->GetFFIType());
+            }
+            else
+            {
+                ffi_arg_types_.push_back(CTypeToFFI(arg_types_[i]));
+            }
         }
 
         ffi_status status = ffi_prep_cif(
@@ -237,115 +295,64 @@ namespace ctypes
     }
 
     // ============================================================================
-    // Inline conversion per return value - evita duplicazione
+    // Inline conversion per return value - usa union (consistente con CToJS)
     // ============================================================================
 
     inline Napi::Value FFIFunction::ConvertReturnValue(Napi::Env env)
     {
-        napi_value result;
-
         switch (return_type_)
         {
         case CType::VOID:
             return env.Undefined();
 
         case CType::INT32:
-        {
-            int32_t val;
-            memcpy(&val, inline_return_buffer_, 4);
-            napi_create_int32(env, val, &result);
-            return Napi::Value(env, result);
-        }
+            return Napi::Number::New(env, return_value_.i32);
 
         case CType::UINT32:
-        {
-            uint32_t val;
-            memcpy(&val, inline_return_buffer_, 4);
-            napi_create_uint32(env, val, &result);
-            return Napi::Value(env, result);
-        }
+            return Napi::Number::New(env, return_value_.u32);
 
         case CType::INT64:
-        {
-            int64_t val;
-            memcpy(&val, inline_return_buffer_, 8);
-            napi_create_bigint_int64(env, val, &result);
-            return Napi::Value(env, result);
-        }
+            return Napi::BigInt::New(env, return_value_.i64);
 
         case CType::UINT64:
         case CType::SIZE_T:
-        {
-            uint64_t val;
-            memcpy(&val, inline_return_buffer_, 8);
-            napi_create_bigint_uint64(env, val, &result);
-            return Napi::Value(env, result);
-        }
+            return Napi::BigInt::New(env, return_value_.u64);
 
         case CType::DOUBLE:
-        {
-            double val;
-            memcpy(&val, inline_return_buffer_, 8);
-            napi_create_double(env, val, &result);
-            return Napi::Value(env, result);
-        }
+            return Napi::Number::New(env, return_value_.d);
 
         case CType::FLOAT:
-        {
-            float val;
-            memcpy(&val, inline_return_buffer_, 4);
-            napi_create_double(env, static_cast<double>(val), &result);
-            return Napi::Value(env, result);
-        }
+            return Napi::Number::New(env, static_cast<double>(return_value_.f));
 
         case CType::BOOL:
-        {
-            uint8_t val;
-            memcpy(&val, inline_return_buffer_, 1);
-            napi_get_boolean(env, val != 0, &result);
-            return Napi::Value(env, result);
-        }
+            return Napi::Boolean::New(env, return_value_.u8 != 0);
 
         case CType::POINTER:
-        {
-            void *ptr;
-            memcpy(&ptr, inline_return_buffer_, sizeof(void *));
-            if (ptr == nullptr)
+            if (return_value_.p == nullptr)
             {
                 return env.Null();
             }
-            napi_create_bigint_uint64(env, reinterpret_cast<uint64_t>(ptr), &result);
-            return Napi::Value(env, result);
-        }
+            return Napi::BigInt::New(env, reinterpret_cast<uint64_t>(return_value_.p));
 
         case CType::STRING:
-        {
-            char *str;
-            memcpy(&str, inline_return_buffer_, sizeof(char *));
-            if (str == nullptr)
+            if (return_value_.str == nullptr)
             {
                 return env.Null();
             }
-            napi_create_string_utf8(env, str, NAPI_AUTO_LENGTH, &result);
-            return Napi::Value(env, result);
-        }
+            return Napi::String::New(env, return_value_.str);
 
         case CType::WSTRING:
         {
-            wchar_t *str;
-            memcpy(&str, inline_return_buffer_, sizeof(wchar_t *));
-            if (str == nullptr)
+            if (return_value_.wstr == nullptr)
             {
                 return env.Null();
             }
 #ifdef _WIN32
             // Windows: wchar_t è 16-bit (UTF-16)
-            napi_create_string_utf16(env, reinterpret_cast<const char16_t *>(str),
-                                     NAPI_AUTO_LENGTH, &result);
-            return Napi::Value(env, result);
+            return Napi::String::New(env, reinterpret_cast<const char16_t *>(return_value_.wstr));
 #else
             // Unix: wchar_t è 32-bit, converti a UTF-8
-            std::wstring wstr(str);
+            std::wstring wstr(return_value_.wstr);
             std::string utf8;
             utf8.reserve(wstr.size() * 4);
             for (wchar_t wc : wstr)
@@ -373,43 +380,61 @@ namespace ctypes
                     utf8.push_back(static_cast<char>(0x80 | (wc & 0x3F)));
                 }
             }
-            napi_create_string_utf8(env, utf8.c_str(), utf8.size(), &result);
-            return Napi::Value(env, result);
+            return Napi::String::New(env, utf8);
 #endif
         }
 
         case CType::LONG:
-        {
-            long val;
-            memcpy(&val, inline_return_buffer_, sizeof(long));
             if (sizeof(long) <= 4)
             {
-                napi_create_int32(env, static_cast<int32_t>(val), &result);
+                return Napi::Number::New(env, static_cast<int32_t>(return_value_.i64));
             }
-            else
-            {
-                napi_create_bigint_int64(env, static_cast<int64_t>(val), &result);
-            }
-            return Napi::Value(env, result);
-        }
+            return Napi::BigInt::New(env, return_value_.i64);
 
         case CType::ULONG:
-        {
-            unsigned long val;
-            memcpy(&val, inline_return_buffer_, sizeof(unsigned long));
             if (sizeof(unsigned long) <= 4)
             {
-                napi_create_uint32(env, static_cast<uint32_t>(val), &result);
+                return Napi::Number::New(env, static_cast<uint32_t>(return_value_.u64));
             }
-            else
+            return Napi::BigInt::New(env, return_value_.u64);
+
+        case CType::INT8:
+            return Napi::Number::New(env, return_value_.i8);
+
+        case CType::UINT8:
+            return Napi::Number::New(env, return_value_.u8);
+
+        case CType::INT16:
+            return Napi::Number::New(env, return_value_.i16);
+
+        case CType::UINT16:
+            return Napi::Number::New(env, return_value_.u16);
+
+        case CType::STRUCT:
+        {
+            // Struct by-value: converti buffer struct → JS object
+            if (return_struct_info_)
             {
-                napi_create_bigint_uint64(env, static_cast<uint64_t>(val), &result);
+                return return_struct_info_->StructToJS(env, &return_value_);
             }
-            return Napi::Value(env, result);
+            // Fallback se non c'è struct info (non dovrebbe accadere)
+            return env.Undefined();
+        }
+
+        case CType::ARRAY:
+        {
+            // Array by-value: converti buffer array → JS array
+            if (return_array_info_)
+            {
+                return return_array_info_->ArrayToJS(env, &return_value_);
+            }
+            // Fallback se non c'è array info (non dovrebbe accadere)
+            return env.Undefined();
         }
 
         default:
-            return CToJS(env, inline_return_buffer_, return_type_);
+            // Fallback generico per tipi non comuni
+            return CToJS(env, &return_value_, return_type_);
         }
     }
 
@@ -428,15 +453,205 @@ namespace ctypes
             return env.Undefined();
         }
 
-        const size_t argc = arg_types_.size();
+        const size_t info_argc = info.Length();
+        const size_t expected_argc = arg_types_.size();
+        size_t argc;
+        bool need_reprep = false;
+
+        // Fast path: numero esatto di argomenti (caso più comune)
+        if (info_argc == expected_argc) [[likely]]
+        {
+            argc = expected_argc;
+            // Continua con i fast paths sotto
+        }
+        else if (info_argc > expected_argc)
+        {
+            // Auto-variadic: più argomenti del previsto (come Python ctypes)
+            argc = info_argc;
+            need_reprep = true;
+        }
+        else [[unlikely]]
+        {
+            // Troppo pochi argomenti
+            Napi::TypeError::New(env,
+                                 "Expected " + std::to_string(expected_argc) +
+                                     " arguments, got " + std::to_string(info_argc))
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
 
         // =====================================================================
         // Fast path: funzioni senza argomenti (es. GetTickCount)
         // =====================================================================
         if (argc == 0)
         {
-            ffi_call(&cif_, FFI_FN(fn_ptr_), inline_return_buffer_, nullptr);
+            ffi_call(&cif_, FFI_FN(fn_ptr_), &return_value_, nullptr);
             return ConvertReturnValue(env);
+        }
+
+        // =====================================================================
+        // Gestione variadic ottimizzata (ispirata a CPython ctypes)
+        // =====================================================================
+        ffi_cif *active_cif = &cif_;
+        ffi_cif variadic_cif;
+        VariadicCifCache *cache_entry = nullptr;
+        size_t num_extra = 0; // Numero di argomenti extra variadic
+
+        // Stack-allocated arrays per piccoli numeri di argomenti extra (come alloca in CPython)
+        CType extra_types_stack[MAX_VARIADIC_EXTRA_ARGS];
+        ffi_type *variadic_ffi_types_stack[MAX_INLINE_ARGS];
+
+        std::vector<CType> extra_types_heap;
+        std::vector<ffi_type *> variadic_ffi_types_heap;
+
+        if (need_reprep)
+        {
+            size_t fixed_args = expected_argc;
+            num_extra = argc - fixed_args;
+
+            // Inferisci tipi degli argomenti extra
+            CType *extra_types;
+            if (num_extra <= MAX_VARIADIC_EXTRA_ARGS)
+            {
+                extra_types = extra_types_stack;
+            }
+            else
+            {
+                extra_types_heap.resize(num_extra);
+                extra_types = extra_types_heap.data();
+            }
+
+            for (size_t i = 0; i < num_extra; i++)
+            {
+                const Napi::Value &val = info[fixed_args + i];
+
+                // Inferisci il tipo dal valore JavaScript
+                if (val.IsString())
+                {
+                    extra_types[i] = CType::STRING;
+                }
+                else if (val.IsNumber())
+                {
+                    double d = val.As<Napi::Number>().DoubleValue();
+                    extra_types[i] = (d == static_cast<int32_t>(d)) ? CType::INT32 : CType::DOUBLE;
+                }
+                else if (val.IsBigInt())
+                {
+                    extra_types[i] = CType::INT64;
+                }
+                else if (val.IsBuffer())
+                {
+                    extra_types[i] = CType::POINTER;
+                }
+                else if (val.IsNull() || val.IsUndefined())
+                {
+                    extra_types[i] = CType::POINTER;
+                }
+                else
+                {
+                    extra_types[i] = CType::INT32; // fallback
+                }
+            }
+
+            // Cerca in cache
+            for (size_t i = 0; i < MAX_CACHED_VARIADIC_CIFS; i++)
+            {
+                if (variadic_cache_[i].valid &&
+                    variadic_cache_[i].total_args == argc &&
+                    variadic_cache_[i].extra_types.size() == num_extra)
+                {
+
+                    // Verifica match dei tipi extra
+                    bool match = true;
+                    for (size_t j = 0; j < num_extra; j++)
+                    {
+                        if (variadic_cache_[i].extra_types[j] != extra_types[j])
+                        {
+                            match = false;
+                            break;
+                        }
+                    }
+
+                    if (match)
+                    {
+                        cache_entry = &variadic_cache_[i];
+                        active_cif = &cache_entry->cif;
+                        break;
+                    }
+                }
+            }
+
+            // Cache miss - prepara nuovo CIF
+            if (!cache_entry)
+            {
+                // Usa stack o heap per array temporaneo
+                ffi_type **variadic_ffi_types;
+                if (argc <= MAX_INLINE_ARGS)
+                {
+                    variadic_ffi_types = variadic_ffi_types_stack;
+                }
+                else
+                {
+                    variadic_ffi_types_heap.resize(argc);
+                    variadic_ffi_types = variadic_ffi_types_heap.data();
+                }
+
+                // Copia tipi fissi
+                for (size_t i = 0; i < fixed_args; i++)
+                {
+                    variadic_ffi_types[i] = ffi_arg_types_[i];
+                }
+
+                // Aggiungi tipi extra
+                for (size_t i = 0; i < num_extra; i++)
+                {
+                    variadic_ffi_types[fixed_args + i] = CTypeToFFI(extra_types[i]);
+                }
+
+                // Prepara CIF variadico
+                ffi_status status = ffi_prep_cif_var(
+                    &variadic_cif,
+                    abi_,
+                    static_cast<unsigned int>(fixed_args),
+                    static_cast<unsigned int>(argc),
+                    ffi_return_type_,
+                    variadic_ffi_types);
+
+                if (status != FFI_OK)
+                {
+                    Napi::Error::New(env, "Failed to prepare variadic FFI call")
+                        .ThrowAsJavaScriptException();
+                    return env.Undefined();
+                }
+
+                active_cif = &variadic_cif;
+
+                // Salva in cache per riutilizzo
+                if (num_extra <= 4)
+                { // Cache solo pattern comuni
+                    size_t slot = next_cache_slot_;
+                    next_cache_slot_ = (next_cache_slot_ + 1) % MAX_CACHED_VARIADIC_CIFS;
+
+                    variadic_cache_[slot].total_args = argc;
+                    variadic_cache_[slot].extra_types.assign(extra_types, extra_types + num_extra);
+                    variadic_cache_[slot].ffi_types.resize(argc);
+
+                    for (size_t i = 0; i < argc; i++)
+                    {
+                        variadic_cache_[slot].ffi_types[i] = variadic_ffi_types[i];
+                    }
+
+                    ffi_status cache_status = ffi_prep_cif_var(
+                        &variadic_cache_[slot].cif,
+                        abi_,
+                        static_cast<unsigned int>(fixed_args),
+                        static_cast<unsigned int>(argc),
+                        ffi_return_type_,
+                        variadic_cache_[slot].ffi_types.data());
+
+                    variadic_cache_[slot].valid = (cache_status == FFI_OK);
+                }
+            }
         }
 
         // =====================================================================
@@ -447,7 +662,7 @@ namespace ctypes
             int32_t arg;
             napi_get_value_int32(env, info[0], &arg);
             void *arg_ptr = &arg;
-            ffi_call(&cif_, FFI_FN(fn_ptr_), inline_return_buffer_, &arg_ptr);
+            ffi_call(&cif_, FFI_FN(fn_ptr_), &return_value_, &arg_ptr);
             return ConvertReturnValue(env);
         }
 
@@ -459,7 +674,7 @@ namespace ctypes
             double arg;
             napi_get_value_double(env, info[0], &arg);
             void *arg_ptr = &arg;
-            ffi_call(&cif_, FFI_FN(fn_ptr_), inline_return_buffer_, &arg_ptr);
+            ffi_call(&cif_, FFI_FN(fn_ptr_), &return_value_, &arg_ptr);
             return ConvertReturnValue(env);
         }
 
@@ -472,14 +687,14 @@ namespace ctypes
             size_t len;
             napi_get_value_string_utf8(env, nval, nullptr, 0, &len);
 
-            // Usa buffer inline se la stringa è piccola
-            char small_buf[256];
+            // Stack buffer per stringhe piccole (come CPython)
+            char stack_buf[SMALL_STRING_BUFFER];
             char *str_ptr;
 
-            if (len < sizeof(small_buf))
+            if (len < SMALL_STRING_BUFFER)
             {
-                napi_get_value_string_utf8(env, nval, small_buf, sizeof(small_buf), &len);
-                str_ptr = small_buf;
+                napi_get_value_string_utf8(env, nval, stack_buf, sizeof(stack_buf), &len);
+                str_ptr = stack_buf;
             }
             else
             {
@@ -489,7 +704,7 @@ namespace ctypes
             }
 
             void *arg_ptr = &str_ptr;
-            ffi_call(&cif_, FFI_FN(fn_ptr_), inline_return_buffer_, &arg_ptr);
+            ffi_call(&cif_, FFI_FN(fn_ptr_), &return_value_, &arg_ptr);
             return ConvertReturnValue(env);
         }
 
@@ -497,26 +712,26 @@ namespace ctypes
         // Path generale
         // =====================================================================
 
-        if (info.Length() < argc) [[unlikely]]
-        {
-            Napi::TypeError::New(env,
-                                 "Expected " + std::to_string(argc) +
-                                     " arguments, got " + std::to_string(info.Length()))
-                .ThrowAsJavaScriptException();
-            return env.Undefined();
-        }
+        // Determina se usare storage inline o heap in base ad argc effettivo
+        bool use_inline_for_call = (argc <= MAX_INLINE_ARGS);
 
         // Seleziona buffer (inline o heap)
         uint8_t *arg_storage;
         void **arg_values;
 
-        if (use_inline_storage_)
+        if (use_inline_for_call)
         {
             arg_storage = inline_arg_storage_;
             arg_values = inline_arg_values_;
         }
         else
         {
+            // Per funzioni variadiche con molti argomenti, potrebbe essere necessario rialloca
+            if (argc > heap_arg_values_.size())
+            {
+                heap_arg_storage_.resize(argc * ARG_SLOT_SIZE);
+                heap_arg_values_.resize(argc);
+            }
             arg_storage = heap_arg_storage_.data();
             arg_values = heap_arg_values_.data();
         }
@@ -524,13 +739,36 @@ namespace ctypes
         // Reset string buffer (mantieni capacità)
         string_buffer_.clear();
 
-        // Converti argomenti
+        // Converti argomenti (usa tipi inferiti per argomenti extra variadic)
         for (size_t i = 0; i < argc; i++)
         {
             uint8_t *slot = arg_storage + (i * ARG_SLOT_SIZE);
             arg_values[i] = slot;
 
-            const CType type = arg_types_[i];
+            // Ottieni il tipo: fisso se i < expected_argc, altrimenti inferito
+            CType type;
+            if (i < expected_argc)
+            {
+                type = arg_types_[i];
+            }
+            else if (cache_entry)
+            {
+                type = cache_entry->extra_types[i - expected_argc];
+            }
+            else
+            {
+                // Usa i tipi inferiti dagli array stack/heap
+                size_t extra_idx = i - expected_argc;
+                if (num_extra <= MAX_VARIADIC_EXTRA_ARGS)
+                {
+                    type = extra_types_stack[extra_idx];
+                }
+                else
+                {
+                    type = extra_types_heap[extra_idx];
+                }
+            }
+
             const Napi::Value &val = info[i];
 
             switch (type)
@@ -755,6 +993,96 @@ namespace ctypes
                 break;
             }
 
+            case CType::STRUCT:
+            {
+                // Struct by-value: converti JS object → buffer struct
+                if (i < expected_argc && arg_struct_infos_[i])
+                {
+                    std::shared_ptr<StructInfo> struct_info = arg_struct_infos_[i];
+                    size_t struct_size = struct_info->GetSize();
+
+                    if (val.IsBuffer())
+                    {
+                        // Buffer già pronto (es. da StructType.create())
+                        Napi::Buffer<uint8_t> buf = val.As<Napi::Buffer<uint8_t>>();
+                        if (buf.Length() >= struct_size)
+                        {
+                            memcpy(slot, buf.Data(), struct_size);
+                        }
+                        else
+                        {
+                            Napi::TypeError::New(env, "Buffer too small for struct at argument " + std::to_string(i))
+                                .ThrowAsJavaScriptException();
+                            return env.Undefined();
+                        }
+                    }
+                    else if (val.IsObject())
+                    {
+                        // JS object: converti usando JSToStruct
+                        if (!struct_info->JSToStruct(env, val.As<Napi::Object>(), slot, ARG_SLOT_SIZE))
+                        {
+                            Napi::Error::New(env, "Failed to convert JS object to struct at argument " + std::to_string(i))
+                                .ThrowAsJavaScriptException();
+                            return env.Undefined();
+                        }
+                    }
+                    else
+                    {
+                        Napi::TypeError::New(env, "Argument " + std::to_string(i) + " must be object or buffer for struct type")
+                            .ThrowAsJavaScriptException();
+                        return env.Undefined();
+                    }
+                }
+                else
+                {
+                    // Fallback generico (non dovrebbe accadere)
+                    JSToC(env, val, type, slot, ARG_SLOT_SIZE);
+                }
+                break;
+            }
+
+            case CType::ARRAY:
+            {
+                // Array: converti JS array/buffer → buffer array
+                if (i < expected_argc && arg_array_infos_[i])
+                {
+                    std::shared_ptr<ArrayInfo> array_info = arg_array_infos_[i];
+                    size_t array_size = array_info->GetSize();
+
+                    if (val.IsBuffer())
+                    {
+                        // Buffer già pronto (es. da ArrayType.create())
+                        Napi::Buffer<uint8_t> buf = val.As<Napi::Buffer<uint8_t>>();
+                        if (buf.Length() >= array_size)
+                        {
+                            memcpy(slot, buf.Data(), array_size);
+                        }
+                        else
+                        {
+                            Napi::TypeError::New(env, "Buffer too small for array at argument " + std::to_string(i))
+                                .ThrowAsJavaScriptException();
+                            return env.Undefined();
+                        }
+                    }
+                    else
+                    {
+                        // JS array/value: converti usando JSToArray
+                        if (!array_info->JSToArray(env, val, slot, ARG_SLOT_SIZE))
+                        {
+                            Napi::Error::New(env, "Failed to convert JS value to array at argument " + std::to_string(i))
+                                .ThrowAsJavaScriptException();
+                            return env.Undefined();
+                        }
+                    }
+                }
+                else
+                {
+                    // Fallback generico (non dovrebbe accadere)
+                    JSToC(env, val, type, slot, ARG_SLOT_SIZE);
+                }
+                break;
+            }
+
             default:
                 // Fallback generico
                 JSToC(env, val, type, slot, ARG_SLOT_SIZE);
@@ -762,8 +1090,8 @@ namespace ctypes
             }
         }
 
-        // Effettua la chiamata
-        ffi_call(&cif_, FFI_FN(fn_ptr_), inline_return_buffer_, arg_values);
+        // Effettua la chiamata con il CIF appropriato (cached o appena creato)
+        ffi_call(active_cif, FFI_FN(fn_ptr_), &return_value_, arg_values);
 
         return ConvertReturnValue(env);
     }

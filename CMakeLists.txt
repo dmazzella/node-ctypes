@@ -173,6 +173,8 @@ set(SOURCE_FILES
     src/function.cc
     src/types.cc
     src/callback.cc
+    src/struct.cc
+    src/array.cc
 )
 
 add_library(${PROJECT_NAME} SHARED ${SOURCE_FILES})
