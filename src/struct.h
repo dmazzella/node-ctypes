@@ -18,8 +18,8 @@ namespace ctypes
     {
         std::string name;
         CType type;
-        size_t offset;  // offset in bytes dall'inizio della struct
-        size_t size;    // dimensione del campo
+        size_t offset;                                 // offset in bytes dall'inizio della struct
+        size_t size;                                   // dimensione del campo
         std::shared_ptr<class StructInfo> struct_type; // per nested structs
         std::shared_ptr<ArrayInfo> array_type;         // per array fields
         bool is_anonymous;                             // se true, i suoi campi sono accessibili direttamente
@@ -34,7 +34,7 @@ namespace ctypes
 
         // Aggiunge un campo e ricalcola layout
         bool AddField(const std::string &name, CType type, std::shared_ptr<StructInfo> nested = nullptr, bool is_anonymous = false);
-        
+
         // Aggiunge un campo array
         bool AddArrayField(const std::string &name, std::shared_ptr<ArrayInfo> array_type);
 

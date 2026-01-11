@@ -22,7 +22,7 @@ namespace ctypes
         else
         {
             element_size_ = CTypeSize(element_type);
-            
+
             // Alignment dell'elemento
             switch (element_type)
             {
@@ -242,7 +242,7 @@ namespace ctypes
         else if (info[0].IsObject())
         {
             Napi::Object type_obj = info[0].As<Napi::Object>();
-            
+
             // Check if StructType
             if (type_obj.InstanceOf(StructType::constructor.Value()))
             {

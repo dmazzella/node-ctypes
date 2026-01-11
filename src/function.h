@@ -79,6 +79,7 @@ namespace ctypes
         Napi::Value Call(const Napi::CallbackInfo &info);
         Napi::Value GetName(const Napi::CallbackInfo &info);
         Napi::Value GetAddress(const Napi::CallbackInfo &info);
+        Napi::Value SetErrcheck(const Napi::CallbackInfo &info);
 
     private:
         bool PrepareFFI(Napi::Env env);
@@ -95,7 +96,7 @@ namespace ctypes
         // Tipi
         CType return_type_;
         std::vector<CType> arg_types_;
-        
+
         // Struct/Array info per argomenti e return (se STRUCT/UNION/ARRAY)
         std::shared_ptr<StructInfo> return_struct_info_;
         std::shared_ptr<ArrayInfo> return_array_info_;
@@ -132,6 +133,14 @@ namespace ctypes
         // ============================================================
         VariadicCifCache variadic_cache_[MAX_CACHED_VARIADIC_CIFS];
         size_t next_cache_slot_; // Round-robin replacement
+
+        // ============================================================
+        // Error checking callback (Python ctypes errcheck)
+        // ============================================================
+        Napi::FunctionReference errcheck_callback_;
+
+        // Helper per applicare errcheck callback
+        Napi::Value ApplyErrcheck(Napi::Env env, Napi::Value result, const Napi::CallbackInfo &info);
     };
 
 } // namespace ctypes

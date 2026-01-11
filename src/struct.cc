@@ -25,7 +25,7 @@ namespace ctypes
         {
             return array->GetAlignment();
         }
-        
+
         if (nested)
         {
             return nested->GetAlignment();
@@ -44,7 +44,7 @@ namespace ctypes
         case CType::INT32:
         case CType::UINT32:
         case CType::FLOAT:
-        case CType::LONG:   // 4 su Windows
+        case CType::LONG: // 4 su Windows
         case CType::ULONG:
             return 4;
         case CType::INT64:
@@ -82,7 +82,7 @@ namespace ctypes
         fields_.push_back(field);
         return true;
     }
-    
+
     bool StructInfo::AddArrayField(const std::string &name, std::shared_ptr<ArrayInfo> array_type)
     {
         FieldInfo field;
@@ -280,7 +280,7 @@ namespace ctypes
             {
                 // Nested struct
                 Napi::Object nested = field.struct_type->StructToJS(env, field_ptr);
-                
+
                 if (field.is_anonymous)
                 {
                     // Anonymous field: esponi i suoi campi direttamente
@@ -358,7 +358,7 @@ namespace ctypes
         }
 
         std::string name = info[0].As<Napi::String>().Utf8Value();
-        
+
         CType type;
         std::shared_ptr<StructInfo> nested;
         std::shared_ptr<ArrayInfo> array;
@@ -453,7 +453,7 @@ namespace ctypes
         // Crea buffer e popola da JS object (se fornito)
         size_t size = struct_info_->GetSize();
         Napi::Buffer<uint8_t> buffer = Napi::Buffer<uint8_t>::New(env, size);
-        
+
         if (info.Length() > 0 && info[0].IsObject())
         {
             if (!struct_info_->JSToStruct(env, info[0].As<Napi::Object>(), buffer.Data(), size))

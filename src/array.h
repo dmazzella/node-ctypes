@@ -41,7 +41,7 @@ namespace ctypes
         CType element_type_;
         size_t count_;
         size_t element_size_;
-        size_t size_;           // count * element_size
+        size_t size_; // count * element_size
         size_t alignment_;
         std::shared_ptr<StructInfo> element_struct_; // Se element_type == STRUCT
         std::unique_ptr<ffi_type> ffi_type_;

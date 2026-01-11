@@ -44,6 +44,7 @@ namespace ctypes
     {
         Napi::Function func = DefineClass(env, "FFIFunction", {
                                                                   InstanceMethod("call", &FFIFunction::Call),
+                                                                  InstanceMethod("setErrcheck", &FFIFunction::SetErrcheck),
                                                                   InstanceAccessor("name", &FFIFunction::GetName, nullptr),
                                                                   InstanceAccessor("address", &FFIFunction::GetAddress, nullptr),
                                                               });
@@ -486,7 +487,7 @@ namespace ctypes
         if (argc == 0)
         {
             ffi_call(&cif_, FFI_FN(fn_ptr_), &return_value_, nullptr);
-            return ConvertReturnValue(env);
+            return ApplyErrcheck(env, ConvertReturnValue(env), info);
         }
 
         // =====================================================================
@@ -663,7 +664,7 @@ namespace ctypes
             napi_get_value_int32(env, info[0], &arg);
             void *arg_ptr = &arg;
             ffi_call(&cif_, FFI_FN(fn_ptr_), &return_value_, &arg_ptr);
-            return ConvertReturnValue(env);
+            return ApplyErrcheck(env, ConvertReturnValue(env), info);
         }
 
         // =====================================================================
@@ -675,7 +676,7 @@ namespace ctypes
             napi_get_value_double(env, info[0], &arg);
             void *arg_ptr = &arg;
             ffi_call(&cif_, FFI_FN(fn_ptr_), &return_value_, &arg_ptr);
-            return ConvertReturnValue(env);
+            return ApplyErrcheck(env, ConvertReturnValue(env), info);
         }
 
         // =====================================================================
@@ -705,7 +706,7 @@ namespace ctypes
 
             void *arg_ptr = &str_ptr;
             ffi_call(&cif_, FFI_FN(fn_ptr_), &return_value_, &arg_ptr);
-            return ConvertReturnValue(env);
+            return ApplyErrcheck(env, ConvertReturnValue(env), info);
         }
 
         // =====================================================================
@@ -1093,7 +1094,70 @@ namespace ctypes
         // Effettua la chiamata con il CIF appropriato (cached o appena creato)
         ffi_call(active_cif, FFI_FN(fn_ptr_), &return_value_, arg_values);
 
-        return ConvertReturnValue(env);
+        // Converti il return value e applica errcheck se presente
+        return ApplyErrcheck(env, ConvertReturnValue(env), info);
+    }
+
+    Napi::Value FFIFunction::SetErrcheck(const Napi::CallbackInfo &info)
+    {
+        Napi::Env env = info.Env();
+
+        if (info.Length() < 1)
+        {
+            // Clear errcheck
+            errcheck_callback_.Reset();
+            return env.Undefined();
+        }
+
+        if (!info[0].IsFunction() && !info[0].IsNull())
+        {
+            Napi::TypeError::New(env, "errcheck must be a function or null").ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        if (info[0].IsNull())
+        {
+            errcheck_callback_.Reset();
+        }
+        else
+        {
+            errcheck_callback_ = Napi::Persistent(info[0].As<Napi::Function>());
+        }
+
+        return env.Undefined();
+    }
+
+    Napi::Value FFIFunction::ApplyErrcheck(Napi::Env env, Napi::Value result, const Napi::CallbackInfo &info)
+    {
+        // Se non c'è errcheck, restituisci il risultato direttamente
+        if (errcheck_callback_.IsEmpty())
+        {
+            return result;
+        }
+
+        try
+        {
+            // Crea array di argomenti passati alla funzione originale
+            Napi::Array args_array = Napi::Array::New(env, info.Length());
+            for (size_t i = 0; i < info.Length(); i++)
+            {
+                args_array.Set(i, info[i]);
+            }
+
+            // Chiama errcheck(result, this, args)
+            std::vector<napi_value> errcheck_args = {
+                result,      // result value
+                info.This(), // function object
+                args_array   // arguments array
+            };
+
+            return errcheck_callback_.Call(errcheck_args);
+        }
+        catch (const Napi::Error &e)
+        {
+            // Rilancia l'eccezione
+            throw;
+        }
     }
 
     Napi::Value FFIFunction::GetName(const Napi::CallbackInfo &info)
