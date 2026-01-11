@@ -6,15 +6,15 @@
 |-----------|------------|----------|----------|
 | Loading Libraries | 3 | 0 | 1 |
 | Basic Types | 19 | 0 | 1 |
-| Functions | 3 | 1 | 1 |
-| Structures | 7 | 0 | 1 |
-| Arrays | 6 | 0 | 1 |
+| Functions | 5 | 0 | 0 |
+| Structures | 8 | 0 | 0 |
+| Arrays | 8 | 0 | 0 |
 | Pointers | 7 | 0 | 0 |
 | Callbacks | 2 | 0 | 0 |
 | Memory | 12 | 0 | 0 |
 | Error Handling | 6 | 0 | 0 |
 
-**Compatibilità stimata: ~98%**
+**Compatibilità stimata: ~99%**
 
 ---
 
@@ -99,18 +99,8 @@ const kernel32 = new WinDLL("kernel32");
 | `lib.func_name` | `lib.func(name, ret, args)` | Sintassi diversa |
 | `func.restype` | secondo parametro di `func()` | Integrato |
 | `func.argtypes` | terzo parametro di `func()` | Integrato |
-
-### ⚠️ Parziale
-
-| Feature | Python | node-ctypes |
-|---------|--------|-------------|
-| Definizione | `lib.abs.restype = c_int`<br>`lib.abs.argtypes = [c_int]` | `lib.func("abs", "int32", ["int32"])` |
-
-### ❌ Mancante
-
-| Python | Descrizione |
-|--------|-------------|
-| `func.errcheck` | Callback per controllo errori automatico |
+| `func.errcheck` | `func.errcheck = callback` | ✅ **IMPLEMENTATO!** |
+| Variadic functions | Auto-detection | Supportato automaticamente |
 
 ### Esempio Comparativo
 
@@ -155,12 +145,7 @@ const result = abs(-42);
 | sizeof | `sizeof(S)` | `structDef.size` |
 | Nested structs | Supportato | Accesso con dot notation |
 | Bit fields | `bitfield('uint32', 4)` | Simile a Python |
-
-### ❌ Mancante
-
-| Python | Descrizione |
-|--------|-------------|
-| `_anonymous_` | Campi anonimi |
+| Anonymous fields | `_anonymous_` | ✅ **IMPLEMENTATO!** `{ anonymous: true }` |
 
 ### Esempio Comparativo - Base
 
@@ -309,20 +294,10 @@ console.log(
 | `(c_int * 5)(1,2,3,4,5)` | `IntArray5.create([1,2,3,4,5])` | Initialization |
 | `sizeof(arr)` | `ArrayType.getSize()` | Size in bytes |
 | `len(arr)` | `ArrayType.getLength()` | Number of elements |
-| `arr[i]` | `buf.readInt32LE(i*4)` | Element access (Buffer API) |
+| `arr[i]` | ✅ **`arr[i]`** | ✅ **IMPLEMENTATO!** Syntactic sugar |
+| `arr[i] = value` | ✅ **`arr[i] = value`** | ✅ **IMPLEMENTATO!** Direct assignment |
 | Partial init | `create([1,2,3])` | Rest filled with zeros |
-
-### 🟡 Differenze
-
-| Python | node-ctypes | Note |
-|--------|-------------|------|
-| Array indexing (`arr[i]`) | Buffer API (`readInt32LE()`) | Python-like indexing non implementato |
-
-### ❌ Mancante
-
-| Python | Descrizione |
-|--------|-------------|
-| `arr[i] = value` | Direct element assignment |
+| Iteration | `for (let v of arr)` | ✅ **IMPLEMENTATO!** Iterable |
 
 ### Esempio Comparativo
 
@@ -365,9 +340,18 @@ const ints = IntArray5.create([1, 2, 3, 4, 5]);
 const floats = FloatArray3.create([1.5, 2.5, 3.5]);
 const chars = CharArray100.create('Hello');
 
-// Access elements (using Buffer API)
-console.log(ints.readInt32LE(0));  // 1
-ints.writeInt32LE(42, 0);
+// Access elements ✅ PYTHON-LIKE SYNTAX!
+console.log(ints[0]);  // 1
+ints[0] = 42;
+
+// Or using Buffer API
+console.log(ints.readInt32LE(0));  // 42
+ints.writeInt32LE(100, 0);
+
+// Iteration ✅ IMPLEMENTED!
+for (let value of ints) {
+    console.log(value);
+}
 
 // Size
 console.log(IntArray5.getSize());   // 20 (5 * 4 bytes)
@@ -866,17 +850,26 @@ node-ctypes include alcune feature **non presenti** in Python ctypes:
 
 ## Conclusione
 
-**node-ctypes copre ~98% delle funzionalità di Python ctypes**, con praticamente tutte le feature implementate:
+**node-ctypes copre ~99% delle funzionalità di Python ctypes**, con praticamente tutte le feature implementate:
 
 - ✅ Loading libraries (CDLL, WinDLL)
 - ✅ Tutti i tipi numerici base (inclusi c_long, c_ulong platform-dependent)
 - ✅ Wide strings (c_wchar, c_wchar_p, wstring, wstring_at)
 - ✅ Chiamate a funzioni con tipi
+- ✅ **Funzioni complete:**
+  - ✅ **errcheck callback** - `func.errcheck = (result, func, args) => result`
+  - ✅ Variadic functions (auto-detection)
 - ✅ **Strutture complete:**
   - Strutture con alignment corretto
   - Union
   - **Nested structs** con accesso dot notation (`outer.inner.field`)
   - **Bit fields** con `bitfield('uint32', bits)`
+  - ✅ **Anonymous fields** - `{ anonymous: true }`
+- ✅ **Arrays completi:**
+  - ✅ **Array indexing** - `arr[i]` read/write
+  - ✅ **Iteration** - `for (let v of arr)`
+  - Arrays in struct fields
+  - Arrays in function arguments/returns
 - ✅ Puntatori (byref, cast, POINTER, addressof)
 - ✅ Callbacks (incluso thread-safe!)
 - ✅ **Gestione memoria completa con nomi Python-identici!**
@@ -885,8 +878,9 @@ node-ctypes include alcune feature **non presenti** in Python ctypes:
   - memmove, memset, sizeof, addressof
 - ✅ Error handling completo (errno, GetLastError, WinError)
 
-### Feature mancanti (minori):
-1. errcheck callback
-2. _anonymous_ fields
-3. OleDLL (COM)
-4. c_longdouble
+### Feature mancanti (low priority):
+1. ~~errcheck callback~~ ✅ **IMPLEMENTATO!**
+2. ~~_anonymous_ fields~~ ✅ **IMPLEMENTATO!**
+3. ~~Array indexing (arr[i])~~ ✅ **IMPLEMENTATO!**
+4. OleDLL (COM) - Windows-specific, bassa priorità
+5. c_longdouble - Tipo raro, poco usato
