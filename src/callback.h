@@ -8,34 +8,29 @@
 #include <mutex>
 #include <condition_variable>
 #include <thread>
+#include <atomic>
 #include "types.h"
 
 namespace ctypes
 {
 
-    // Dati associati a un callback
+    // ========================================================================
+    // Callback - Solo main thread, veloce, zero overhead
+    // ========================================================================
+
     struct CallbackData
     {
-        Napi::ThreadSafeFunction tsfn;
-        Napi::FunctionReference js_function_ref; // Per chiamate dirette dal main thread
-        std::thread::id main_thread_id;          // ID del thread principale
-        ffi_closure *closure;
-        void *code_ptr;
+        Napi::FunctionReference js_function_ref;
+        ffi_closure *closure = nullptr;
+        void *code_ptr = nullptr;
         ffi_cif cif;
         CType return_type;
         std::vector<CType> arg_types;
         std::vector<ffi_type *> ffi_arg_types;
-        ffi_type *ffi_return_type;
-        bool released;
-
-        // Per sincronizzazione quando chiamato da thread esterni
-        std::mutex result_mutex;
-        std::condition_variable result_cv;
-        uint8_t result_buffer[32];
-        bool result_ready;
+        ffi_type *ffi_return_type = nullptr;
+        std::atomic<bool> released{false};
     };
 
-    // Wrapper per callback JavaScript chiamabili da C
     class Callback : public Napi::ObjectWrap<Callback>
     {
     public:
@@ -45,14 +40,52 @@ namespace ctypes
         Callback(const Napi::CallbackInfo &info);
         ~Callback();
 
-        // Ottiene il puntatore a funzione da passare al C
         Napi::Value GetPointer(const Napi::CallbackInfo &info);
-
-        // Rilascia le risorse (chiamare quando non serve più)
         Napi::Value Release(const Napi::CallbackInfo &info);
 
     private:
         std::unique_ptr<CallbackData> data_;
+    };
+
+    // ========================================================================
+    // ThreadSafeCallback - Supporta chiamate da qualsiasi thread
+    // ========================================================================
+
+    struct ThreadSafeCallbackData
+    {
+        Napi::ThreadSafeFunction tsfn;
+        Napi::FunctionReference js_function_ref;
+        std::thread::id main_thread_id;
+        ffi_closure *closure = nullptr;
+        void *code_ptr = nullptr;
+        ffi_cif cif;
+        CType return_type;
+        std::vector<CType> arg_types;
+        std::vector<ffi_type *> ffi_arg_types;
+        ffi_type *ffi_return_type = nullptr;
+        std::atomic<bool> released{false};
+
+        // Sincronizzazione per thread esterni
+        std::mutex result_mutex;
+        std::condition_variable result_cv;
+        uint8_t result_buffer[64];
+        std::atomic<bool> result_ready{false};
+    };
+
+    class ThreadSafeCallback : public Napi::ObjectWrap<ThreadSafeCallback>
+    {
+    public:
+        static Napi::Object Init(Napi::Env env, Napi::Object exports);
+        static Napi::FunctionReference constructor;
+
+        ThreadSafeCallback(const Napi::CallbackInfo &info);
+        ~ThreadSafeCallback();
+
+        Napi::Value GetPointer(const Napi::CallbackInfo &info);
+        Napi::Value Release(const Napi::CallbackInfo &info);
+
+    private:
+        std::unique_ptr<ThreadSafeCallbackData> data_;
     };
 
 } // namespace ctypes

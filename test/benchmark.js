@@ -163,28 +163,45 @@ console.log(`  node-ctypes: ${ctypes_time.toFixed(2)}ms (${(apiIterations / ctyp
 console.log(`  koffi:       ${koffi_time.toFixed(2)}ms (${(apiIterations / koffi_time * 1000).toFixed(0)} calls/sec)`);
 console.log(`  Ratio: ${(ctypes_time / koffi_time).toFixed(2)}x ${koffi_time < ctypes_time ? 'slower' : 'faster'}\n`);
 
-// ============================================================================
-// Summary
-// ============================================================================
-
-console.log("=== Summary ===");
-console.log("node-ctypes è un'implementazione FFI completa per Node.js");
-console.log("che supporta:");
-console.log("  - Chiamate a funzioni C (cdecl/stdcall)");
-console.log("  - Callback JavaScript chiamabili da C");
-console.log("  - Callback multi-thread (main + external threads)");
-console.log("  - Struct complesse");
-console.log("  - Gestione memoria manuale");
-console.log("");
-console.log("koffi è ottimizzato per performance estreme e usa:");
-console.log("  - Generazione codice assembly dinamico");
-console.log("  - Zero-copy per Buffer");
-console.log("  - Ottimizzazioni aggressive");
-console.log("");
-console.log("Performance: koffi è ~2-4x più veloce per chiamate semplici");
-console.log("grazie all'uso di codegen assembly. node-ctypes privilegia");
-console.log("compatibilità e semplicità d'uso tramite libffi.");
-
 // Cleanup
 ctypes_msvcrt.close();
 ctypes_kernel32.close();
+
+// ============================================================================
+// Benchmark 5: Raw vs Wrapped call overhead
+// ============================================================================
+
+console.log("Benchmark 5: Raw FFI call vs JS wrapper overhead");
+
+const rawLib = new ctypes.Library("msvcrt.dll");
+const rawAbs = rawLib.func("abs", "int32", ["int32"]);
+const wrappedAbs = new ctypes.CDLL("msvcrt.dll").func("abs", "int32", ["int32"]);
+
+const rawIterations = 1000000;
+
+// Warmup
+for (let i = 0; i < 1000; i++) {
+  rawAbs.call(-42);
+  wrappedAbs(-42);
+}
+
+// Benchmark raw
+start = performance.now();
+for (let i = 0; i < rawIterations; i++) {
+  rawAbs.call(-42);
+}
+let raw_time = performance.now() - start;
+
+// Benchmark wrapped
+start = performance.now();
+for (let i = 0; i < rawIterations; i++) {
+  wrappedAbs(-42);
+}
+let wrapped_time = performance.now() - start;
+
+console.log(`  Iterations: ${rawIterations.toLocaleString()}`);
+console.log(`  raw .call():     ${raw_time.toFixed(2)}ms (${(rawIterations / raw_time * 1000).toFixed(0)} calls/sec)`);
+console.log(`  wrapped():       ${wrapped_time.toFixed(2)}ms (${(rawIterations / wrapped_time * 1000).toFixed(0)} calls/sec)`);
+console.log(`  Wrapper overhead: ${((wrapped_time / raw_time - 1) * 100).toFixed(1)}%\n`);
+
+rawLib.close();

@@ -516,7 +516,8 @@ try {
     return 0; // Success
   };
 
-  const ThreadProc = ctypes.callback(threadProcFn, "uint32", ["pointer"]);
+  // Usa threadSafeCallback per callback da thread esterni!
+  const ThreadProc = ctypes.threadSafeCallback(threadProcFn, "uint32", ["pointer"]);
 
   console.log("  Callback created:", "0x" + ThreadProc.pointer.toString(16));
 

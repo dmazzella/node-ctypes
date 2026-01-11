@@ -344,6 +344,58 @@ namespace ctypes
         return Napi::String::New(env, ptr, len);
     }
 
+    // Crea un Buffer che punta a un indirizzo di memoria esistente
+    // ATTENZIONE: Pericoloso! L'utente deve garantire che la memoria sia valida
+    Napi::Value PtrToBuffer(const Napi::CallbackInfo &info)
+    {
+        Napi::Env env = info.Env();
+
+        if (info.Length() < 2)
+        {
+            Napi::TypeError::New(env, "Address and size required")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        void *ptr = nullptr;
+
+        if (info[0].IsBigInt())
+        {
+            bool lossless;
+            uint64_t addr = info[0].As<Napi::BigInt>().Uint64Value(&lossless);
+            ptr = reinterpret_cast<void *>(addr);
+        }
+        else if (info[0].IsNumber())
+        {
+            ptr = reinterpret_cast<void *>(
+                static_cast<uintptr_t>(info[0].ToNumber().Int64Value()));
+        }
+        else
+        {
+            Napi::TypeError::New(env, "Address must be BigInt or Number")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        if (!ptr)
+        {
+            return env.Null();
+        }
+
+        size_t size = static_cast<size_t>(info[1].ToNumber().Int64Value());
+
+        // Crea un Buffer esterno che punta alla memoria esistente
+        // NON viene deallocato automaticamente quando il Buffer viene GC'd
+        return Napi::Buffer<uint8_t>::New(
+            env,
+            static_cast<uint8_t *>(ptr),
+            size,
+            [](Napi::Env, void *)
+            {
+                // No-op finalizer: non deallochiamo memoria che non abbiamo allocato
+            });
+    }
+
     // Inizializzazione del modulo
     Napi::Object Init(Napi::Env env, Napi::Object exports)
     {
@@ -352,6 +404,7 @@ namespace ctypes
         Library::Init(env, exports);
         FFIFunction::Init(env, exports);
         Callback::Init(env, exports);
+        ThreadSafeCallback::Init(env, exports);
 
         // Esporta funzioni helper
         exports.Set("load", Napi::Function::New(env, LoadLibrary));
@@ -361,6 +414,7 @@ namespace ctypes
         exports.Set("sizeof", Napi::Function::New(env, SizeOf));
         exports.Set("cstring", Napi::Function::New(env, CreateCString));
         exports.Set("readCString", Napi::Function::New(env, ReadCString));
+        exports.Set("ptrToBuffer", Napi::Function::New(env, PtrToBuffer));
 
         // Esporta i tipi predefiniti
         exports.Set("types", CreatePredefinedTypes(env));

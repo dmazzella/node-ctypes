@@ -54,10 +54,17 @@ namespace ctypes
         {"cstring", CType::STRING},
         {"wstring", CType::WSTRING},
         {"wchar_t*", CType::WSTRING},
+        {"wchar", CType::WCHAR},
+        {"wchar_t", CType::WCHAR},
         {"bool", CType::BOOL},
         {"_Bool", CType::BOOL},
         {"size_t", CType::SIZE_T},
-        {"ssize_t", CType::SSIZE_T}};
+        {"ssize_t", CType::SSIZE_T},
+        {"long", CType::LONG},
+        {"c_long", CType::LONG},
+        {"ulong", CType::ULONG},
+        {"unsigned long", CType::ULONG},
+        {"c_ulong", CType::ULONG}};
 
     CType StringToCType(const std::string &name)
     {
@@ -101,12 +108,32 @@ namespace ctypes
             return &ffi_type_pointer;
         case CType::WSTRING:
             return &ffi_type_pointer;
+        case CType::WCHAR:
+            // wchar_t è 16-bit su Windows, 32-bit su Unix
+#ifdef _WIN32
+            return &ffi_type_uint16;
+#else
+            return &ffi_type_uint32;
+#endif
         case CType::BOOL:
             return &ffi_type_uint8;
         case CType::SIZE_T:
             return &ffi_type_pointer; // size_t è tipicamente pointer-sized
         case CType::SSIZE_T:
             return &ffi_type_pointer;
+        case CType::LONG:
+            // long è 32-bit su Windows (LLP64), 64-bit su Unix 64-bit (LP64)
+#ifdef _WIN32
+            return &ffi_type_sint32;
+#else
+            return sizeof(long) == 8 ? &ffi_type_sint64 : &ffi_type_sint32;
+#endif
+        case CType::ULONG:
+#ifdef _WIN32
+            return &ffi_type_uint32;
+#else
+            return sizeof(unsigned long) == 8 ? &ffi_type_uint64 : &ffi_type_uint32;
+#endif
         default:
             return &ffi_type_void;
         }
@@ -144,12 +171,18 @@ namespace ctypes
             return sizeof(char *);
         case CType::WSTRING:
             return sizeof(wchar_t *);
+        case CType::WCHAR:
+            return sizeof(wchar_t);
         case CType::BOOL:
             return 1;
         case CType::SIZE_T:
             return sizeof(size_t);
         case CType::SSIZE_T:
             return sizeof(ssize_t);
+        case CType::LONG:
+            return sizeof(long);
+        case CType::ULONG:
+            return sizeof(unsigned long);
         default:
             return 0;
         }
@@ -299,14 +332,12 @@ namespace ctypes
             }
             else if (value.IsBigInt())
             {
-                // Gestisci BigInt (preferito per puntatori)
                 bool lossless;
                 uint64_t addr = value.As<Napi::BigInt>().Uint64Value(&lossless);
                 ptr = reinterpret_cast<void *>(addr);
             }
             else if (value.IsNumber())
             {
-                // Permetti di passare un indirizzo come numero (per retrocompatibilità)
                 ptr = reinterpret_cast<void *>(static_cast<uintptr_t>(
                     value.ToNumber().Int64Value()));
             }
@@ -325,30 +356,81 @@ namespace ctypes
             {
                 str = nullptr;
             }
-            else if (value.IsString())
-            {
-                // NOTA: questa stringa deve rimanere valida durante la chiamata FFI
-                // Per una soluzione robusta, dovremmo gestire la memoria separatamente
-                std::string s = value.ToString().Utf8Value();
-                char *copy = new char[s.length() + 1];
-                strcpy(copy, s.c_str());
-                str = copy;
-            }
             else if (value.IsBuffer())
             {
                 str = reinterpret_cast<const char *>(
                     value.As<Napi::Buffer<uint8_t>>().Data());
+            }
+            else if (value.IsString())
+            {
+                // NOTA: IsString NON è gestito qui per evitare memory leak.
+                // Il chiamante (FFIFunction::Call) deve gestire le stringhe
+                // separatamente usando string_storage.
+                return -1;
             }
 
             memcpy(buffer, &str, sizeof(char *));
             return sizeof(char *);
         }
 
+        case CType::WSTRING:
+        {
+            if (bufsize < sizeof(wchar_t *))
+                return -1;
+            const wchar_t *str = nullptr;
+
+            if (value.IsNull() || value.IsUndefined())
+            {
+                str = nullptr;
+            }
+            else if (value.IsBuffer())
+            {
+                str = reinterpret_cast<const wchar_t *>(
+                    value.As<Napi::Buffer<uint8_t>>().Data());
+            }
+            // IsString gestito in FFIFunction::Call
+
+            memcpy(buffer, &str, sizeof(wchar_t *));
+            return sizeof(wchar_t *);
+        }
+
+        case CType::WCHAR:
+        {
+            if (bufsize < sizeof(wchar_t))
+                return -1;
+            wchar_t val = 0;
+
+            if (value.IsNumber())
+            {
+                val = static_cast<wchar_t>(value.ToNumber().Uint32Value());
+            }
+            else if (value.IsString())
+            {
+                std::u16string str = value.As<Napi::String>().Utf16Value();
+                if (!str.empty())
+                {
+                    val = static_cast<wchar_t>(str[0]);
+                }
+            }
+
+            memcpy(buffer, &val, sizeof(wchar_t));
+            return sizeof(wchar_t);
+        }
+
         case CType::SIZE_T:
         {
             if (bufsize < sizeof(size_t))
                 return -1;
-            size_t val = static_cast<size_t>(value.ToNumber().Int64Value());
+            size_t val;
+            if (value.IsBigInt())
+            {
+                bool lossless;
+                val = static_cast<size_t>(value.As<Napi::BigInt>().Uint64Value(&lossless));
+            }
+            else
+            {
+                val = static_cast<size_t>(value.ToNumber().Int64Value());
+            }
             memcpy(buffer, &val, sizeof(size_t));
             return sizeof(size_t);
         }
@@ -357,9 +439,54 @@ namespace ctypes
         {
             if (bufsize < sizeof(ssize_t))
                 return -1;
-            ssize_t val = static_cast<ssize_t>(value.ToNumber().Int64Value());
+            ssize_t val;
+            if (value.IsBigInt())
+            {
+                bool lossless;
+                val = static_cast<ssize_t>(value.As<Napi::BigInt>().Int64Value(&lossless));
+            }
+            else
+            {
+                val = static_cast<ssize_t>(value.ToNumber().Int64Value());
+            }
             memcpy(buffer, &val, sizeof(ssize_t));
             return sizeof(ssize_t);
+        }
+
+        case CType::LONG:
+        {
+            if (bufsize < sizeof(long))
+                return -1;
+            long val;
+            if (value.IsBigInt())
+            {
+                bool lossless;
+                val = static_cast<long>(value.As<Napi::BigInt>().Int64Value(&lossless));
+            }
+            else
+            {
+                val = static_cast<long>(value.ToNumber().Int64Value());
+            }
+            memcpy(buffer, &val, sizeof(long));
+            return sizeof(long);
+        }
+
+        case CType::ULONG:
+        {
+            if (bufsize < sizeof(unsigned long))
+                return -1;
+            unsigned long val;
+            if (value.IsBigInt())
+            {
+                bool lossless;
+                val = static_cast<unsigned long>(value.As<Napi::BigInt>().Uint64Value(&lossless));
+            }
+            else
+            {
+                val = static_cast<unsigned long>(value.ToNumber().Int64Value());
+            }
+            memcpy(buffer, &val, sizeof(unsigned long));
+            return sizeof(unsigned long);
         }
 
         default:
@@ -459,7 +586,6 @@ namespace ctypes
             {
                 return env.Null();
             }
-            // Ritorna come BigInt per preservare l'indirizzo completo
             return Napi::BigInt::New(env, reinterpret_cast<uint64_t>(ptr));
         }
 
@@ -474,6 +600,60 @@ namespace ctypes
             return Napi::String::New(env, str);
         }
 
+        case CType::WSTRING:
+        {
+            wchar_t *str;
+            memcpy(&str, buffer, sizeof(wchar_t *));
+            if (str == nullptr)
+            {
+                return env.Null();
+            }
+            // Converti wchar_t* a stringa JS
+#ifdef _WIN32
+            // Windows: wchar_t è 16-bit (UTF-16)
+            return Napi::String::New(env, reinterpret_cast<const char16_t *>(str));
+#else
+            // Unix: wchar_t è 32-bit, dobbiamo convertire
+            std::wstring wstr(str);
+            std::string utf8;
+            utf8.reserve(wstr.size() * 4);
+            for (wchar_t wc : wstr)
+            {
+                if (wc < 0x80)
+                {
+                    utf8.push_back(static_cast<char>(wc));
+                }
+                else if (wc < 0x800)
+                {
+                    utf8.push_back(static_cast<char>(0xC0 | (wc >> 6)));
+                    utf8.push_back(static_cast<char>(0x80 | (wc & 0x3F)));
+                }
+                else if (wc < 0x10000)
+                {
+                    utf8.push_back(static_cast<char>(0xE0 | (wc >> 12)));
+                    utf8.push_back(static_cast<char>(0x80 | ((wc >> 6) & 0x3F)));
+                    utf8.push_back(static_cast<char>(0x80 | (wc & 0x3F)));
+                }
+                else
+                {
+                    utf8.push_back(static_cast<char>(0xF0 | (wc >> 18)));
+                    utf8.push_back(static_cast<char>(0x80 | ((wc >> 12) & 0x3F)));
+                    utf8.push_back(static_cast<char>(0x80 | ((wc >> 6) & 0x3F)));
+                    utf8.push_back(static_cast<char>(0x80 | (wc & 0x3F)));
+                }
+            }
+            return Napi::String::New(env, utf8);
+#endif
+        }
+
+        case CType::WCHAR:
+        {
+            wchar_t val;
+            memcpy(&val, buffer, sizeof(wchar_t));
+            // Restituisci come numero (code point)
+            return Napi::Number::New(env, static_cast<uint32_t>(val));
+        }
+
         case CType::SIZE_T:
         {
             size_t val;
@@ -486,6 +666,35 @@ namespace ctypes
             ssize_t val;
             memcpy(&val, buffer, sizeof(ssize_t));
             return Napi::BigInt::New(env, static_cast<int64_t>(val));
+        }
+
+        case CType::LONG:
+        {
+            long val;
+            memcpy(&val, buffer, sizeof(long));
+            // Su Windows long è 32-bit, su Unix 64-bit potrebbe essere 64-bit
+            if (sizeof(long) <= 4)
+            {
+                return Napi::Number::New(env, static_cast<int32_t>(val));
+            }
+            else
+            {
+                return Napi::BigInt::New(env, static_cast<int64_t>(val));
+            }
+        }
+
+        case CType::ULONG:
+        {
+            unsigned long val;
+            memcpy(&val, buffer, sizeof(unsigned long));
+            if (sizeof(unsigned long) <= 4)
+            {
+                return Napi::Number::New(env, static_cast<uint32_t>(val));
+            }
+            else
+            {
+                return Napi::BigInt::New(env, static_cast<uint64_t>(val));
+            }
         }
 
         default:
@@ -571,7 +780,11 @@ namespace ctypes
         types.Set("bool", createType("bool"));
         types.Set("pointer", createType("pointer"));
         types.Set("string", createType("string"));
+        types.Set("wstring", createType("wstring"));
+        types.Set("wchar", createType("wchar"));
         types.Set("size_t", createType("size_t"));
+        types.Set("long", createType("long"));
+        types.Set("ulong", createType("ulong"));
 
         // Alias stile ctypes Python
         types.Set("c_int8", createType("int8"));
@@ -586,14 +799,16 @@ namespace ctypes
         types.Set("c_double", createType("double"));
         types.Set("c_bool", createType("bool"));
         types.Set("c_char_p", createType("string"));
+        types.Set("c_wchar_p", createType("wstring"));
+        types.Set("c_wchar", createType("wchar"));
         types.Set("c_void_p", createType("pointer"));
         types.Set("c_size_t", createType("size_t"));
+        types.Set("c_long", createType("long"));
+        types.Set("c_ulong", createType("ulong"));
 
         // Alias comuni
         types.Set("c_int", createType("int32"));
         types.Set("c_uint", createType("uint32"));
-        types.Set("c_long", createType("int64"));
-        types.Set("c_ulong", createType("uint64"));
         types.Set("c_char", createType("int8"));
         types.Set("c_uchar", createType("uint8"));
         types.Set("c_short", createType("int16"));

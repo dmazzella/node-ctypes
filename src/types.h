@@ -28,9 +28,12 @@ namespace ctypes
         POINTER,
         STRING,  // char* null-terminated
         WSTRING, // wchar_t* null-terminated
+        WCHAR,   // singolo wchar_t
         BOOL,
         SIZE_T,
-        SSIZE_T
+        SSIZE_T,
+        LONG, // platform-dependent: 32-bit su Windows, 32/64-bit su Unix
+        ULONG // platform-dependent: 32-bit su Windows, 32/64-bit su Unix
     };
 
     // Mappa nome stringa -> CType

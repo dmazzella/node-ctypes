@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.15)
 project(node_ctypes)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_compile_definitions(NAPI_VERSION=8)
