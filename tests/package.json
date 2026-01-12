@@ -12,5 +12,9 @@
   },
   "dependencies": {
     "node-ctypes": ".."
+  },
+  "devDependencies": {
+    "@napi-ffi/ffi-napi": "^4.0.3",
+    "koffi": "^2.15.0"
   }
 }
