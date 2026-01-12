@@ -199,13 +199,35 @@ describe("Functions and Callbacks", function () {
         this.skip(); // Different sprintf behavior on Unix
       }
 
+      // Define sprintf with only fixed parameters
+      // node-ctypes auto-detects variadic arguments!
       const sprintf = libc.func("sprintf", "int32", ["pointer", "string"]);
 
-      const buf = ctypes.create_string_buffer(100);
-      const written = sprintf(buf, "Hello %s!");
+      const buf = ctypes.create_string_buffer(256);
 
-      // Note: This will fail without proper variadic support
-      // but demonstrates the syntax
+      // Test 1: String formatting
+      let written = sprintf(buf, "Hello %s!", "World");
+      assert(written > 0, "sprintf should return positive byte count");
+      const str1 = buf.toString("utf8", 0, buf.indexOf(0));
+      assert.strictEqual(str1, "Hello World!");
+
+      // Test 2: Mixed int and string
+      written = sprintf(buf, "Number: %d, String: %s", 42, "test");
+      assert(written > 0);
+      const str2 = buf.toString("utf8", 0, buf.indexOf(0));
+      assert.strictEqual(str2, "Number: 42, String: test");
+
+      // Test 3: Multiple numbers
+      written = sprintf(buf, "%d + %d = %d", 10, 20, 30);
+      assert(written > 0);
+      const str3 = buf.toString("utf8", 0, buf.indexOf(0));
+      assert.strictEqual(str3, "10 + 20 = 30");
+
+      // Test 4: Float formatting
+      written = sprintf(buf, "Pi is approximately %.2f", 3.14159);
+      assert(written > 0);
+      const str4 = buf.toString("utf8", 0, buf.indexOf(0));
+      assert.strictEqual(str4, "Pi is approximately 3.14");
     });
   });
 

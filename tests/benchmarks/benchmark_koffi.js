@@ -313,14 +313,68 @@ console.log(
 }
 
 // ============================================================================
-// Benchmark 6: Struct operations
+// Benchmark 6: Variadic function (sprintf)
 // ============================================================================
 
 console.log(
   "┌─────────────────────────────────────────────────────────────────┐"
 );
 console.log(
-  "│ Benchmark 6: Struct read/write                                 │"
+  "│ Benchmark 6: Variadic function - sprintf(fmt, ...)             │"
+);
+console.log(
+  "└─────────────────────────────────────────────────────────────────┘"
+);
+
+{
+  // node-ctypes: variadic args auto-detected
+  const ctypes_sprintf = ctypes_libc.func("sprintf", "int32", [
+    "pointer",
+    "string",
+  ]);
+
+  // koffi: variadic args must be declared explicitly in signature
+  const koffi_sprintf = koffi_libc.func(
+    "int sprintf(char*, const char*, int, const char*)"
+  );
+
+  const ctypes_buf = ctypes.create_string_buffer(256);
+  const koffi_buf = Buffer.alloc(256);
+
+  const iterations = 200_000;
+
+  // Warmup
+  for (let i = 0; i < 1000; i++) {
+    ctypes_sprintf(ctypes_buf, "Number: %d, String: %s", 42, "test");
+    koffi_sprintf(koffi_buf, "Number: %d, String: %s", 42, "test");
+  }
+
+  let start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    // Auto-variadic: same function handles different arg counts/types
+    ctypes_sprintf(ctypes_buf, "Number: %d, String: %s", i, "test");
+  }
+  const ctypes_time = performance.now() - start;
+
+  start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    // koffi: must match pre-defined signature exactly
+    koffi_sprintf(koffi_buf, "Number: %d, String: %s", i, "test");
+  }
+  const koffi_time = performance.now() - start;
+
+  benchmark("sprintf(variadic)", ctypes_time, koffi_time, iterations);
+}
+
+// ============================================================================
+// Benchmark 7: Struct operations
+// ============================================================================
+
+console.log(
+  "┌─────────────────────────────────────────────────────────────────┐"
+);
+console.log(
+  "│ Benchmark 7: Struct read/write                                 │"
 );
 console.log(
   "└─────────────────────────────────────────────────────────────────┘"
@@ -371,14 +425,14 @@ console.log(
 }
 
 // ============================================================================
-// Benchmark 7: Memory allocation
+// Benchmark 8: Memory allocation
 // ============================================================================
 
 console.log(
   "┌─────────────────────────────────────────────────────────────────┐"
 );
 console.log(
-  "│ Benchmark 7: Buffer allocation (64 bytes)                      │"
+  "│ Benchmark 8: Buffer allocation (64 bytes)                      │"
 );
 console.log(
   "└─────────────────────────────────────────────────────────────────┘"
@@ -426,14 +480,14 @@ console.log(
 }
 
 // ============================================================================
-// Benchmark 8: Raw vs Wrapped call
+// Benchmark 9: Raw vs Wrapped call
 // ============================================================================
 
 console.log(
   "┌─────────────────────────────────────────────────────────────────┐"
 );
 console.log(
-  "│ Benchmark 8: Raw Library.func vs CDLL wrapper                  │"
+  "│ Benchmark 9: Raw Library.func vs CDLL wrapper                  │"
 );
 console.log(
   "└─────────────────────────────────────────────────────────────────┘"

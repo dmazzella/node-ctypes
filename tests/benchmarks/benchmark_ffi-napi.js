@@ -69,6 +69,7 @@ const ffi_libc = ffi.Library(LIBC, {
   strlen: ["size_t", ["string"]],
   sqrt: ["double", ["double"]],
   memset: ["pointer", ["pointer", "int", "size_t"]],
+  sprintf: ["int", ["pointer", "string", "int", "string"]], // Variadic with specific signature
   time: ["int64", ["pointer"]],
 });
 
@@ -323,14 +324,66 @@ console.log(
 }
 
 // ============================================================================
-// Benchmark 6: Struct operations
+// Benchmark 6: Variadic function (sprintf)
 // ============================================================================
 
 console.log(
   "┌─────────────────────────────────────────────────────────────────┐"
 );
 console.log(
-  "│ Benchmark 6: Struct read/write                                 │"
+  "│ Benchmark 6: Variadic function - sprintf(fmt, ...)             │"
+);
+console.log(
+  "└─────────────────────────────────────────────────────────────────┘"
+);
+
+{
+  // node-ctypes: variadic args auto-detected
+  const ctypes_sprintf = ctypes_libc.func("sprintf", "int32", [
+    "pointer",
+    "string",
+  ]);
+
+  // ffi-napi: variadic args must be declared explicitly in Library definition
+  const ffi_sprintf = ffi_libc.sprintf;
+
+  const ctypes_buf = ctypes.create_string_buffer(256);
+  const ffi_buf = Buffer.alloc(256);
+
+  const iterations = 200_000;
+
+  // Warmup
+  for (let i = 0; i < 1000; i++) {
+    ctypes_sprintf(ctypes_buf, "Number: %d, String: %s", 42, "test");
+    ffi_sprintf(ffi_buf, "Number: %d, String: %s", 42, "test");
+  }
+
+  let start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    // Auto-variadic: same function handles different arg counts/types
+    ctypes_sprintf(ctypes_buf, "Number: %d, String: %s", i, "test");
+  }
+  const ctypes_time = performance.now() - start;
+
+  start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    // ffi-napi: must match pre-defined signature exactly
+    ffi_sprintf(ffi_buf, "Number: %d, String: %s", i, "test");
+  }
+  const ffi_time = performance.now() - start;
+
+  benchmark("sprintf(variadic)", ctypes_time, ffi_time, iterations);
+}
+
+// ============================================================================
+// Benchmark 7: Struct operations
+// ============================================================================
+
+console.log(
+  "┌─────────────────────────────────────────────────────────────────┐"
+);
+console.log(
+  "│ Benchmark 7: Struct read/write                                 │"
 );
 console.log(
   "└─────────────────────────────────────────────────────────────────┘"
@@ -379,14 +432,14 @@ console.log(
 }
 
 // ============================================================================
-// Benchmark 7: Memory allocation
+// Benchmark 8: Memory allocation
 // ============================================================================
 
 console.log(
   "┌─────────────────────────────────────────────────────────────────┐"
 );
 console.log(
-  "│ Benchmark 7: Buffer allocation (64 bytes)                      │"
+  "│ Benchmark 8: Buffer allocation (64 bytes)                      │"
 );
 console.log(
   "└─────────────────────────────────────────────────────────────────┘"
@@ -434,14 +487,14 @@ console.log(
 }
 
 // ============================================================================
-// Benchmark 8: Raw vs Wrapped call
+// Benchmark 9: Raw vs Wrapped call
 // ============================================================================
 
 console.log(
   "┌─────────────────────────────────────────────────────────────────┐"
 );
 console.log(
-  "│ Benchmark 8: Raw Library.func vs CDLL wrapper                  │"
+  "│ Benchmark 9: Raw Library.func vs CDLL wrapper                  │"
 );
 console.log(
   "└─────────────────────────────────────────────────────────────────┘"
