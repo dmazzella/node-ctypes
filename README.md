@@ -4,13 +4,10 @@
 
 ## Why node-ctypes?
 
-✨ **Python ctypes API Compatibility** - If you know Python ctypes, you already know node-ctypes! Same syntax, same patterns.
-
-🚀 **High Performance** - Up to **50x faster** than ffi-napi, with struct operations matching or exceeding koffi performance.
-
-🔧 **Complete FFI Support** - Structs, unions, bit fields, nested structures, arrays, callbacks, variadic functions, and more.
-
-🌍 **Cross-platform** - Works seamlessly on Linux, macOS, and Windows with identical API.
+- ✨ **Python ctypes API Compatibility** - If you know Python ctypes, you already know node-ctypes! Same syntax, same patterns.
+- 🚀 **High Performance** - Up to **50x faster** than ffi-napi, with struct operations matching or exceeding koffi performance.
+- 🔧 **Complete FFI Support** - Structs, unions, bit fields, nested structures, arrays, callbacks, variadic functions, and more.
+- 🌍 **Cross-platform** - Works seamlessly on Linux, macOS, and Windows with identical API.
 
 ## Features
 
