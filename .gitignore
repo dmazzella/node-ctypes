@@ -6,6 +6,7 @@
 /.env*
 /node_modules
 /test/python
+/tests/node_modules
 /tests/common/__pycache__
 /tests/windows/__pycache__
 package-lock.json

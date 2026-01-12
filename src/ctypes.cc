@@ -1,5 +1,6 @@
 #include <napi.h>
 #include <stdexcept>
+#include "version.h"
 #include "types.h"
 #include "library.h"
 #include "function.h"
@@ -402,6 +403,7 @@ namespace ctypes
     Napi::Object Init(Napi::Env env, Napi::Object exports)
     {
         // Inizializza le classi
+        Version::Init(env, exports);
         TypeInfo::Init(env, exports);
         Library::Init(env, exports);
         FFIFunction::Init(env, exports);

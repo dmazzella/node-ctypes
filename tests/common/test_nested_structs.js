@@ -9,7 +9,7 @@ import {
   c_uint8,
   c_int8,
   sizeof,
-} from "../../lib/index.js";
+} from "node-ctypes";
 
 describe("Complex Nested Structures", function () {
   describe("Multi-level Nesting", function () {

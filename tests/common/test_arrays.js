@@ -5,7 +5,7 @@
 
 import assert, { strictEqual, throws } from "node:assert";
 import { describe, it, before, after } from "node:test";
-import * as ctypes from "../../lib/index.js";
+import * as ctypes from "node-ctypes";
 
 describe("Arrays", function () {
   describe("Array Creation", function () {

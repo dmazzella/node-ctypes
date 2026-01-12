@@ -1,7 +1,7 @@
 // Benchmark: node-ctypes vs koffi
 // Run: node tests/benchmarks/benchmark_koffi.js
 
-import * as ctypes from "../../lib/index.js";
+import * as ctypes from "node-ctypes";
 import pkg from "koffi";
 import os from "os";
 const { load } = pkg;

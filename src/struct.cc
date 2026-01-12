@@ -331,7 +331,7 @@ namespace ctypes
     StructType::StructType(const Napi::CallbackInfo &info)
         : Napi::ObjectWrap<StructType>(info)
     {
-        Napi::Env env = info.Env();
+        // Napi::Env env = info.Env();
 
         // Opzionale: { union: true }
         is_union_ = false;

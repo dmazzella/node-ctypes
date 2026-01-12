@@ -1,7 +1,7 @@
 // Benchmark: node-ctypes vs @napi-ffi/ffi-napi
 // Run: node tests/benchmarks/benchmark_ffi-napi.js
 
-import * as ctypes from "../../lib/index.js";
+import * as ctypes from "node-ctypes";
 import ffi from "@napi-ffi/ffi-napi";
 import os from "os";
 

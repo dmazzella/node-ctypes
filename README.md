@@ -613,7 +613,9 @@ For complete, working examples, see the test suite:
 
 Run tests:
 ```bash
-npm test                    # All tests
+cd tests
+npm install 
+npm run test               # All tests
 npm run bench:koffi        # Benchmark vs koffi
 npm run bench:ffi-napi     # Benchmark vs ffi-napi
 ```

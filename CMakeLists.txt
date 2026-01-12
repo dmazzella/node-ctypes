@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.15)
-project(node_ctypes)
+project(ctypes)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_compile_definitions(NAPI_VERSION=8)
+add_compile_definitions(NAPI_VERSION=9)
 add_compile_definitions(NAPI_CPP_EXCEPTIONS)
 
 include(FetchContent)
@@ -48,70 +48,20 @@ message(STATUS "Target architecture: ${FFI_ARCH}")
 set(FFI_FOUND FALSE)
 
 if(WIN32)
-    # Su Windows, scarica i binari precompilati direttamente (molto più veloce del clone Git)
-    message(STATUS "Downloading prebuilt libffi for Windows ${FFI_ARCH}...")
+    set(LIBFFI_DYNAMIC_DIR ${CMAKE_SOURCE_DIR}/deps/libffi_${FFI_ARCH}-windows)
     
-    # URL base dei file libffi da GitHub (raw files, non git clone)
-    set(LIBFFI_BASE_URL "https://raw.githubusercontent.com/python/cpython-bin-deps/libffi/${FFI_ARCH}")
-    
-    # Directory di destinazione
-    set(LIBFFI_BIN_DIR ${CMAKE_BINARY_DIR}/_deps/libffi-${FFI_ARCH})
-    
-    # Scarica i file necessari (solo se non esistono già)
-    if(NOT EXISTS ${LIBFFI_BIN_DIR}/libffi-8.lib)
-        message(STATUS "Downloading libffi files (${FFI_ARCH})...")
-        file(MAKE_DIRECTORY ${LIBFFI_BIN_DIR}/include)
+    if(EXISTS ${LIBFFI_DYNAMIC_DIR})
+        message(STATUS "Using local dynamic libffi from: ${LIBFFI_DYNAMIC_DIR}")
         
-        # Scarica library (.lib)
-        file(DOWNLOAD 
-            "${LIBFFI_BASE_URL}/libffi-8.lib"
-            "${LIBFFI_BIN_DIR}/libffi-8.lib"
-            SHOW_PROGRESS
-            STATUS DOWNLOAD_STATUS
-        )
-        list(GET DOWNLOAD_STATUS 0 STATUS_CODE)
-        if(NOT STATUS_CODE EQUAL 0)
-            message(FATAL_ERROR "Failed to download libffi-8.lib")
-        endif()
+        set(FFI_FOUND TRUE)
+        set(FFI_INCLUDE_DIRS ${LIBFFI_DYNAMIC_DIR}/include)
+        set(FFI_LIBRARIES ${LIBFFI_DYNAMIC_DIR}/lib/ffi.lib)
         
-        # Scarica DLL
-        file(DOWNLOAD 
-            "${LIBFFI_BASE_URL}/libffi-8.dll"
-            "${LIBFFI_BIN_DIR}/libffi-8.dll"
-            SHOW_PROGRESS
-            STATUS DOWNLOAD_STATUS
-        )
-        list(GET DOWNLOAD_STATUS 0 STATUS_CODE)
-        if(NOT STATUS_CODE EQUAL 0)
-            message(FATAL_ERROR "Failed to download libffi-8.dll")
-        endif()
+        set(FFI_DLL_FILE ${LIBFFI_DYNAMIC_DIR}/bin/ffi-8.dll)
         
-        # Scarica headers
-        file(DOWNLOAD 
-            "${LIBFFI_BASE_URL}/include/ffi.h"
-            "${LIBFFI_BIN_DIR}/include/ffi.h"
-            SHOW_PROGRESS
-            STATUS DOWNLOAD_STATUS
-        )
-        list(GET DOWNLOAD_STATUS 0 STATUS_CODE)
-        if(NOT STATUS_CODE EQUAL 0)
-            message(FATAL_ERROR "Failed to download ffi.h")
-        endif()
-        
-        file(DOWNLOAD 
-            "${LIBFFI_BASE_URL}/include/ffitarget.h"
-            "${LIBFFI_BIN_DIR}/include/ffitarget.h"
-            SHOW_PROGRESS
-            STATUS DOWNLOAD_STATUS
-        )
-        list(GET DOWNLOAD_STATUS 0 STATUS_CODE)
-        if(NOT STATUS_CODE EQUAL 0)
-            message(FATAL_ERROR "Failed to download ffitarget.h")
-        endif()
-        
-        message(STATUS "libffi download completed")
-    else()
-        message(STATUS "Using cached libffi files")
+        message(STATUS "libffi library: ${FFI_LIBRARIES}")
+        message(STATUS "libffi includes: ${FFI_INCLUDE_DIRS}")
+        message(STATUS "libffi DLL: ${FFI_DLL_FILE}")
     endif()
     
     if(EXISTS ${LIBFFI_BIN_DIR})
@@ -131,7 +81,7 @@ if(WIN32)
             message(STATUS "libffi DLL: ${FFI_DLL_FILE}")
             message(STATUS "libffi includes: ${FFI_INCLUDE_DIRS}")
         endif()
-    endif()
+    endif()  # Fine if(EXISTS ${LIBFFI_DYNAMIC_DIR})
     
 else()
     # Su Linux/macOS, usa pkg-config
@@ -168,6 +118,7 @@ endif()
 # ============================================================================
 
 set(SOURCE_FILES
+    src/version.cc
     src/ctypes.cc
     src/library.cc
     src/function.cc
@@ -227,6 +178,11 @@ endif()
 
 if(MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE /wd4996)
+    target_compile_options(${PROJECT_NAME} PRIVATE /utf-8)
+    target_compile_options(${PROJECT_NAME} PRIVATE /bigobj)
+    if(CMAKE_JS_NODELIB_DEF AND CMAKE_JS_NODELIB_TARGET)
+        execute_process(COMMAND ${CMAKE_AR} /def:${CMAKE_JS_NODELIB_DEF} /out:${CMAKE_JS_NODELIB_TARGET} ${CMAKE_STATIC_LINKER_FLAGS})
+    endif()
 endif()
 
 # ============================================================================

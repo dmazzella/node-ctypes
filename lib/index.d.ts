@@ -96,6 +96,14 @@ export interface Types {
 // Library & Function
 // =============================================================================
 
+/** Version information */
+export class Version {
+  static get major(): number;
+  static get minor(): number;
+  static get patch(): number;
+  static toString(): string;
+}
+
 /** Native library handle */
 export class Library {
   constructor(path: string | null);

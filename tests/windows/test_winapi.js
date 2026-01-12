@@ -14,7 +14,7 @@ import {
   create_unicode_buffer,
   wstring_at,
   writeValue,
-} from "../../lib/index.js";
+} from "node-ctypes";
 
 describe("Windows API", function () {
   let kernel32;
