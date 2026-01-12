@@ -127,9 +127,8 @@ describe("Windows API", function () {
       const GetLocalTime = kernel32.func("GetLocalTime", "void", ["pointer"]);
 
       const st = SYSTEMTIME.create();
-      GetLocalTime(st);
-
-      const time = SYSTEMTIME.toObject(st);
+      GetLocalTime(st); // Pass struct object directly - _buffer extracted automatically!
+      const time = SYSTEMTIME.toObject(st); // Reload from st (automatically uses st._buffer)
 
       assert(time.wYear >= 2020, "Year should be reasonable");
       assert(time.wMonth >= 1 && time.wMonth <= 12, "Month should be 1-12");

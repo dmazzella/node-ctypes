@@ -1,10 +1,9 @@
-// Benchmark: node-ctypes vs koffi
-// Run: node tests/benchmarks/benchmark_koffi.js
+// Benchmark: node-ctypes vs @napi-ffi/ffi-napi
+// Run: node tests/benchmarks/benchmark_ffi-napi.js
 
 import * as ctypes from "../../lib/index.js";
-import pkg from "koffi";
+import ffi from "@napi-ffi/ffi-napi";
 import os from "os";
-const { load } = pkg;
 
 const isWindows = os.platform() === "win32";
 const platform = os.platform();
@@ -21,7 +20,7 @@ console.log(
   "╔════════════════════════════════════════════════════════════════╗"
 );
 console.log(
-  "║           FFI Performance Benchmark: node-ctypes vs koffi      ║"
+  "║        FFI Performance Benchmark: node-ctypes vs ffi-napi      ║"
 );
 console.log(
   "╚════════════════════════════════════════════════════════════════╝\n"
@@ -29,15 +28,15 @@ console.log(
 
 const results = [];
 
-function benchmark(name, ctypesTime, koffiTime, iterations) {
-  const ratio = ctypesTime / koffiTime;
-  const faster = ratio < 1 ? "node-ctypes" : "koffi";
+function benchmark(name, ctypesTime, ffiTime, iterations) {
+  const ratio = ctypesTime / ffiTime;
+  const faster = ratio < 1 ? "node-ctypes" : "ffi-napi";
   const diff = ratio < 1 ? (1 / ratio).toFixed(2) : ratio.toFixed(2);
 
   results.push({
     name,
     ctypes: ctypesTime,
-    koffi: koffiTime,
+    ffi: ffiTime,
     ratio,
     winner: faster,
   });
@@ -50,8 +49,8 @@ function benchmark(name, ctypesTime, koffiTime, iterations) {
     ).toFixed(0)} ops/sec)`
   );
   console.log(
-    `  koffi:       ${koffiTime.toFixed(2)}ms (${(
-      (iterations / koffiTime) *
+    `  ffi-napi:    ${ffiTime.toFixed(2)}ms (${(
+      (iterations / ffiTime) *
       1000
     ).toFixed(0)} ops/sec)`
   );
@@ -65,8 +64,19 @@ function benchmark(name, ctypesTime, koffiTime, iterations) {
 const ctypes_libc = new ctypes.CDLL(LIBC);
 const ctypes_system = SYSTEM_LIB ? new ctypes.CDLL(SYSTEM_LIB) : null;
 
-const koffi_libc = load(LIBC);
-const koffi_system = SYSTEM_LIB ? load(SYSTEM_LIB) : null;
+const ffi_libc = ffi.Library(LIBC, {
+  abs: ["int", ["int"]],
+  strlen: ["size_t", ["string"]],
+  sqrt: ["double", ["double"]],
+  memset: ["pointer", ["pointer", "int", "size_t"]],
+  time: ["int64", ["pointer"]],
+});
+
+const ffi_system = SYSTEM_LIB
+  ? ffi.Library(SYSTEM_LIB, {
+      GetTickCount: ["uint32", []],
+    })
+  : null;
 
 // ============================================================================
 // Benchmark 1: Simple function calls (abs)
@@ -84,14 +94,14 @@ console.log(
 
 {
   const ctypes_abs = ctypes_libc.func("abs", "int32", ["int32"]);
-  const koffi_abs = koffi_libc.func("int abs(int)");
+  const ffi_abs = ffi_libc.abs;
 
   const iterations = 1_000_000;
 
   // Warmup
   for (let i = 0; i < 10000; i++) {
     ctypes_abs(-42);
-    koffi_abs(-42);
+    ffi_abs(-42);
   }
 
   let start = performance.now();
@@ -102,11 +112,11 @@ console.log(
 
   start = performance.now();
   for (let i = 0; i < iterations; i++) {
-    koffi_abs(-42);
+    ffi_abs(-42);
   }
-  const koffi_time = performance.now() - start;
+  const ffi_time = performance.now() - start;
 
-  benchmark("abs(int32)", ctypes_time, koffi_time, iterations);
+  benchmark("abs(int32)", ctypes_time, ffi_time, iterations);
 }
 
 // ============================================================================
@@ -125,7 +135,7 @@ console.log(
 
 {
   const ctypes_strlen = ctypes_libc.func("strlen", "size_t", ["string"]);
-  const koffi_strlen = koffi_libc.func("size_t strlen(const char*)");
+  const ffi_strlen = ffi_libc.strlen;
 
   const testString = "Hello, World! This is a test string for benchmarking.";
   const iterations = 500_000;
@@ -133,7 +143,7 @@ console.log(
   // Warmup
   for (let i = 0; i < 1000; i++) {
     ctypes_strlen(testString);
-    koffi_strlen(testString);
+    ffi_strlen(testString);
   }
 
   let start = performance.now();
@@ -144,11 +154,11 @@ console.log(
 
   start = performance.now();
   for (let i = 0; i < iterations; i++) {
-    koffi_strlen(testString);
+    ffi_strlen(testString);
   }
-  const koffi_time = performance.now() - start;
+  const ffi_time = performance.now() - start;
 
-  benchmark("strlen(string)", ctypes_time, koffi_time, iterations);
+  benchmark("strlen(string)", ctypes_time, ffi_time, iterations);
 }
 
 // ============================================================================
@@ -167,14 +177,14 @@ console.log(
 
 {
   const ctypes_sqrt = ctypes_libc.func("sqrt", "double", ["double"]);
-  const koffi_sqrt = koffi_libc.func("double sqrt(double)");
+  const ffi_sqrt = ffi_libc.sqrt;
 
   const iterations = 500_000;
 
   // Warmup
   for (let i = 0; i < 1000; i++) {
     ctypes_sqrt(144.0);
-    koffi_sqrt(144.0);
+    ffi_sqrt(144.0);
   }
 
   let start = performance.now();
@@ -185,11 +195,11 @@ console.log(
 
   start = performance.now();
   for (let i = 0; i < iterations; i++) {
-    koffi_sqrt(144.0);
+    ffi_sqrt(144.0);
   }
-  const koffi_time = performance.now() - start;
+  const ffi_time = performance.now() - start;
 
-  benchmark("sqrt(double)", ctypes_time, koffi_time, iterations);
+  benchmark("sqrt(double)", ctypes_time, ffi_time, iterations);
 }
 
 // ============================================================================
@@ -214,14 +224,14 @@ console.log(
 
 if (isWindows) {
   const ctypes_GetTickCount = ctypes_system.func("GetTickCount", "uint32", []);
-  const koffi_GetTickCount = koffi_system.func("unsigned long GetTickCount()");
+  const ffi_GetTickCount = ffi_system.GetTickCount;
 
   const iterations = 1_000_000;
 
   // Warmup
   for (let i = 0; i < 1000; i++) {
     ctypes_GetTickCount();
-    koffi_GetTickCount();
+    ffi_GetTickCount();
   }
 
   let start = performance.now();
@@ -232,36 +242,36 @@ if (isWindows) {
 
   start = performance.now();
   for (let i = 0; i < iterations; i++) {
-    koffi_GetTickCount();
+    ffi_GetTickCount();
   }
-  const koffi_time = performance.now() - start;
+  const ffi_time = performance.now() - start;
 
-  benchmark("GetTickCount()", ctypes_time, koffi_time, iterations);
+  benchmark("GetTickCount()", ctypes_time, ffi_time, iterations);
 } else {
-  const ctypes_time = ctypes_libc.func("time", "int64", ["pointer"]);
-  const koffi_time = koffi_libc.func("long time(void*)");
+  const ctypes_time_func = ctypes_libc.func("time", "int64", ["pointer"]);
+  const ffi_time_func = ffi_libc.time;
 
   const iterations = 1_000_000;
 
   // Warmup
   for (let i = 0; i < 1000; i++) {
-    ctypes_time(null);
-    koffi_time(null);
+    ctypes_time_func(null);
+    ffi_time_func(null);
   }
 
   let start = performance.now();
   for (let i = 0; i < iterations; i++) {
-    ctypes_time(null);
+    ctypes_time_func(null);
   }
   const ctypes_elapsed = performance.now() - start;
 
   start = performance.now();
   for (let i = 0; i < iterations; i++) {
-    koffi_time(null);
+    ffi_time_func(null);
   }
-  const koffi_elapsed = performance.now() - start;
+  const ffi_elapsed = performance.now() - start;
 
-  benchmark("time(NULL)", ctypes_elapsed, koffi_elapsed, iterations);
+  benchmark("time(NULL)", ctypes_elapsed, ffi_elapsed, iterations);
 }
 
 // ============================================================================
@@ -284,17 +294,17 @@ console.log(
     "int32",
     "size_t",
   ]);
-  const koffi_memset = koffi_libc.func("void* memset(void*, int, size_t)");
+  const ffi_memset = ffi_libc.memset;
 
   const ctypes_buf = ctypes.create_string_buffer(1024);
-  const koffi_buf = Buffer.alloc(1024);
+  const ffi_buf = Buffer.alloc(1024);
 
   const iterations = 500_000;
 
   // Warmup
   for (let i = 0; i < 1000; i++) {
     ctypes_memset(ctypes_buf, 0, 1024);
-    koffi_memset(koffi_buf, 0, 1024);
+    ffi_memset(ffi_buf, 0, 1024);
   }
 
   let start = performance.now();
@@ -305,11 +315,11 @@ console.log(
 
   start = performance.now();
   for (let i = 0; i < iterations; i++) {
-    koffi_memset(koffi_buf, 0x41, 1024);
+    ffi_memset(ffi_buf, 0x41, 1024);
   }
-  const koffi_time = performance.now() - start;
+  const ffi_time = performance.now() - start;
 
-  benchmark("memset(ptr,int,size)", ctypes_time, koffi_time, iterations);
+  benchmark("memset(ptr,int,size)", ctypes_time, ffi_time, iterations);
 }
 
 // ============================================================================
@@ -333,41 +343,39 @@ console.log(
     y: "int32",
   });
 
-  // Define struct in koffi
-  const Point_koffi = pkg.struct("Point", {
-    x: "int",
-    y: "int",
-  });
+  // Define struct in ffi-napi (using ref-struct)
+  // ffi-napi doesn't have built-in struct support like koffi,
+  // but we can compare plain Buffer access
+  const Point_ffi = Buffer.alloc(8); // 2 * int32
 
   const iterations = 500_000;
 
   // Create instances
   const p_ctypes = Point_ctypes.create({ x: 10, y: 20 });
-  const p_koffi = { x: 10, y: 20 };
 
   // Warmup
   for (let i = 0; i < 1000; i++) {
-    p_ctypes.x; // Direct property access (KOFFI-style)
-    p_koffi.x;
+    p_ctypes.x; // Using native property accessors
+    Point_ffi.readInt32LE(0);
   }
 
-  // Benchmark ctypes struct read (DIRECT PROPERTY ACCESS)
+  // Benchmark ctypes struct read (using native property accessors)
   let start = performance.now();
   for (let i = 0; i < iterations; i++) {
-    const x = p_ctypes.x; // Direct access like koffi!
+    const x = p_ctypes.x;
     const y = p_ctypes.y;
   }
   const ctypes_time = performance.now() - start;
 
-  // Benchmark koffi struct read (koffi uses plain objects, very fast)
+  // Benchmark ffi/Buffer struct read
   start = performance.now();
   for (let i = 0; i < iterations; i++) {
-    const x = p_koffi.x;
-    const y = p_koffi.y;
+    const x = Point_ffi.readInt32LE(0);
+    const y = Point_ffi.readInt32LE(4);
   }
-  const koffi_time = performance.now() - start;
+  const ffi_time = performance.now() - start;
 
-  benchmark("struct read (2 fields)", ctypes_time, koffi_time, iterations);
+  benchmark("struct read (2 fields)", ctypes_time, ffi_time, iterations);
 }
 
 // ============================================================================
@@ -502,7 +510,7 @@ console.log(
 );
 
 let ctypesWins = 0;
-let koffiWins = 0;
+let ffiWins = 0;
 
 for (const r of results) {
   const status = r.ratio < 1 ? "✓" : "✗";
@@ -511,24 +519,38 @@ for (const r of results) {
       ? (1 / r.ratio).toFixed(2) + "x faster"
       : r.ratio.toFixed(2) + "x slower";
   console.log(
-    `║ ${status} ${r.name.padEnd(25)} ${diff.padStart(15)} vs koffi   ║`
+    `║ ${status} ${r.name.padEnd(25)} ${diff.padStart(15)} vs ffi-napi ║`
   );
   if (r.ratio < 1) ctypesWins++;
-  else koffiWins++;
+  else ffiWins++;
 }
 
 console.log(
   "╠════════════════════════════════════════════════════════════════╣"
 );
 
-const avgRatio = results.reduce((sum, r) => sum + r.ratio, 0) / results.length;
-console.log(
-  `║ Average ratio: ${avgRatio.toFixed(2)}x ${
-    avgRatio < 1 ? "(node-ctypes faster)" : "(koffi faster)"
-  }`.padEnd(65) + "║"
+// Calcola media geometrica per i ratio (più significativa di media aritmetica)
+const geometricMean = Math.pow(
+  results.reduce((product, r) => product * r.ratio, 1),
+  1 / results.length
 );
+
+if (geometricMean < 1) {
+  console.log(
+    `║ Geometric mean: ${(1 / geometricMean).toFixed(
+      2
+    )}x faster (node-ctypes)`.padEnd(65) + "║"
+  );
+} else {
+  console.log(
+    `║ Geometric mean: ${geometricMean.toFixed(
+      2
+    )}x slower (vs ffi-napi)`.padEnd(65) + "║"
+  );
+}
+
 console.log(
-  `║ Wins: node-ctypes ${ctypesWins}, koffi ${koffiWins}`.padEnd(65) + "║"
+  `║ Wins: node-ctypes ${ctypesWins}, ffi-napi ${ffiWins}`.padEnd(65) + "║"
 );
 console.log(
   "╚════════════════════════════════════════════════════════════════╝"
@@ -537,3 +559,6 @@ console.log(
 // Cleanup
 ctypes_libc.close();
 if (ctypes_system) ctypes_system.close();
+
+// Force process exit (ffi-napi may keep event loop alive)
+process.exit(0);
