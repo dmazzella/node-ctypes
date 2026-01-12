@@ -35,6 +35,7 @@
     "test:python": "python -Bm pytest tests/ -v"
   },
   "devDependencies": {
+    "@napi-ffi/ffi-napi": "^4.0.3",
     "cmake-js": "^7.4.0",
     "koffi": "^2.15.0"
   },
