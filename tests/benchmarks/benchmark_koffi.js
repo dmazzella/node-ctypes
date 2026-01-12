@@ -1,0 +1,502 @@
+// Benchmark: node-ctypes vs koffi
+// Run: node tests/benchmarks/benchmark_koffi.js
+
+import * as ctypes from "../../lib/index.js";
+import pkg from "koffi";
+const { load } = pkg;
+
+console.log(
+  "╔════════════════════════════════════════════════════════════════╗"
+);
+console.log(
+  "║           FFI Performance Benchmark: node-ctypes vs koffi      ║"
+);
+console.log(
+  "╚════════════════════════════════════════════════════════════════╝\n"
+);
+
+const results = [];
+
+function benchmark(name, ctypesTime, koffiTime, iterations) {
+  const ratio = ctypesTime / koffiTime;
+  const faster = ratio < 1 ? "node-ctypes" : "koffi";
+  const diff = ratio < 1 ? (1 / ratio).toFixed(2) : ratio.toFixed(2);
+
+  results.push({
+    name,
+    ctypes: ctypesTime,
+    koffi: koffiTime,
+    ratio,
+    winner: faster,
+  });
+
+  console.log(`  Iterations: ${iterations.toLocaleString()}`);
+  console.log(
+    `  node-ctypes: ${ctypesTime.toFixed(2)}ms (${(
+      (iterations / ctypesTime) *
+      1000
+    ).toFixed(0)} ops/sec)`
+  );
+  console.log(
+    `  koffi:       ${koffiTime.toFixed(2)}ms (${(
+      (iterations / koffiTime) *
+      1000
+    ).toFixed(0)} ops/sec)`
+  );
+  console.log(`  Winner: ${faster} (${diff}x faster)\n`);
+}
+
+// ============================================================================
+// Setup
+// ============================================================================
+
+const ctypes_msvcrt = new ctypes.CDLL("msvcrt.dll");
+const ctypes_kernel32 = new ctypes.CDLL("kernel32.dll");
+
+const koffi_msvcrt = load("msvcrt.dll");
+const koffi_kernel32 = load("kernel32.dll");
+
+// ============================================================================
+// Benchmark 1: Simple function calls (abs)
+// ============================================================================
+
+console.log(
+  "┌─────────────────────────────────────────────────────────────────┐"
+);
+console.log(
+  "│ Benchmark 1: Simple int32 function - abs(-42)                  │"
+);
+console.log(
+  "└─────────────────────────────────────────────────────────────────┘"
+);
+
+{
+  const ctypes_abs = ctypes_msvcrt.func("abs", "int32", ["int32"]);
+  const koffi_abs = koffi_msvcrt.func("int abs(int)");
+
+  const iterations = 1_000_000;
+
+  // Warmup
+  for (let i = 0; i < 10000; i++) {
+    ctypes_abs(-42);
+    koffi_abs(-42);
+  }
+
+  let start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    ctypes_abs(-42);
+  }
+  const ctypes_time = performance.now() - start;
+
+  start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    koffi_abs(-42);
+  }
+  const koffi_time = performance.now() - start;
+
+  benchmark("abs(int32)", ctypes_time, koffi_time, iterations);
+}
+
+// ============================================================================
+// Benchmark 2: String functions (strlen)
+// ============================================================================
+
+console.log(
+  "┌─────────────────────────────────────────────────────────────────┐"
+);
+console.log(
+  "│ Benchmark 2: String parameter - strlen(str)                    │"
+);
+console.log(
+  "└─────────────────────────────────────────────────────────────────┘"
+);
+
+{
+  const ctypes_strlen = ctypes_msvcrt.func("strlen", "size_t", ["string"]);
+  const koffi_strlen = koffi_msvcrt.func("size_t strlen(const char*)");
+
+  const testString = "Hello, World! This is a test string for benchmarking.";
+  const iterations = 500_000;
+
+  // Warmup
+  for (let i = 0; i < 1000; i++) {
+    ctypes_strlen(testString);
+    koffi_strlen(testString);
+  }
+
+  let start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    ctypes_strlen(testString);
+  }
+  const ctypes_time = performance.now() - start;
+
+  start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    koffi_strlen(testString);
+  }
+  const koffi_time = performance.now() - start;
+
+  benchmark("strlen(string)", ctypes_time, koffi_time, iterations);
+}
+
+// ============================================================================
+// Benchmark 3: Floating point (sqrt)
+// ============================================================================
+
+console.log(
+  "┌─────────────────────────────────────────────────────────────────┐"
+);
+console.log(
+  "│ Benchmark 3: Floating point - sqrt(double)                     │"
+);
+console.log(
+  "└─────────────────────────────────────────────────────────────────┘"
+);
+
+{
+  const ctypes_sqrt = ctypes_msvcrt.func("sqrt", "double", ["double"]);
+  const koffi_sqrt = koffi_msvcrt.func("double sqrt(double)");
+
+  const iterations = 500_000;
+
+  // Warmup
+  for (let i = 0; i < 1000; i++) {
+    ctypes_sqrt(144.0);
+    koffi_sqrt(144.0);
+  }
+
+  let start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    ctypes_sqrt(144.0);
+  }
+  const ctypes_time = performance.now() - start;
+
+  start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    koffi_sqrt(144.0);
+  }
+  const koffi_time = performance.now() - start;
+
+  benchmark("sqrt(double)", ctypes_time, koffi_time, iterations);
+}
+
+// ============================================================================
+// Benchmark 4: No-argument function (GetTickCount)
+// ============================================================================
+
+console.log(
+  "┌─────────────────────────────────────────────────────────────────┐"
+);
+console.log(
+  "│ Benchmark 4: No arguments - GetTickCount()                     │"
+);
+console.log(
+  "└─────────────────────────────────────────────────────────────────┘"
+);
+
+{
+  const ctypes_GetTickCount = ctypes_kernel32.func(
+    "GetTickCount",
+    "uint32",
+    []
+  );
+  const koffi_GetTickCount = koffi_kernel32.func(
+    "unsigned long GetTickCount()"
+  );
+
+  const iterations = 1_000_000;
+
+  // Warmup
+  for (let i = 0; i < 1000; i++) {
+    ctypes_GetTickCount();
+    koffi_GetTickCount();
+  }
+
+  let start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    ctypes_GetTickCount();
+  }
+  const ctypes_time = performance.now() - start;
+
+  start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    koffi_GetTickCount();
+  }
+  const koffi_time = performance.now() - start;
+
+  benchmark("GetTickCount()", ctypes_time, koffi_time, iterations);
+}
+
+// ============================================================================
+// Benchmark 5: Multiple arguments
+// ============================================================================
+
+console.log(
+  "┌─────────────────────────────────────────────────────────────────┐"
+);
+console.log(
+  "│ Benchmark 5: Multiple arguments - memset(ptr, val, size)       │"
+);
+console.log(
+  "└─────────────────────────────────────────────────────────────────┘"
+);
+
+{
+  const ctypes_memset = ctypes_msvcrt.func("memset", "pointer", [
+    "pointer",
+    "int32",
+    "size_t",
+  ]);
+  const koffi_memset = koffi_msvcrt.func("void* memset(void*, int, size_t)");
+
+  const ctypes_buf = ctypes.create_string_buffer(1024);
+  const koffi_buf = Buffer.alloc(1024);
+
+  const iterations = 500_000;
+
+  // Warmup
+  for (let i = 0; i < 1000; i++) {
+    ctypes_memset(ctypes_buf, 0, 1024);
+    koffi_memset(koffi_buf, 0, 1024);
+  }
+
+  let start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    ctypes_memset(ctypes_buf, 0x41, 1024);
+  }
+  const ctypes_time = performance.now() - start;
+
+  start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    koffi_memset(koffi_buf, 0x41, 1024);
+  }
+  const koffi_time = performance.now() - start;
+
+  benchmark("memset(ptr,int,size)", ctypes_time, koffi_time, iterations);
+}
+
+// ============================================================================
+// Benchmark 6: Struct operations
+// ============================================================================
+
+console.log(
+  "┌─────────────────────────────────────────────────────────────────┐"
+);
+console.log(
+  "│ Benchmark 6: Struct read/write                                 │"
+);
+console.log(
+  "└─────────────────────────────────────────────────────────────────┘"
+);
+
+{
+  // Define struct in node-ctypes
+  const Point_ctypes = ctypes.struct({
+    x: "int32",
+    y: "int32",
+  });
+
+  // Define struct in koffi
+  const Point_koffi = pkg.struct("Point", {
+    x: "int",
+    y: "int",
+  });
+
+  const iterations = 500_000;
+
+  // Create instances
+  const p_ctypes = Point_ctypes.create({ x: 10, y: 20 });
+  const p_koffi = { x: 10, y: 20 };
+
+  // Warmup
+  for (let i = 0; i < 1000; i++) {
+    Point_ctypes.get(p_ctypes, "x");
+    p_koffi.x;
+  }
+
+  // Benchmark ctypes struct read
+  let start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    Point_ctypes.get(p_ctypes, "x");
+    Point_ctypes.get(p_ctypes, "y");
+  }
+  const ctypes_time = performance.now() - start;
+
+  // Benchmark koffi struct read (koffi uses plain objects, very fast)
+  start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    const x = p_koffi.x;
+    const y = p_koffi.y;
+  }
+  const koffi_time = performance.now() - start;
+
+  benchmark("struct read (2 fields)", ctypes_time, koffi_time, iterations);
+}
+
+// ============================================================================
+// Benchmark 7: Memory allocation
+// ============================================================================
+
+console.log(
+  "┌─────────────────────────────────────────────────────────────────┐"
+);
+console.log(
+  "│ Benchmark 7: Buffer allocation (64 bytes)                      │"
+);
+console.log(
+  "└─────────────────────────────────────────────────────────────────┘"
+);
+
+{
+  const iterations = 200_000;
+
+  // Warmup
+  for (let i = 0; i < 1000; i++) {
+    ctypes.create_string_buffer(64);
+    Buffer.alloc(64);
+  }
+
+  let start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    const buf = ctypes.create_string_buffer(64);
+  }
+  const ctypes_time = performance.now() - start;
+
+  start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    const buf = Buffer.alloc(64);
+  }
+  const native_time = performance.now() - start;
+
+  console.log(`  Iterations: ${iterations.toLocaleString()}`);
+  console.log(
+    `  node-ctypes:  ${ctypes_time.toFixed(2)}ms (${(
+      (iterations / ctypes_time) *
+      1000
+    ).toFixed(0)} allocs/sec)`
+  );
+  console.log(
+    `  Buffer.alloc: ${native_time.toFixed(2)}ms (${(
+      (iterations / native_time) *
+      1000
+    ).toFixed(0)} allocs/sec)`
+  );
+  console.log(
+    `  Overhead: ${((ctypes_time / native_time - 1) * 100).toFixed(
+      1
+    )}% vs native\n`
+  );
+}
+
+// ============================================================================
+// Benchmark 8: Raw vs Wrapped call
+// ============================================================================
+
+console.log(
+  "┌─────────────────────────────────────────────────────────────────┐"
+);
+console.log(
+  "│ Benchmark 8: Raw Library.func vs CDLL wrapper                  │"
+);
+console.log(
+  "└─────────────────────────────────────────────────────────────────┘"
+);
+
+{
+  const rawLib = new ctypes.Library("msvcrt.dll");
+  const rawAbs = rawLib.func("abs", "int32", ["int32"]);
+
+  const wrappedLib = new ctypes.CDLL("msvcrt.dll");
+  const wrappedAbs = wrappedLib.func("abs", "int32", ["int32"]);
+
+  const iterations = 1_000_000;
+
+  // Warmup
+  for (let i = 0; i < 1000; i++) {
+    rawAbs.call(-42);
+    wrappedAbs(-42);
+  }
+
+  let start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    rawAbs.call(-42);
+  }
+  const raw_time = performance.now() - start;
+
+  start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    wrappedAbs(-42);
+  }
+  const wrapped_time = performance.now() - start;
+
+  console.log(`  Iterations: ${iterations.toLocaleString()}`);
+  console.log(
+    `  Raw .call():  ${raw_time.toFixed(2)}ms (${(
+      (iterations / raw_time) *
+      1000
+    ).toFixed(0)} ops/sec)`
+  );
+  console.log(
+    `  CDLL wrapper: ${wrapped_time.toFixed(2)}ms (${(
+      (iterations / wrapped_time) *
+      1000
+    ).toFixed(0)} ops/sec)`
+  );
+  console.log(
+    `  Wrapper overhead: ${((wrapped_time / raw_time - 1) * 100).toFixed(1)}%\n`
+  );
+
+  rawLib.close();
+  wrappedLib.close();
+}
+
+// ============================================================================
+// Summary
+// ============================================================================
+
+console.log(
+  "╔════════════════════════════════════════════════════════════════╗"
+);
+console.log(
+  "║                          SUMMARY                               ║"
+);
+console.log(
+  "╠════════════════════════════════════════════════════════════════╣"
+);
+
+let ctypesWins = 0;
+let koffiWins = 0;
+
+for (const r of results) {
+  const status = r.ratio < 1 ? "✓" : "✗";
+  const diff =
+    r.ratio < 1
+      ? (1 / r.ratio).toFixed(2) + "x faster"
+      : r.ratio.toFixed(2) + "x slower";
+  console.log(
+    `║ ${status} ${r.name.padEnd(25)} ${diff.padStart(15)} vs koffi   ║`
+  );
+  if (r.ratio < 1) ctypesWins++;
+  else koffiWins++;
+}
+
+console.log(
+  "╠════════════════════════════════════════════════════════════════╣"
+);
+
+const avgRatio = results.reduce((sum, r) => sum + r.ratio, 0) / results.length;
+console.log(
+  `║ Average ratio: ${avgRatio.toFixed(2)}x ${
+    avgRatio < 1 ? "(node-ctypes faster)" : "(koffi faster)"
+  }`.padEnd(65) + "║"
+);
+console.log(
+  `║ Wins: node-ctypes ${ctypesWins}, koffi ${koffiWins}`.padEnd(65) + "║"
+);
+console.log(
+  "╚════════════════════════════════════════════════════════════════╝"
+);
+
+// Cleanup
+ctypes_msvcrt.close();
+ctypes_kernel32.close();
