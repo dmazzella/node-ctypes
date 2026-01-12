@@ -145,11 +145,11 @@ class TestWindowsAPI(unittest.TestCase):
         GetEnvironmentVariableW.restype = DWORD
         
         buf = create_unicode_buffer(1024)
-        length = GetEnvironmentVariableW('PATH', buf, 1024)
+        length = GetEnvironmentVariableW('TEMP', buf, 1024)
         
-        self.assertGreater(length, 0, 'Should find PATH environment variable')
-        self.assertGreater(len(buf.value), 0, 'PATH should not be empty')
-        self.assertIn('\\', buf.value, 'PATH should contain backslashes')
+        self.assertGreater(length, 0, 'Should find TEMP environment variable')
+        self.assertGreater(len(buf.value), 0, 'TEMP should not be empty')
+        self.assertIn('\\', buf.value, 'TEMP should contain backslashes')
     
     def test_get_computer_name(self):
         """Test GetComputerNameW"""

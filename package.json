@@ -2,24 +2,25 @@
   "name": "node-ctypes",
   "version": "0.1.0",
   "description": "Python ctypes-like FFI for Node.js using libffi",
+  "author": "",
+  "license": "MIT",
+  "keywords": [
+    "ffi",
+    "ctypes",
+    "native",
+    "libffi"
+  ],
   "main": "lib/index.js",
+  "type": "module",
   "scripts": {
     "install": "cmake-js compile",
     "build": "cmake-js compile",
     "build:debug": "cmake-js compile --debug",
     "rebuild": "cmake-js rebuild",
     "clean": "cmake-js clean",
-    "test": "node test/test.js"
+    "test": "node --test tests/**/*.js --timeout 5000",
+    "test:python": "python -Bm pytest tests/ -v"
   },
-  "keywords": [
-    "ffi",
-    "ctypes",
-    "native",
-    "libffi",
-    "dlopen"
-  ],
-  "author": "",
-  "license": "MIT",
   "devDependencies": {
     "cmake-js": "^7.4.0",
     "koffi": "^2.15.0"
