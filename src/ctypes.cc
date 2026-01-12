@@ -425,6 +425,7 @@ namespace ctypes
 
         // Costanti utili
         exports.Set("POINTER_SIZE", Napi::Number::New(env, sizeof(void *)));
+        exports.Set("WCHAR_SIZE", Napi::Number::New(env, sizeof(wchar_t)));
         exports.Set("NULL", env.Null());
 
         return exports;

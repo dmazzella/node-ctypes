@@ -11,7 +11,20 @@
     "libffi"
   ],
   "main": "lib/index.js",
+  "types": "lib/index.d.ts",
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "import": "./lib/index.js"
+    }
+  },
+  "files": [
+    "lib/",
+    "src/",
+    "deps/",
+    "CMakeLists.txt"
+  ],
   "scripts": {
     "install": "cmake-js compile",
     "build": "cmake-js compile",

@@ -10,9 +10,9 @@ import {
   SetLastError,
   GetLastError,
   struct,
+  create_string_buffer,
   create_unicode_buffer,
   wstring_at,
-  alloc,
   writeValue,
 } from "../../lib/index.js";
 
@@ -215,7 +215,7 @@ describe("Windows API", function () {
       ]);
 
       const buf = create_unicode_buffer(256);
-      const sizeBuf = alloc(4);
+      const sizeBuf = create_string_buffer(4);
       writeValue(sizeBuf, "uint32", 256);
 
       const result = GetComputerNameW(buf, sizeBuf);

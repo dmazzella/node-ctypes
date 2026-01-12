@@ -1,6 +1,7 @@
 // Benchmark: node-ctypes vs koffi
-const ctypes = require("../lib");
-const koffi = require("koffi");
+import { CDLL, Library } from "../../lib/index.js";
+import pkg from "koffi";
+const { load } = pkg;
 
 console.log("=== FFI Performance Benchmark ===");
 console.log("Comparing: node-ctypes vs koffi\n");
@@ -10,12 +11,12 @@ console.log("Comparing: node-ctypes vs koffi\n");
 // ============================================================================
 
 // node-ctypes
-const ctypes_msvcrt = new ctypes.CDLL("msvcrt.dll");
-const ctypes_kernel32 = new ctypes.CDLL("kernel32.dll");
+const ctypes_msvcrt = new CDLL("msvcrt.dll");
+const ctypes_kernel32 = new CDLL("kernel32.dll");
 
 // koffi
-const koffi_msvcrt = koffi.load("msvcrt.dll");
-const koffi_kernel32 = koffi.load("kernel32.dll");
+const koffi_msvcrt = load("msvcrt.dll");
+const koffi_kernel32 = load("kernel32.dll");
 
 // ============================================================================
 // Benchmark 1: Simple function calls (abs)
@@ -50,9 +51,23 @@ for (let i = 0; i < iterations; i++) {
 let koffi_time = performance.now() - start;
 
 console.log(`  Iterations: ${iterations.toLocaleString()}`);
-console.log(`  node-ctypes: ${ctypes_time.toFixed(2)}ms (${(iterations / ctypes_time * 1000).toFixed(0)} calls/sec)`);
-console.log(`  koffi:       ${koffi_time.toFixed(2)}ms (${(iterations / koffi_time * 1000).toFixed(0)} calls/sec)`);
-console.log(`  Ratio: ${(ctypes_time / koffi_time).toFixed(2)}x ${koffi_time < ctypes_time ? 'slower' : 'faster'}\n`);
+console.log(
+  `  node-ctypes: ${ctypes_time.toFixed(2)}ms (${(
+    (iterations / ctypes_time) *
+    1000
+  ).toFixed(0)} calls/sec)`
+);
+console.log(
+  `  koffi:       ${koffi_time.toFixed(2)}ms (${(
+    (iterations / koffi_time) *
+    1000
+  ).toFixed(0)} calls/sec)`
+);
+console.log(
+  `  Ratio: ${(ctypes_time / koffi_time).toFixed(2)}x ${
+    koffi_time < ctypes_time ? "slower" : "faster"
+  }\n`
+);
 
 // ============================================================================
 // Benchmark 2: String functions (strlen)
@@ -87,9 +102,23 @@ for (let i = 0; i < strIterations; i++) {
 koffi_time = performance.now() - start;
 
 console.log(`  Iterations: ${strIterations.toLocaleString()}`);
-console.log(`  node-ctypes: ${ctypes_time.toFixed(2)}ms (${(strIterations / ctypes_time * 1000).toFixed(0)} calls/sec)`);
-console.log(`  koffi:       ${koffi_time.toFixed(2)}ms (${(strIterations / koffi_time * 1000).toFixed(0)} calls/sec)`);
-console.log(`  Ratio: ${(ctypes_time / koffi_time).toFixed(2)}x ${koffi_time < ctypes_time ? 'slower' : 'faster'}\n`);
+console.log(
+  `  node-ctypes: ${ctypes_time.toFixed(2)}ms (${(
+    (strIterations / ctypes_time) *
+    1000
+  ).toFixed(0)} calls/sec)`
+);
+console.log(
+  `  koffi:       ${koffi_time.toFixed(2)}ms (${(
+    (strIterations / koffi_time) *
+    1000
+  ).toFixed(0)} calls/sec)`
+);
+console.log(
+  `  Ratio: ${(ctypes_time / koffi_time).toFixed(2)}x ${
+    koffi_time < ctypes_time ? "slower" : "faster"
+  }\n`
+);
 
 // ============================================================================
 // Benchmark 3: Floating point (sqrt)
@@ -123,9 +152,23 @@ for (let i = 0; i < fpIterations; i++) {
 koffi_time = performance.now() - start;
 
 console.log(`  Iterations: ${fpIterations.toLocaleString()}`);
-console.log(`  node-ctypes: ${ctypes_time.toFixed(2)}ms (${(fpIterations / ctypes_time * 1000).toFixed(0)} calls/sec)`);
-console.log(`  koffi:       ${koffi_time.toFixed(2)}ms (${(fpIterations / koffi_time * 1000).toFixed(0)} calls/sec)`);
-console.log(`  Ratio: ${(ctypes_time / koffi_time).toFixed(2)}x ${koffi_time < ctypes_time ? 'slower' : 'faster'}\n`);
+console.log(
+  `  node-ctypes: ${ctypes_time.toFixed(2)}ms (${(
+    (fpIterations / ctypes_time) *
+    1000
+  ).toFixed(0)} calls/sec)`
+);
+console.log(
+  `  koffi:       ${koffi_time.toFixed(2)}ms (${(
+    (fpIterations / koffi_time) *
+    1000
+  ).toFixed(0)} calls/sec)`
+);
+console.log(
+  `  Ratio: ${(ctypes_time / koffi_time).toFixed(2)}x ${
+    koffi_time < ctypes_time ? "slower" : "faster"
+  }\n`
+);
 
 // ============================================================================
 // Benchmark 4: Windows API (GetTickCount)
@@ -159,9 +202,23 @@ for (let i = 0; i < apiIterations; i++) {
 koffi_time = performance.now() - start;
 
 console.log(`  Iterations: ${apiIterations.toLocaleString()}`);
-console.log(`  node-ctypes: ${ctypes_time.toFixed(2)}ms (${(apiIterations / ctypes_time * 1000).toFixed(0)} calls/sec)`);
-console.log(`  koffi:       ${koffi_time.toFixed(2)}ms (${(apiIterations / koffi_time * 1000).toFixed(0)} calls/sec)`);
-console.log(`  Ratio: ${(ctypes_time / koffi_time).toFixed(2)}x ${koffi_time < ctypes_time ? 'slower' : 'faster'}\n`);
+console.log(
+  `  node-ctypes: ${ctypes_time.toFixed(2)}ms (${(
+    (apiIterations / ctypes_time) *
+    1000
+  ).toFixed(0)} calls/sec)`
+);
+console.log(
+  `  koffi:       ${koffi_time.toFixed(2)}ms (${(
+    (apiIterations / koffi_time) *
+    1000
+  ).toFixed(0)} calls/sec)`
+);
+console.log(
+  `  Ratio: ${(ctypes_time / koffi_time).toFixed(2)}x ${
+    koffi_time < ctypes_time ? "slower" : "faster"
+  }\n`
+);
 
 // Cleanup
 ctypes_msvcrt.close();
@@ -173,9 +230,9 @@ ctypes_kernel32.close();
 
 console.log("Benchmark 5: Raw FFI call vs JS wrapper overhead");
 
-const rawLib = new ctypes.Library("msvcrt.dll");
+const rawLib = new Library("msvcrt.dll");
 const rawAbs = rawLib.func("abs", "int32", ["int32"]);
-const wrappedAbs = new ctypes.CDLL("msvcrt.dll").func("abs", "int32", ["int32"]);
+const wrappedAbs = new CDLL("msvcrt.dll").func("abs", "int32", ["int32"]);
 
 const rawIterations = 1000000;
 
@@ -200,8 +257,20 @@ for (let i = 0; i < rawIterations; i++) {
 let wrapped_time = performance.now() - start;
 
 console.log(`  Iterations: ${rawIterations.toLocaleString()}`);
-console.log(`  raw .call():     ${raw_time.toFixed(2)}ms (${(rawIterations / raw_time * 1000).toFixed(0)} calls/sec)`);
-console.log(`  wrapped():       ${wrapped_time.toFixed(2)}ms (${(rawIterations / wrapped_time * 1000).toFixed(0)} calls/sec)`);
-console.log(`  Wrapper overhead: ${((wrapped_time / raw_time - 1) * 100).toFixed(1)}%\n`);
+console.log(
+  `  raw .call():     ${raw_time.toFixed(2)}ms (${(
+    (rawIterations / raw_time) *
+    1000
+  ).toFixed(0)} calls/sec)`
+);
+console.log(
+  `  wrapped():       ${wrapped_time.toFixed(2)}ms (${(
+    (rawIterations / wrapped_time) *
+    1000
+  ).toFixed(0)} calls/sec)`
+);
+console.log(
+  `  Wrapper overhead: ${((wrapped_time / raw_time - 1) * 100).toFixed(1)}%\n`
+);
 
 rawLib.close();

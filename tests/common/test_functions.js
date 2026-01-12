@@ -48,8 +48,8 @@ describe("Functions and Callbacks", function () {
         "size_t",
       ]);
 
-      const src = ctypes.alloc(10);
-      const dst = ctypes.alloc(10);
+      const src = ctypes.create_string_buffer(10);
+      const dst = ctypes.create_string_buffer(10);
 
       // Fill source with pattern
       for (let i = 0; i < 10; i++) {
@@ -163,7 +163,7 @@ describe("Functions and Callbacks", function () {
       );
 
       // Create array to sort
-      const arr = ctypes.alloc(5 * 4);
+      const arr = ctypes.create_string_buffer(5 * 4);
       const values = [5, 2, 8, 1, 9];
       values.forEach((v, i) => ctypes.writeValue(arr, "int32", v, i * 4));
 
@@ -201,7 +201,7 @@ describe("Functions and Callbacks", function () {
 
       const sprintf = libc.func("sprintf", "int32", ["pointer", "string"]);
 
-      const buf = ctypes.alloc(100);
+      const buf = ctypes.create_string_buffer(100);
       const written = sprintf(buf, "Hello %s!");
 
       // Note: This will fail without proper variadic support
