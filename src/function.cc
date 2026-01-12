@@ -84,6 +84,14 @@ namespace ctypes
         }
         fn_ptr_ = info[0].As<Napi::External<void>>().Data();
 
+        // CRITICAL: Valida che il puntatore non sia NULL
+        if (fn_ptr_ == nullptr)
+        {
+            Napi::Error::New(env, "Function pointer is NULL - cannot call invalid function")
+                .ThrowAsJavaScriptException();
+            return;
+        }
+
         // 2. Name
         if (!info[1].IsString())
         {
@@ -660,6 +668,13 @@ namespace ctypes
         // =====================================================================
         if (argc == 1 && arg_types_[0] == CType::INT32)
         {
+            // Safety check: verifica che il puntatore sia ancora valido
+            if (fn_ptr_ == nullptr)
+            {
+                Napi::Error::New(env, "Function pointer is NULL").ThrowAsJavaScriptException();
+                return env.Undefined();
+            }
+
             int32_t arg;
             napi_get_value_int32(env, info[0], &arg);
             void *arg_ptr = &arg;
@@ -672,6 +687,13 @@ namespace ctypes
         // =====================================================================
         if (argc == 1 && arg_types_[0] == CType::DOUBLE)
         {
+            // Safety check
+            if (fn_ptr_ == nullptr)
+            {
+                Napi::Error::New(env, "Function pointer is NULL").ThrowAsJavaScriptException();
+                return env.Undefined();
+            }
+
             double arg;
             napi_get_value_double(env, info[0], &arg);
             void *arg_ptr = &arg;
@@ -1092,6 +1114,14 @@ namespace ctypes
         }
 
         // Effettua la chiamata con il CIF appropriato (cached o appena creato)
+        // CRITICAL: Ultimo check di sicurezza prima della chiamata
+        if (fn_ptr_ == nullptr)
+        {
+            Napi::Error::New(env, "Function pointer is NULL - cannot execute call")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
         ffi_call(active_cif, FFI_FN(fn_ptr_), &return_value_, arg_values);
 
         // Converti il return value e applica errcheck se presente

@@ -47,7 +47,72 @@ namespace ctypes
         }
         catch (const Napi::Error &e)
         {
-            fprintf(stderr, "Callback error: %s\n", e.Message().c_str());
+            std::string error_msg = e.Message();
+
+            // Salva l'ultimo errore
+            {
+                std::lock_guard<std::mutex> lock(data->error_mutex);
+                data->last_error = error_msg;
+            }
+
+            // Chiama error handler se presente
+            if (!data->error_handler_ref.IsEmpty())
+            {
+                try
+                {
+                    Napi::Function error_handler = data->error_handler_ref.Value();
+                    error_handler.Call({Napi::String::New(env, error_msg)});
+                }
+                catch (...)
+                {
+                    // Ignora errori nell'error handler stesso
+                }
+            }
+            else
+            {
+                // Fallback: emetti warning (visibile in Node.js)
+                napi_value process, emit_warning;
+                if (napi_get_global(env, &process) == napi_ok &&
+                    napi_get_named_property(env, process, "emitWarning", &emit_warning) == napi_ok)
+                {
+                    napi_value warning_msg;
+                    napi_create_string_utf8(env, error_msg.c_str(), NAPI_AUTO_LENGTH, &warning_msg);
+                    napi_value warning_type;
+                    napi_create_string_utf8(env, "CallbackError", NAPI_AUTO_LENGTH, &warning_type);
+                    napi_value args[2] = {warning_msg, warning_type};
+                    napi_value result_val;
+                    napi_call_function(env, process, emit_warning, 2, args, &result_val);
+                }
+            }
+
+            // Ritorna valore zero per evitare comportamenti indefiniti in C
+            if (data->return_type != CType::VOID)
+            {
+                memset(ret, 0, CTypeSize(data->return_type));
+            }
+            return;
+        }
+        catch (...)
+        {
+            std::string error_msg = "Unknown exception in callback";
+
+            {
+                std::lock_guard<std::mutex> lock(data->error_mutex);
+                data->last_error = error_msg;
+            }
+
+            if (!data->error_handler_ref.IsEmpty())
+            {
+                try
+                {
+                    Napi::Function error_handler = data->error_handler_ref.Value();
+                    error_handler.Call({Napi::String::New(env, error_msg)});
+                }
+                catch (...)
+                {
+                }
+            }
+
             if (data->return_type != CType::VOID)
             {
                 memset(ret, 0, CTypeSize(data->return_type));
@@ -78,6 +143,8 @@ namespace ctypes
         Napi::Function func = DefineClass(env, "Callback", {
                                                                InstanceMethod("getPointer", &Callback::GetPointer),
                                                                InstanceMethod("release", &Callback::Release),
+                                                               InstanceMethod("setErrorHandler", &Callback::SetErrorHandler),
+                                                               InstanceMethod("getLastError", &Callback::GetLastError),
                                                                InstanceAccessor("pointer", &Callback::GetPointer, nullptr),
                                                            });
 
@@ -216,17 +283,27 @@ namespace ctypes
             Napi::Error::New(env, "Failed to prepare FFI closure").ThrowAsJavaScriptException();
             return;
         }
+
+        // Il cleanup del FunctionReference verrà fatto in Release() o nel distruttore
+        // N-API gestisce automaticamente il GC in modo thread-safe
     }
 
     Callback::~Callback()
     {
+        // Cleanup - il flag atomico previene double-free
         if (data_ && !data_->released.exchange(true))
         {
             if (data_->closure)
             {
                 ffi_closure_free(data_->closure);
+                data_->closure = nullptr;
             }
-            data_->js_function_ref.Reset();
+            // Reset() è sicuro qui perché N-API lo gestisce internamente
+            // Se chiamato dal GC, N-API lo fa in modo thread-safe
+            if (!data_->js_function_ref.IsEmpty())
+            {
+                data_->js_function_ref.Reset();
+            }
         }
     }
 
@@ -253,8 +330,50 @@ namespace ctypes
                 data_->closure = nullptr;
             }
             data_->js_function_ref.Reset();
+            if (!data_->error_handler_ref.IsEmpty())
+            {
+                data_->error_handler_ref.Reset();
+            }
         }
         return info.Env().Undefined();
+    }
+
+    Napi::Value Callback::SetErrorHandler(const Napi::CallbackInfo &info)
+    {
+        Napi::Env env = info.Env();
+
+        if (!data_ || data_->released.load())
+        {
+            Napi::Error::New(env, "Callback has been released").ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        if (info.Length() < 1 || !info[0].IsFunction())
+        {
+            Napi::TypeError::New(env, "Error handler must be a function").ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        data_->error_handler_ref = Napi::Persistent(info[0].As<Napi::Function>());
+        return env.Undefined();
+    }
+
+    Napi::Value Callback::GetLastError(const Napi::CallbackInfo &info)
+    {
+        Napi::Env env = info.Env();
+
+        if (!data_)
+        {
+            return env.Null();
+        }
+
+        std::lock_guard<std::mutex> lock(data_->error_mutex);
+        if (data_->last_error.empty())
+        {
+            return env.Null();
+        }
+
+        return Napi::String::New(env, data_->last_error);
     }
 
     // ========================================================================
@@ -300,7 +419,68 @@ namespace ctypes
             }
             catch (const Napi::Error &e)
             {
-                fprintf(stderr, "ThreadSafeCallback error: %s\n", e.Message().c_str());
+                std::string error_msg = e.Message();
+
+                {
+                    std::lock_guard<std::mutex> lock(data->result_mutex);
+                    data->last_error = error_msg;
+                }
+
+                if (!data->error_handler_ref.IsEmpty())
+                {
+                    try
+                    {
+                        Napi::Function error_handler = data->error_handler_ref.Value();
+                        error_handler.Call({Napi::String::New(env, error_msg)});
+                    }
+                    catch (...)
+                    {
+                    }
+                }
+                else
+                {
+                    // Emetti warning
+                    napi_value process, emit_warning;
+                    if (napi_get_global(env, &process) == napi_ok &&
+                        napi_get_named_property(env, process, "emitWarning", &emit_warning) == napi_ok)
+                    {
+                        napi_value warning_msg;
+                        napi_create_string_utf8(env, error_msg.c_str(), NAPI_AUTO_LENGTH, &warning_msg);
+                        napi_value warning_type;
+                        napi_create_string_utf8(env, "ThreadSafeCallbackError", NAPI_AUTO_LENGTH, &warning_type);
+                        napi_value args[2] = {warning_msg, warning_type};
+                        napi_value result_val;
+                        napi_call_function(env, process, emit_warning, 2, args, &result_val);
+                    }
+                }
+
+                if (data->return_type != CType::VOID)
+                {
+                    memset(ret, 0, CTypeSize(data->return_type));
+                }
+                return;
+            }
+            catch (...)
+            {
+                std::string error_msg = "Unknown exception in thread-safe callback";
+
+                {
+                    std::lock_guard<std::mutex> lock(data->result_mutex);
+                    data->last_error = error_msg;
+                }
+
+                if (!data->error_handler_ref.IsEmpty())
+                {
+                    try
+                    {
+                        Napi::Function error_handler = data->error_handler_ref.Value();
+                        error_handler.Call({Napi::String::New(env, error_msg)});
+                    }
+                    catch (...)
+                    {
+                    }
+                }
+
                 if (data->return_type != CType::VOID)
                 {
                     memset(ret, 0, CTypeSize(data->return_type));
@@ -356,7 +536,61 @@ namespace ctypes
                 }
                 catch (const Napi::Error &e)
                 {
-                    fprintf(stderr, "ThreadSafeCallback error (external thread): %s\n", e.Message().c_str());
+                    std::string error_msg = e.Message();
+
+                    {
+                        std::lock_guard<std::mutex> lock(data->result_mutex);
+                        data->last_error = error_msg;
+                    }
+
+                    if (!data->error_handler_ref.IsEmpty())
+                    {
+                        try
+                        {
+                            Napi::Function error_handler = data->error_handler_ref.Value();
+                            error_handler.Call({Napi::String::New(env, error_msg)});
+                        }
+                        catch (...)
+                        {
+                        }
+                    }
+                    else
+                    {
+                        // Emetti warning
+                        napi_value process, emit_warning;
+                        if (napi_get_global(env, &process) == napi_ok &&
+                            napi_get_named_property(env, process, "emitWarning", &emit_warning) == napi_ok)
+                        {
+                            napi_value warning_msg;
+                            napi_create_string_utf8(env, error_msg.c_str(), NAPI_AUTO_LENGTH, &warning_msg);
+                            napi_value warning_type;
+                            napi_create_string_utf8(env, "ThreadSafeCallbackError", NAPI_AUTO_LENGTH, &warning_type);
+                            napi_value args[2] = {warning_msg, warning_type};
+                            napi_value result_val;
+                            napi_call_function(env, process, emit_warning, 2, args, &result_val);
+                        }
+                    }
+                }
+                catch (...)
+                {
+                    std::string error_msg = "Unknown exception in thread-safe callback (external thread)";
+
+                    {
+                        std::lock_guard<std::mutex> lock(data->result_mutex);
+                        data->last_error = error_msg;
+                    }
+
+                    if (!data->error_handler_ref.IsEmpty())
+                    {
+                        try
+                        {
+                            Napi::Function error_handler = data->error_handler_ref.Value();
+                            error_handler.Call({Napi::String::New(env, error_msg)});
+                        }
+                        catch (...)
+                        {
+                        }
+                    }
                 }
 
                 // Salva risultato
@@ -371,10 +605,25 @@ namespace ctypes
                 data->result_cv.notify_one();
             };
 
+            // Verifica nuovamente se rilasciato (race condition check)
+            if (data->released.load(std::memory_order_acquire))
+            {
+                if (data->return_type != CType::VOID)
+                {
+                    memset(ret, 0, CTypeSize(data->return_type));
+                }
+                return;
+            }
+
             napi_status status = data->tsfn.BlockingCall(invoke);
             if (status != napi_ok)
             {
-                fprintf(stderr, "Failed to queue ThreadSafeCallback\n");
+                // Salva errore senza logging - l'utente può controllare last_error
+                {
+                    std::lock_guard<std::mutex> lock(data->result_mutex);
+                    data->last_error = "Failed to queue callback (napi_status: " + std::to_string(status) + ")";
+                }
+
                 if (data->return_type != CType::VOID)
                 {
                     memset(ret, 0, CTypeSize(data->return_type));
@@ -402,6 +651,8 @@ namespace ctypes
         Napi::Function func = DefineClass(env, "ThreadSafeCallback", {
                                                                          InstanceMethod("getPointer", &ThreadSafeCallback::GetPointer),
                                                                          InstanceMethod("release", &ThreadSafeCallback::Release),
+                                                                         InstanceMethod("setErrorHandler", &ThreadSafeCallback::SetErrorHandler),
+                                                                         InstanceMethod("getLastError", &ThreadSafeCallback::GetLastError),
                                                                          InstanceAccessor("pointer", &ThreadSafeCallback::GetPointer, nullptr),
                                                                      });
 
@@ -554,19 +805,51 @@ namespace ctypes
             Napi::Error::New(env, "Failed to prepare FFI closure").ThrowAsJavaScriptException();
             return;
         }
+
+        // Il cleanup verrà fatto in Release() o nel distruttore
     }
 
     ThreadSafeCallback::~ThreadSafeCallback()
     {
-        if (data_ && !data_->released.exchange(true))
+        // Il cleanup verrà fatto in Release()
+    }
+
+    Napi::Value ThreadSafeCallback::SetErrorHandler(const Napi::CallbackInfo &info)
+    {
+        Napi::Env env = info.Env();
+
+        if (!data_ || data_->released.load())
         {
-            if (data_->closure)
-            {
-                ffi_closure_free(data_->closure);
-            }
-            data_->js_function_ref.Reset();
-            data_->tsfn.Release();
+            Napi::Error::New(env, "ThreadSafeCallback has been released").ThrowAsJavaScriptException();
+            return env.Undefined();
         }
+
+        if (info.Length() < 1 || !info[0].IsFunction())
+        {
+            Napi::TypeError::New(env, "Error handler must be a function").ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        data_->error_handler_ref = Napi::Persistent(info[0].As<Napi::Function>());
+        return env.Undefined();
+    }
+
+    Napi::Value ThreadSafeCallback::GetLastError(const Napi::CallbackInfo &info)
+    {
+        Napi::Env env = info.Env();
+
+        if (!data_)
+        {
+            return env.Null();
+        }
+
+        std::lock_guard<std::mutex> lock(data_->result_mutex);
+        if (data_->last_error.empty())
+        {
+            return env.Null();
+        }
+
+        return Napi::String::New(env, data_->last_error);
     }
 
     Napi::Value ThreadSafeCallback::GetPointer(const Napi::CallbackInfo &info)
@@ -592,6 +875,10 @@ namespace ctypes
                 data_->closure = nullptr;
             }
             data_->js_function_ref.Reset();
+            if (!data_->error_handler_ref.IsEmpty())
+            {
+                data_->error_handler_ref.Reset();
+            }
             data_->tsfn.Release();
         }
         return info.Env().Undefined();
