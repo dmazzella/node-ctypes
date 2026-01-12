@@ -3,7 +3,19 @@
 
 import * as ctypes from "../../lib/index.js";
 import pkg from "koffi";
+import os from "os";
 const { load } = pkg;
+
+const isWindows = os.platform() === "win32";
+const platform = os.platform();
+
+// Platform-specific library names
+const LIBC = isWindows
+  ? "msvcrt.dll"
+  : platform === "darwin"
+  ? "libc.dylib"
+  : "libc.so.6";
+const SYSTEM_LIB = isWindows ? "kernel32.dll" : null;
 
 console.log(
   "╔════════════════════════════════════════════════════════════════╗"
@@ -50,11 +62,11 @@ function benchmark(name, ctypesTime, koffiTime, iterations) {
 // Setup
 // ============================================================================
 
-const ctypes_msvcrt = new ctypes.CDLL("msvcrt.dll");
-const ctypes_kernel32 = new ctypes.CDLL("kernel32.dll");
+const ctypes_libc = new ctypes.CDLL(LIBC);
+const ctypes_system = SYSTEM_LIB ? new ctypes.CDLL(SYSTEM_LIB) : null;
 
-const koffi_msvcrt = load("msvcrt.dll");
-const koffi_kernel32 = load("kernel32.dll");
+const koffi_libc = load(LIBC);
+const koffi_system = SYSTEM_LIB ? load(SYSTEM_LIB) : null;
 
 // ============================================================================
 // Benchmark 1: Simple function calls (abs)
@@ -71,8 +83,8 @@ console.log(
 );
 
 {
-  const ctypes_abs = ctypes_msvcrt.func("abs", "int32", ["int32"]);
-  const koffi_abs = koffi_msvcrt.func("int abs(int)");
+  const ctypes_abs = ctypes_libc.func("abs", "int32", ["int32"]);
+  const koffi_abs = koffi_libc.func("int abs(int)");
 
   const iterations = 1_000_000;
 
@@ -112,8 +124,8 @@ console.log(
 );
 
 {
-  const ctypes_strlen = ctypes_msvcrt.func("strlen", "size_t", ["string"]);
-  const koffi_strlen = koffi_msvcrt.func("size_t strlen(const char*)");
+  const ctypes_strlen = ctypes_libc.func("strlen", "size_t", ["string"]);
+  const koffi_strlen = koffi_libc.func("size_t strlen(const char*)");
 
   const testString = "Hello, World! This is a test string for benchmarking.";
   const iterations = 500_000;
@@ -154,8 +166,8 @@ console.log(
 );
 
 {
-  const ctypes_sqrt = ctypes_msvcrt.func("sqrt", "double", ["double"]);
-  const koffi_sqrt = koffi_msvcrt.func("double sqrt(double)");
+  const ctypes_sqrt = ctypes_libc.func("sqrt", "double", ["double"]);
+  const koffi_sqrt = koffi_libc.func("double sqrt(double)");
 
   const iterations = 500_000;
 
@@ -181,28 +193,28 @@ console.log(
 }
 
 // ============================================================================
-// Benchmark 4: No-argument function (GetTickCount)
+// Benchmark 4: No-argument function (GetTickCount/time)
 // ============================================================================
 
 console.log(
   "┌─────────────────────────────────────────────────────────────────┐"
 );
-console.log(
-  "│ Benchmark 4: No arguments - GetTickCount()                     │"
-);
+if (isWindows) {
+  console.log(
+    "│ Benchmark 4: No arguments - GetTickCount()                     │"
+  );
+} else {
+  console.log(
+    "│ Benchmark 4: No arguments - time(NULL)                         │"
+  );
+}
 console.log(
   "└─────────────────────────────────────────────────────────────────┘"
 );
 
-{
-  const ctypes_GetTickCount = ctypes_kernel32.func(
-    "GetTickCount",
-    "uint32",
-    []
-  );
-  const koffi_GetTickCount = koffi_kernel32.func(
-    "unsigned long GetTickCount()"
-  );
+if (isWindows) {
+  const ctypes_GetTickCount = ctypes_system.func("GetTickCount", "uint32", []);
+  const koffi_GetTickCount = koffi_system.func("unsigned long GetTickCount()");
 
   const iterations = 1_000_000;
 
@@ -225,6 +237,31 @@ console.log(
   const koffi_time = performance.now() - start;
 
   benchmark("GetTickCount()", ctypes_time, koffi_time, iterations);
+} else {
+  const ctypes_time = ctypes_libc.func("time", "int64", ["pointer"]);
+  const koffi_time = koffi_libc.func("long time(void*)");
+
+  const iterations = 1_000_000;
+
+  // Warmup
+  for (let i = 0; i < 1000; i++) {
+    ctypes_time(null);
+    koffi_time(null);
+  }
+
+  let start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    ctypes_time(null);
+  }
+  const ctypes_elapsed = performance.now() - start;
+
+  start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    koffi_time(null);
+  }
+  const koffi_elapsed = performance.now() - start;
+
+  benchmark("time(NULL)", ctypes_elapsed, koffi_elapsed, iterations);
 }
 
 // ============================================================================
@@ -242,12 +279,12 @@ console.log(
 );
 
 {
-  const ctypes_memset = ctypes_msvcrt.func("memset", "pointer", [
+  const ctypes_memset = ctypes_libc.func("memset", "pointer", [
     "pointer",
     "int32",
     "size_t",
   ]);
-  const koffi_memset = koffi_msvcrt.func("void* memset(void*, int, size_t)");
+  const koffi_memset = koffi_libc.func("void* memset(void*, int, size_t)");
 
   const ctypes_buf = ctypes.create_string_buffer(1024);
   const koffi_buf = Buffer.alloc(1024);
@@ -403,10 +440,10 @@ console.log(
 );
 
 {
-  const rawLib = new ctypes.Library("msvcrt.dll");
+  const rawLib = new ctypes.Library(LIBC);
   const rawAbs = rawLib.func("abs", "int32", ["int32"]);
 
-  const wrappedLib = new ctypes.CDLL("msvcrt.dll");
+  const wrappedLib = new ctypes.CDLL(LIBC);
   const wrappedAbs = wrappedLib.func("abs", "int32", ["int32"]);
 
   const iterations = 1_000_000;
@@ -498,5 +535,5 @@ console.log(
 );
 
 // Cleanup
-ctypes_msvcrt.close();
-ctypes_kernel32.close();
+ctypes_libc.close();
+if (ctypes_system) ctypes_system.close();
