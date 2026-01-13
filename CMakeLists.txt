@@ -52,7 +52,7 @@ message(STATUS "Target architecture: ${FFI_ARCH}")
 set(FFI_FOUND FALSE)
 
 if(WIN32)
-    set(LIBFFI_DYNAMIC_DIR ${CMAKE_SOURCE_DIR}/deps/libffi_${FFI_ARCH}-windows)
+    set(LIBFFI_DYNAMIC_DIR ${CMAKE_SOURCE_DIR}/deps/libffi_${FFI_ARCH}-windows-static)
     
     if(EXISTS ${LIBFFI_DYNAMIC_DIR})
         message(STATUS "Using local dynamic libffi from: ${LIBFFI_DYNAMIC_DIR}")
@@ -61,7 +61,9 @@ if(WIN32)
         set(FFI_INCLUDE_DIRS ${LIBFFI_DYNAMIC_DIR}/include)
         set(FFI_LIBRARIES ${LIBFFI_DYNAMIC_DIR}/lib/ffi.lib)
         
-        set(FFI_DLL_FILE ${LIBFFI_DYNAMIC_DIR}/bin/ffi-8.dll)
+        if(EXISTS ${LIBFFI_DYNAMIC_DIR}/bin/ffi-8.dll)
+            set(FFI_DLL_FILE ${LIBFFI_DYNAMIC_DIR}/bin/ffi-8.dll)
+        endif()
         
         message(STATUS "libffi library: ${FFI_LIBRARIES}")
         message(STATUS "libffi includes: ${FFI_INCLUDE_DIRS}")

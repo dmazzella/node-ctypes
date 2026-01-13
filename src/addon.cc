@@ -18,21 +18,95 @@ namespace ctypes
         version.Set("major", Napi::Number::New(env, CTYPES_MAJOR_VERSION));
         version.Set("minor", Napi::Number::New(env, CTYPES_MINOR_VERSION));
         version.Set("patch", Napi::Number::New(env, CTYPES_PATCH_VERSION));
-        version.Set("toString", Napi::Function::New(env, [](const Napi::CallbackInfo &info) -> Napi::Value
-                                                    { return Napi::String::New(info.Env(), fmt::format("{}.{}.{}", CTYPES_MAJOR_VERSION, CTYPES_MINOR_VERSION, CTYPES_PATCH_VERSION)); }));
+        version.Set("toString",
+                    Napi::Function::New(
+                        env,
+                        [](const Napi::CallbackInfo &info) -> Napi::Value
+                        {
+                            return Napi::String::New(info.Env(), fmt::format("{}.{}.{}", CTYPES_MAJOR_VERSION, CTYPES_MINOR_VERSION, CTYPES_PATCH_VERSION));
+                        }));
         return version;
     }
 
-    // Helper template per inizializzare un wrapper (simile a node-cryptoki)
-    template <typename T>
-    std::unique_ptr<Napi::FunctionReference> SafeInitializeWrapper(Napi::Env env, const char *name)
+    template <typename Func>
+    auto SafeInvoke(Napi::Env env, Func &&func) -> decltype(func())
     {
-        spdlog::trace("{}: {}", __FUNCTION__, name);
+        try
+        {
+            return func();
+        }
+        catch (const std::bad_alloc &e)
+        {
+            spdlog::error("Memory allocation failed: {}", e.what());
+            Napi::Error::New(env, fmt::format("Memory allocation failed: {}", e.what())).ThrowAsJavaScriptException();
+            if constexpr (std::is_void_v<decltype(func())>)
+            {
+                return;
+            }
+            else
+            {
+                return {};
+            }
+        }
+        catch (const std::runtime_error &e)
+        {
+            spdlog::error("Runtime error: {}", e.what());
+            Napi::Error::New(env, fmt::format("Runtime error: {}", e.what())).ThrowAsJavaScriptException();
+            if constexpr (std::is_void_v<decltype(func())>)
+            {
+                return;
+            }
+            else
+            {
+                return {};
+            }
+        }
+        catch (const std::exception &e)
+        {
+            spdlog::error("Exception: {}", e.what());
+            Napi::Error::New(env, fmt::format("Exception: {}", e.what())).ThrowAsJavaScriptException();
+            if constexpr (std::is_void_v<decltype(func())>)
+            {
+                return;
+            }
+            else
+            {
+                return {};
+            }
+        }
+        catch (...)
+        {
+            spdlog::error("Unknown exception occurred");
+            Napi::Error::New(env, "Unknown exception occurred").ThrowAsJavaScriptException();
+            if constexpr (std::is_void_v<decltype(func())>)
+            {
+                return;
+            }
+            else
+            {
+                return {};
+            }
+        }
+    }
 
-        Napi::Function func = T::GetClass(env);
-        auto ref = std::make_unique<Napi::FunctionReference>();
-        *ref = Napi::Persistent(func);
-        return ref;
+    template <typename WrapperType>
+    std::unique_ptr<Napi::FunctionReference> SafeInitializeWrapper(Napi::Env env, const std::string &wrapperName)
+    {
+        spdlog::trace("{}: {}", __FUNCTION__, wrapperName);
+
+        return SafeInvoke(
+            env,
+            [&]() -> std::unique_ptr<Napi::FunctionReference>
+            {
+                Napi::Function func = WrapperType::GetClass(env);
+                auto result = std::make_unique<Napi::FunctionReference>();
+                *result = Napi::Persistent(func);
+                if (!result)
+                {
+                    throw std::runtime_error(fmt::format("Failed to initialize {} wrapper constructor", wrapperName));
+                }
+                return result;
+            });
     }
 
     CTypesAddon::CTypesAddon(Napi::Env env, Napi::Object exports)
@@ -82,8 +156,6 @@ namespace ctypes
                 InstanceValue("WCHAR_SIZE", Napi::Number::New(env, sizeof(wchar_t)), napi_enumerable),
                 InstanceValue("NULL", env.Null(), napi_enumerable),
             });
-
-        spdlog::trace("{} - completed", __FUNCTION__);
     }
 
     CTypesAddon::~CTypesAddon()

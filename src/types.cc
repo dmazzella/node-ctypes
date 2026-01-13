@@ -716,9 +716,9 @@ namespace ctypes
             env,
             "CType",
             {
-                InstanceMethod("size", &TypeInfo::GetSize),
-                InstanceMethod("name", &TypeInfo::GetName),
-                InstanceAccessor("sizeof", &TypeInfo::GetSize, nullptr),
+                InstanceMethod("size", &TypeInfo::GetSize, napi_default_jsproperty),
+                InstanceMethod("name", &TypeInfo::GetName, napi_default_jsproperty),
+                InstanceAccessor("sizeof", &TypeInfo::GetSize, nullptr, napi_default_jsproperty),
             });
         return func;
     }
