@@ -35,14 +35,17 @@ describe("Windows API", function () {
 
   describe("GetLastError / SetLastError", function () {
     it("should get and set last error", function () {
-      SetLastError(0);
-      strictEqual(GetLastError(), 0);
+      SetLastError(126);
+      strictEqual(GetLastError(), 126);
 
       SetLastError(123);
       strictEqual(GetLastError(), 123);
 
       SetLastError(0xdeadbeef);
       strictEqual(GetLastError(), 0xdeadbeef);
+
+      SetLastError(0);
+      strictEqual(GetLastError(), 0);
     });
   });
 
