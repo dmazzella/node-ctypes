@@ -6,6 +6,7 @@
 /.env*
 /node_modules
 /tests/python
+/tests/.pytest_cache
 /tests/node_modules
 /tests/common/__pycache__
 /tests/windows/__pycache__
