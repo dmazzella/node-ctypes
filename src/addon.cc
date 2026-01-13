@@ -12,6 +12,8 @@ namespace ctypes
     // Helper per creare l'oggetto Version (dichiarato prima dell'uso)
     Napi::Object CreateVersionObject(Napi::Env env)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Object version = Napi::Object::New(env);
         version.Set("major", Napi::Number::New(env, CTYPES_MAJOR_VERSION));
         version.Set("minor", Napi::Number::New(env, CTYPES_MINOR_VERSION));
@@ -25,7 +27,8 @@ namespace ctypes
     template <typename T>
     std::unique_ptr<Napi::FunctionReference> SafeInitializeWrapper(Napi::Env env, const char *name)
     {
-        spdlog::trace("SafeInitializeWrapper: {}", name);
+        spdlog::trace("{}: {}", __FUNCTION__, name);
+
         Napi::Function func = T::GetClass(env);
         auto ref = std::make_unique<Napi::FunctionReference>();
         *ref = Napi::Persistent(func);
