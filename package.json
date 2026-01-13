@@ -14,10 +14,7 @@
   "types": "lib/index.d.ts",
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./lib/index.d.ts",
-      "import": "./lib/index.js"
-    }
+    ".": "./lib/index.js"
   },
   "scripts": {
     "install": "cmake-js compile --target ctypes",

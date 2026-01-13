@@ -1,11 +1,5 @@
 #include "types.h"
 
-// ssize_t non esiste su Windows MSVC
-#ifdef _MSC_VER
-#include <BaseTsd.h>
-typedef SSIZE_T ssize_t;
-#endif
-
 namespace ctypes
 {
 

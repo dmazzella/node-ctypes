@@ -1,5 +1,4 @@
-#ifndef CTYPES_LIBRARY_H
-#define CTYPES_LIBRARY_H
+#pragma once
 
 #include "shared.h"
 
@@ -43,5 +42,3 @@ namespace ctypes
     bool CloseSharedLibrary(void *handle);
 
 } // namespace ctypes
-
-#endif // CTYPES_LIBRARY_H

@@ -1,5 +1,4 @@
-#ifndef CTYPES_ARRAY_H
-#define CTYPES_ARRAY_H
+#pragma once
 
 #include "shared.h"
 #include "types.h"
@@ -65,5 +64,3 @@ namespace ctypes
     };
 
 } // namespace ctypes
-
-#endif // CTYPES_ARRAY_H

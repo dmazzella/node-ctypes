@@ -1,5 +1,4 @@
-#ifndef CTYPES_ADDON_H
-#define CTYPES_ADDON_H
+#pragma once
 
 #include "shared.h"
 
@@ -34,5 +33,3 @@ namespace ctypes
     };
 
 } // namespace ctypes
-
-#endif // CTYPES_ADDON_H

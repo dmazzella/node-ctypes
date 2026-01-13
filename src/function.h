@@ -1,5 +1,4 @@
-#ifndef CTYPES_FUNCTION_H
-#define CTYPES_FUNCTION_H
+#pragma once
 
 #include "shared.h"
 #include "types.h"
@@ -139,5 +138,3 @@ namespace ctypes
     };
 
 } // namespace ctypes
-
-#endif // CTYPES_FUNCTION_H

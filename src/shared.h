@@ -1,8 +1,6 @@
-#ifndef SHARED_H
-#define SHARED_H
+#pragma once
 
 #include <napi.h>
-#include <ffi.h>
 
 #include <atomic>
 #include <algorithm>
@@ -38,16 +36,24 @@
 #include <dlfcn.h>
 #endif
 
+// ssize_t non esiste su Windows MSVC
+#ifdef _MSC_VER
+#include <BaseTsd.h>
+typedef SSIZE_T ssize_t;
+#endif
+
 #pragma warning(push)
 #pragma warning(disable : 4996)
-#include "spdlog/tweakme.h"
-#include "spdlog/spdlog.h"
-#include "spdlog/sinks/null_sink.h"
-#include "spdlog/sinks/rotating_file_sink.h"
-#include "spdlog/fmt/bin_to_hex.h"
+#include <spdlog/tweakme.h>
+#include <spdlog/spdlog.h>
+#include <spdlog/sinks/null_sink.h>
+#include <spdlog/sinks/rotating_file_sink.h>
+#include <spdlog/fmt/bin_to_hex.h>
 #pragma warning(pop)
 
-#include "dotenv/dotenv.h"
+#include <dotenv/dotenv.h>
+
+#include <ffi.h>
 
 namespace ctypes
 {
@@ -83,5 +89,3 @@ namespace ctypes
                !obj.Has("addField") && !obj.Has("getLength");
     }
 }
-
-#endif // SHARED_H

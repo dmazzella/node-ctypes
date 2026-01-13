@@ -1,5 +1,4 @@
-#ifndef CTYPES_TYPES_H
-#define CTYPES_TYPES_H
+#pragma once
 
 #include "shared.h"
 
@@ -75,5 +74,3 @@ namespace ctypes
     Napi::Object CreatePredefinedTypes(Napi::Env env, Napi::FunctionReference &typeInfoConstructor);
 
 } // namespace ctypes
-
-#endif // CTYPES_TYPES_H

@@ -1,5 +1,4 @@
-#ifndef CTYPES_CALLBACK_H
-#define CTYPES_CALLBACK_H
+#pragma once
 
 #include "shared.h"
 #include "types.h"
@@ -89,5 +88,3 @@ namespace ctypes
     };
 
 } // namespace ctypes
-
-#endif // CTYPES_CALLBACK_H

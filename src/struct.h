@@ -1,5 +1,4 @@
-#ifndef CTYPES_STRUCT_H
-#define CTYPES_STRUCT_H
+#pragma once
 
 #include "shared.h"
 #include "types.h"
@@ -87,5 +86,3 @@ namespace ctypes
     };
 
 } // namespace ctypes
-
-#endif // CTYPES_STRUCT_H
