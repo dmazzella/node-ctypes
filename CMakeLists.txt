@@ -9,7 +9,6 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 add_definitions(-DNAPI_VERSION=9)
 add_definitions(-DNAPI_CPP_EXCEPTIONS)
-add_definitions(-DNODE_GYP_MODULE_NAME=ctypes)
 
 include(FetchContent)
 
@@ -52,43 +51,22 @@ message(STATUS "Target architecture: ${FFI_ARCH}")
 set(FFI_FOUND FALSE)
 
 if(WIN32)
-    set(LIBFFI_DYNAMIC_DIR ${CMAKE_SOURCE_DIR}/deps/libffi_${FFI_ARCH}-windows-static)
+    set(LIBFFI_BIN_DIR ${CMAKE_SOURCE_DIR}/deps/libffi_${FFI_ARCH}-windows-static)
     
-    if(EXISTS ${LIBFFI_DYNAMIC_DIR})
-        message(STATUS "Using local dynamic libffi from: ${LIBFFI_DYNAMIC_DIR}")
+    if(EXISTS ${LIBFFI_BIN_DIR})
+        message(STATUS "Using libffi from: ${LIBFFI_BIN_DIR}")
         
         set(FFI_FOUND TRUE)
-        set(FFI_INCLUDE_DIRS ${LIBFFI_DYNAMIC_DIR}/include)
-        set(FFI_LIBRARIES ${LIBFFI_DYNAMIC_DIR}/lib/ffi.lib)
-        
-        if(EXISTS ${LIBFFI_DYNAMIC_DIR}/bin/ffi-8.dll)
-            set(FFI_DLL_FILE ${LIBFFI_DYNAMIC_DIR}/bin/ffi-8.dll)
-        endif()
+        set(FFI_INCLUDE_DIRS ${LIBFFI_BIN_DIR}/include)
+        set(FFI_LIBRARIES ${LIBFFI_BIN_DIR}/lib/ffi.lib)
         
         message(STATUS "libffi library: ${FFI_LIBRARIES}")
         message(STATUS "libffi includes: ${FFI_INCLUDE_DIRS}")
-        message(STATUS "libffi DLL: ${FFI_DLL_FILE}")
-    endif()
-    
-    if(EXISTS ${LIBFFI_BIN_DIR})
-        message(STATUS "Found libffi binaries at: ${LIBFFI_BIN_DIR}")
-        
-        # Trova i file
-        file(GLOB FFI_DLL "${LIBFFI_BIN_DIR}/libffi*.dll")
-        file(GLOB FFI_LIB "${LIBFFI_BIN_DIR}/libffi*.lib")
-        
-        if(FFI_LIB)
-            set(FFI_FOUND TRUE)
-            set(FFI_INCLUDE_DIRS ${LIBFFI_BIN_DIR}/include)
-            set(FFI_LIBRARIES ${FFI_LIB})
-            set(FFI_DLL_FILE ${FFI_DLL})
-            
-            message(STATUS "libffi library: ${FFI_LIBRARIES}")
+        if(EXISTS ${LIBFFI_BIN_DIR}/bin/ffi-8.dll)
+            set(FFI_DLL_FILE ${LIBFFI_BIN_DIR}/bin/ffi-8.dll)
             message(STATUS "libffi DLL: ${FFI_DLL_FILE}")
-            message(STATUS "libffi includes: ${FFI_INCLUDE_DIRS}")
         endif()
-    endif()  # Fine if(EXISTS ${LIBFFI_DYNAMIC_DIR})
-    
+    endif()
 else()
     # Su Linux/macOS, usa pkg-config
     find_package(PkgConfig QUIET)
@@ -143,7 +121,7 @@ execute_process(
     ERROR_QUIET
 )
 if(NODE_ADDON_API_DIR)
-    string(REPLACE "\"" "" NODE_ADDON_API_DIR ${NODE_ADDON_API_DIR})
+    string(REGEX REPLACE "[\r\n\"]" "" NODE_ADDON_API_DIR "${NODE_ADDON_API_DIR}")
     target_include_directories(${PROJECT_NAME} PRIVATE ${NODE_ADDON_API_DIR})
 endif()
 
@@ -162,9 +140,7 @@ endif()
 target_link_libraries(${PROJECT_NAME} PRIVATE ${FFI_LIBRARIES})
 
 # Windows specifiche
-if(WIN32)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE _CRT_SECURE_NO_WARNINGS)
-    
+if(WIN32)    
     # Copia DLL nella directory di output
     if(FFI_DLL_FILE)
         add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
@@ -177,7 +153,6 @@ if(WIN32)
 endif()
 
 if(MSVC)
-    target_compile_options(${PROJECT_NAME} PRIVATE /wd4996)
     target_compile_options(${PROJECT_NAME} PRIVATE /utf-8)
     target_compile_options(${PROJECT_NAME} PRIVATE /bigobj)
     if(CMAKE_JS_NODELIB_DEF AND CMAKE_JS_NODELIB_TARGET)
