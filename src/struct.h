@@ -1,11 +1,7 @@
 #ifndef CTYPES_STRUCT_H
 #define CTYPES_STRUCT_H
 
-#include <napi.h>
-#include <ffi.h>
-#include <vector>
-#include <string>
-#include <memory>
+#include "shared.h"
 #include "types.h"
 
 namespace ctypes
@@ -72,8 +68,7 @@ namespace ctypes
     class StructType : public Napi::ObjectWrap<StructType>
     {
     public:
-        static Napi::Object Init(Napi::Env env, Napi::Object exports);
-        static Napi::FunctionReference constructor;
+        static Napi::Function GetClass(Napi::Env env);
 
         StructType(const Napi::CallbackInfo &info);
 

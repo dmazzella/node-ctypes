@@ -1,59 +1,57 @@
 #include "function.h"
-#include <cstring>
-#include <memory>
-#include <stdexcept>
 
 namespace ctypes
 {
 
-    Napi::FunctionReference FFIFunction::constructor;
-
     CallConv StringToCallConv(const std::string &name)
     {
+        spdlog::trace(__FUNCTION__);
+
         if (name == "cdecl" || name == "default")
-            return CallConv::CDECL;
+            return CallConv::CTYPES_CDECL;
         if (name == "stdcall")
-            return CallConv::STDCALL;
+            return CallConv::CTYPES_STDCALL;
         if (name == "fastcall")
-            return CallConv::FASTCALL;
+            return CallConv::CTYPES_FASTCALL;
         if (name == "thiscall")
-            return CallConv::THISCALL;
-        return CallConv::DEFAULT;
+            return CallConv::CTYPES_THISCALL;
+        return CallConv::CTYPES_DEFAULT;
     }
 
     ffi_abi CallConvToFFI(CallConv conv)
     {
+        spdlog::trace(__FUNCTION__);
+
         switch (conv)
         {
 #if defined(_WIN32) && defined(__i386__)
         case CallConv::STDCALL:
             return FFI_STDCALL;
-        case CallConv::FASTCALL:
+        case CallConv::CTYPES_FASTCALL:
             return FFI_FASTCALL;
-        case CallConv::THISCALL:
+        case CallConv::CTYPES_THISCALL:
             return FFI_THISCALL;
 #endif
-        case CallConv::CDECL:
-        case CallConv::DEFAULT:
+        case CallConv::CTYPES_CDECL:
+        case CallConv::CTYPES_DEFAULT:
         default:
             return FFI_DEFAULT_ABI;
         }
     }
 
-    Napi::Object FFIFunction::Init(Napi::Env env, Napi::Object exports)
+    Napi::Function FFIFunction::GetClass(Napi::Env env)
     {
-        Napi::Function func = DefineClass(env, "FFIFunction", {
-                                                                  InstanceMethod("call", &FFIFunction::Call),
-                                                                  InstanceMethod("setErrcheck", &FFIFunction::SetErrcheck),
-                                                                  InstanceAccessor("name", &FFIFunction::GetName, nullptr),
-                                                                  InstanceAccessor("address", &FFIFunction::GetAddress, nullptr),
-                                                              });
+        spdlog::trace(__FUNCTION__);
 
-        constructor = Napi::Persistent(func);
-        constructor.SuppressDestruct();
-
-        exports.Set("FFIFunction", func);
-        return exports;
+        return DefineClass(
+            env,
+            "FFIFunction",
+            {
+                InstanceMethod("call", &FFIFunction::Call),
+                InstanceMethod("setErrcheck", &FFIFunction::SetErrcheck),
+                InstanceAccessor("name", &FFIFunction::GetName, nullptr),
+                InstanceAccessor("address", &FFIFunction::GetAddress, nullptr),
+            });
     }
 
     FFIFunction::FFIFunction(const Napi::CallbackInfo &info)
@@ -61,11 +59,13 @@ namespace ctypes
           fn_ptr_(nullptr),
           cif_prepared_(false),
           abi_(FFI_DEFAULT_ABI),
-          return_type_(CType::VOID),
+          return_type_(CType::CTYPES_VOID),
           ffi_return_type_(nullptr),
           use_inline_storage_(true),
           next_cache_slot_(0)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (info.Length() < 3)
@@ -111,21 +111,21 @@ namespace ctypes
             else if (info[2].IsObject())
             {
                 Napi::Object obj = info[2].As<Napi::Object>();
-                if (obj.InstanceOf(TypeInfo::constructor.Value()))
-                {
-                    return_type_ = Napi::ObjectWrap<TypeInfo>::Unwrap(obj)->GetCType();
-                }
-                else if (obj.InstanceOf(StructType::constructor.Value()))
+                if (IsStructType(obj))
                 {
                     // Return type è struct
-                    return_type_ = CType::STRUCT;
+                    return_type_ = CType::CTYPES_STRUCT;
                     return_struct_info_ = Napi::ObjectWrap<StructType>::Unwrap(obj)->GetStructInfo();
                 }
-                else if (obj.InstanceOf(ArrayType::constructor.Value()))
+                else if (IsArrayType(obj))
                 {
                     // Return type è array
-                    return_type_ = CType::ARRAY;
+                    return_type_ = CType::CTYPES_ARRAY;
                     return_array_info_ = Napi::ObjectWrap<ArrayType>::Unwrap(obj)->GetArrayInfo();
+                }
+                else if (IsTypeInfo(obj))
+                {
+                    return_type_ = Napi::ObjectWrap<TypeInfo>::Unwrap(obj)->GetCType();
                 }
                 else
                 {
@@ -167,26 +167,26 @@ namespace ctypes
                     else if (elem.IsObject())
                     {
                         Napi::Object obj = elem.As<Napi::Object>();
-                        if (obj.InstanceOf(TypeInfo::constructor.Value()))
+                        if (IsStructType(obj))
+                        {
+                            // Argument type è struct
+                            arg_types_.push_back(CType::CTYPES_STRUCT);
+                            arg_struct_infos_[i] = Napi::ObjectWrap<StructType>::Unwrap(obj)->GetStructInfo();
+                            arg_array_infos_[i] = nullptr;
+                        }
+                        else if (IsArrayType(obj))
+                        {
+                            // Argument type è array
+                            arg_types_.push_back(CType::CTYPES_ARRAY);
+                            arg_struct_infos_[i] = nullptr;
+                            arg_array_infos_[i] = Napi::ObjectWrap<ArrayType>::Unwrap(obj)->GetArrayInfo();
+                        }
+                        else if (IsTypeInfo(obj))
                         {
                             arg_types_.push_back(
                                 Napi::ObjectWrap<TypeInfo>::Unwrap(obj)->GetCType());
                             arg_struct_infos_[i] = nullptr;
                             arg_array_infos_[i] = nullptr;
-                        }
-                        else if (obj.InstanceOf(StructType::constructor.Value()))
-                        {
-                            // Argument type è struct
-                            arg_types_.push_back(CType::STRUCT);
-                            arg_struct_infos_[i] = Napi::ObjectWrap<StructType>::Unwrap(obj)->GetStructInfo();
-                            arg_array_infos_[i] = nullptr;
-                        }
-                        else if (obj.InstanceOf(ArrayType::constructor.Value()))
-                        {
-                            // Argument type è array
-                            arg_types_.push_back(CType::ARRAY);
-                            arg_struct_infos_[i] = nullptr;
-                            arg_array_infos_[i] = Napi::ObjectWrap<ArrayType>::Unwrap(obj)->GetArrayInfo();
                         }
                         else
                         {
@@ -234,7 +234,7 @@ namespace ctypes
         size_t string_count = 0;
         for (const auto &type : arg_types_)
         {
-            if (type == CType::STRING)
+            if (type == CType::CTYPES_STRING)
                 string_count++;
         }
         if (string_count > 0)
@@ -252,12 +252,14 @@ namespace ctypes
 
     bool FFIFunction::PrepareFFI(Napi::Env env)
     {
+        spdlog::trace(__FUNCTION__);
+
         // Return type FFI
-        if (return_type_ == CType::STRUCT && return_struct_info_)
+        if (return_type_ == CType::CTYPES_STRUCT && return_struct_info_)
         {
             ffi_return_type_ = return_struct_info_->GetFFIType();
         }
-        else if (return_type_ == CType::ARRAY && return_array_info_)
+        else if (return_type_ == CType::CTYPES_ARRAY && return_array_info_)
         {
             ffi_return_type_ = return_array_info_->GetFFIType();
         }
@@ -271,11 +273,11 @@ namespace ctypes
         ffi_arg_types_.reserve(arg_types_.size());
         for (size_t i = 0; i < arg_types_.size(); i++)
         {
-            if (arg_types_[i] == CType::STRUCT && arg_struct_infos_[i])
+            if (arg_types_[i] == CType::CTYPES_STRUCT && arg_struct_infos_[i])
             {
                 ffi_arg_types_.push_back(arg_struct_infos_[i]->GetFFIType());
             }
-            else if (arg_types_[i] == CType::ARRAY && arg_array_infos_[i])
+            else if (arg_types_[i] == CType::CTYPES_ARRAY && arg_array_infos_[i])
             {
                 ffi_arg_types_.push_back(arg_array_infos_[i]->GetFFIType());
             }
@@ -309,48 +311,50 @@ namespace ctypes
 
     inline Napi::Value FFIFunction::ConvertReturnValue(Napi::Env env)
     {
+        spdlog::trace(__FUNCTION__);
+
         switch (return_type_)
         {
-        case CType::VOID:
+        case CType::CTYPES_VOID:
             return env.Undefined();
 
-        case CType::INT32:
+        case CType::CTYPES_INT32:
             return Napi::Number::New(env, return_value_.i32);
 
-        case CType::UINT32:
+        case CType::CTYPES_UINT32:
             return Napi::Number::New(env, return_value_.u32);
 
-        case CType::INT64:
+        case CType::CTYPES_INT64:
             return Napi::BigInt::New(env, return_value_.i64);
 
-        case CType::UINT64:
-        case CType::SIZE_T:
+        case CType::CTYPES_UINT64:
+        case CType::CTYPES_SIZE_T:
             return Napi::BigInt::New(env, return_value_.u64);
 
-        case CType::DOUBLE:
+        case CType::CTYPES_DOUBLE:
             return Napi::Number::New(env, return_value_.d);
 
-        case CType::FLOAT:
+        case CType::CTYPES_FLOAT:
             return Napi::Number::New(env, static_cast<double>(return_value_.f));
 
-        case CType::BOOL:
+        case CType::CTYPES_BOOL:
             return Napi::Boolean::New(env, return_value_.u8 != 0);
 
-        case CType::POINTER:
+        case CType::CTYPES_POINTER:
             if (return_value_.p == nullptr)
             {
                 return env.Null();
             }
             return Napi::BigInt::New(env, reinterpret_cast<uint64_t>(return_value_.p));
 
-        case CType::STRING:
+        case CType::CTYPES_STRING:
             if (return_value_.str == nullptr)
             {
                 return env.Null();
             }
             return Napi::String::New(env, return_value_.str);
 
-        case CType::WSTRING:
+        case CType::CTYPES_WSTRING:
         {
             if (return_value_.wstr == nullptr)
             {
@@ -393,33 +397,33 @@ namespace ctypes
 #endif
         }
 
-        case CType::LONG:
+        case CType::CTYPES_LONG:
             if (sizeof(long) <= 4)
             {
                 return Napi::Number::New(env, static_cast<int32_t>(return_value_.i64));
             }
             return Napi::BigInt::New(env, return_value_.i64);
 
-        case CType::ULONG:
+        case CType::CTYPES_ULONG:
             if (sizeof(unsigned long) <= 4)
             {
                 return Napi::Number::New(env, static_cast<uint32_t>(return_value_.u64));
             }
             return Napi::BigInt::New(env, return_value_.u64);
 
-        case CType::INT8:
+        case CType::CTYPES_INT8:
             return Napi::Number::New(env, return_value_.i8);
 
-        case CType::UINT8:
+        case CType::CTYPES_UINT8:
             return Napi::Number::New(env, return_value_.u8);
 
-        case CType::INT16:
+        case CType::CTYPES_INT16:
             return Napi::Number::New(env, return_value_.i16);
 
-        case CType::UINT16:
+        case CType::CTYPES_UINT16:
             return Napi::Number::New(env, return_value_.u16);
 
-        case CType::STRUCT:
+        case CType::CTYPES_STRUCT:
         {
             // Struct by-value: converti buffer struct → JS object
             if (return_struct_info_)
@@ -430,7 +434,7 @@ namespace ctypes
             return env.Undefined();
         }
 
-        case CType::ARRAY:
+        case CType::CTYPES_ARRAY:
         {
             // Array by-value: converti buffer array → JS array
             if (return_array_info_)
@@ -453,6 +457,8 @@ namespace ctypes
 
     Napi::Value FFIFunction::Call(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (!cif_prepared_) [[unlikely]]
@@ -537,28 +543,28 @@ namespace ctypes
                 // Inferisci il tipo dal valore JavaScript
                 if (val.IsString())
                 {
-                    extra_types[i] = CType::STRING;
+                    extra_types[i] = CType::CTYPES_STRING;
                 }
                 else if (val.IsNumber())
                 {
                     double d = val.As<Napi::Number>().DoubleValue();
-                    extra_types[i] = (d == static_cast<int32_t>(d)) ? CType::INT32 : CType::DOUBLE;
+                    extra_types[i] = (d == static_cast<int32_t>(d)) ? CType::CTYPES_INT32 : CType::CTYPES_DOUBLE;
                 }
                 else if (val.IsBigInt())
                 {
-                    extra_types[i] = CType::INT64;
+                    extra_types[i] = CType::CTYPES_INT64;
                 }
                 else if (val.IsBuffer())
                 {
-                    extra_types[i] = CType::POINTER;
+                    extra_types[i] = CType::CTYPES_POINTER;
                 }
                 else if (val.IsNull() || val.IsUndefined())
                 {
-                    extra_types[i] = CType::POINTER;
+                    extra_types[i] = CType::CTYPES_POINTER;
                 }
                 else
                 {
-                    extra_types[i] = CType::INT32; // fallback
+                    extra_types[i] = CType::CTYPES_INT32; // fallback
                 }
             }
 
@@ -666,7 +672,7 @@ namespace ctypes
         // =====================================================================
         // Fast path: un solo argomento int32 (es. abs)
         // =====================================================================
-        if (argc == 1 && arg_types_[0] == CType::INT32)
+        if (argc == 1 && arg_types_[0] == CType::CTYPES_INT32)
         {
             // Safety check: verifica che il puntatore sia ancora valido
             if (fn_ptr_ == nullptr)
@@ -685,7 +691,7 @@ namespace ctypes
         // =====================================================================
         // Fast path: un solo argomento double (es. sqrt)
         // =====================================================================
-        if (argc == 1 && arg_types_[0] == CType::DOUBLE)
+        if (argc == 1 && arg_types_[0] == CType::CTYPES_DOUBLE)
         {
             // Safety check
             if (fn_ptr_ == nullptr)
@@ -704,7 +710,7 @@ namespace ctypes
         // =====================================================================
         // Fast path: un solo argomento stringa (es. strlen)
         // =====================================================================
-        if (argc == 1 && arg_types_[0] == CType::STRING && info[0].IsString())
+        if (argc == 1 && arg_types_[0] == CType::CTYPES_STRING && info[0].IsString())
         {
             napi_value nval = info[0];
             size_t len;
@@ -796,24 +802,24 @@ namespace ctypes
 
             switch (type)
             {
-            case CType::INT32:
+            case CType::CTYPES_INT32:
             {
                 int32_t v = val.As<Napi::Number>().Int32Value();
                 memcpy(slot, &v, 4);
                 break;
             }
 
-            case CType::UINT32:
+            case CType::CTYPES_UINT32:
             {
                 uint32_t v = val.As<Napi::Number>().Uint32Value();
                 memcpy(slot, &v, 4);
                 break;
             }
 
-            case CType::INT64:
-            case CType::UINT64:
-            case CType::SIZE_T:
-            case CType::SSIZE_T:
+            case CType::CTYPES_INT64:
+            case CType::CTYPES_UINT64:
+            case CType::CTYPES_SIZE_T:
+            case CType::CTYPES_SSIZE_T:
             {
                 int64_t v;
                 if (val.IsBigInt())
@@ -829,21 +835,21 @@ namespace ctypes
                 break;
             }
 
-            case CType::DOUBLE:
+            case CType::CTYPES_DOUBLE:
             {
                 double v = val.As<Napi::Number>().DoubleValue();
                 memcpy(slot, &v, 8);
                 break;
             }
 
-            case CType::FLOAT:
+            case CType::CTYPES_FLOAT:
             {
                 float v = static_cast<float>(val.As<Napi::Number>().FloatValue());
                 memcpy(slot, &v, 4);
                 break;
             }
 
-            case CType::POINTER:
+            case CType::CTYPES_POINTER:
             {
                 void *ptr = nullptr;
                 if (val.IsNull() || val.IsUndefined())
@@ -868,7 +874,7 @@ namespace ctypes
                 break;
             }
 
-            case CType::STRING:
+            case CType::CTYPES_STRING:
             {
                 if (val.IsString())
                 {
@@ -904,7 +910,7 @@ namespace ctypes
                 break;
             }
 
-            case CType::WSTRING:
+            case CType::CTYPES_WSTRING:
             {
                 if (val.IsString())
                 {
@@ -949,7 +955,7 @@ namespace ctypes
                 break;
             }
 
-            case CType::LONG:
+            case CType::CTYPES_LONG:
             {
                 long v;
                 if (val.IsBigInt())
@@ -965,7 +971,7 @@ namespace ctypes
                 break;
             }
 
-            case CType::ULONG:
+            case CType::CTYPES_ULONG:
             {
                 unsigned long v;
                 if (val.IsBigInt())
@@ -981,42 +987,42 @@ namespace ctypes
                 break;
             }
 
-            case CType::BOOL:
+            case CType::CTYPES_BOOL:
             {
                 uint8_t v = val.ToBoolean().Value() ? 1 : 0;
                 memcpy(slot, &v, 1);
                 break;
             }
 
-            case CType::INT8:
+            case CType::CTYPES_INT8:
             {
                 int8_t v = static_cast<int8_t>(val.As<Napi::Number>().Int32Value());
                 memcpy(slot, &v, 1);
                 break;
             }
 
-            case CType::UINT8:
+            case CType::CTYPES_UINT8:
             {
                 uint8_t v = static_cast<uint8_t>(val.As<Napi::Number>().Uint32Value());
                 memcpy(slot, &v, 1);
                 break;
             }
 
-            case CType::INT16:
+            case CType::CTYPES_INT16:
             {
                 int16_t v = static_cast<int16_t>(val.As<Napi::Number>().Int32Value());
                 memcpy(slot, &v, 2);
                 break;
             }
 
-            case CType::UINT16:
+            case CType::CTYPES_UINT16:
             {
                 uint16_t v = static_cast<uint16_t>(val.As<Napi::Number>().Uint32Value());
                 memcpy(slot, &v, 2);
                 break;
             }
 
-            case CType::STRUCT:
+            case CType::CTYPES_STRUCT:
             {
                 // Struct by-value: converti JS object → buffer struct
                 if (i < expected_argc && arg_struct_infos_[i])
@@ -1064,7 +1070,7 @@ namespace ctypes
                 break;
             }
 
-            case CType::ARRAY:
+            case CType::CTYPES_ARRAY:
             {
                 // Array: converti JS array/buffer → buffer array
                 if (i < expected_argc && arg_array_infos_[i])
@@ -1130,6 +1136,8 @@ namespace ctypes
 
     Napi::Value FFIFunction::SetErrcheck(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (info.Length() < 1)
@@ -1159,6 +1167,8 @@ namespace ctypes
 
     Napi::Value FFIFunction::ApplyErrcheck(Napi::Env env, Napi::Value result, const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         // Se non c'è errcheck, restituisci il risultato direttamente
         if (errcheck_callback_.IsEmpty())
         {
@@ -1192,11 +1202,15 @@ namespace ctypes
 
     Napi::Value FFIFunction::GetName(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         return Napi::String::New(info.Env(), name_);
     }
 
     Napi::Value FFIFunction::GetAddress(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         return Napi::BigInt::New(info.Env(), reinterpret_cast<uint64_t>(fn_ptr_));
     }
 

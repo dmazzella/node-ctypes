@@ -1,11 +1,8 @@
 #include "array.h"
 #include "struct.h"
-#include <cstring>
 
 namespace ctypes
 {
-
-    Napi::FunctionReference ArrayType::constructor;
 
     // ============================================================================
     // ArrayInfo - Core logic
@@ -14,6 +11,8 @@ namespace ctypes
     ArrayInfo::ArrayInfo(CType element_type, size_t count, std::shared_ptr<StructInfo> element_struct)
         : element_type_(element_type), count_(count), element_struct_(element_struct)
     {
+        spdlog::trace(__FUNCTION__);
+
         if (element_struct)
         {
             element_size_ = element_struct->GetSize();
@@ -26,31 +25,31 @@ namespace ctypes
             // Alignment dell'elemento
             switch (element_type)
             {
-            case CType::INT8:
-            case CType::UINT8:
-            case CType::BOOL:
+            case CType::CTYPES_INT8:
+            case CType::CTYPES_UINT8:
+            case CType::CTYPES_BOOL:
                 alignment_ = 1;
                 break;
-            case CType::INT16:
-            case CType::UINT16:
-            case CType::WCHAR:
+            case CType::CTYPES_INT16:
+            case CType::CTYPES_UINT16:
+            case CType::CTYPES_WCHAR:
                 alignment_ = 2;
                 break;
-            case CType::INT32:
-            case CType::UINT32:
-            case CType::FLOAT:
-            case CType::LONG:
-            case CType::ULONG:
+            case CType::CTYPES_INT32:
+            case CType::CTYPES_UINT32:
+            case CType::CTYPES_FLOAT:
+            case CType::CTYPES_LONG:
+            case CType::CTYPES_ULONG:
                 alignment_ = 4;
                 break;
-            case CType::INT64:
-            case CType::UINT64:
-            case CType::DOUBLE:
-            case CType::POINTER:
-            case CType::STRING:
-            case CType::WSTRING:
-            case CType::SIZE_T:
-            case CType::SSIZE_T:
+            case CType::CTYPES_INT64:
+            case CType::CTYPES_UINT64:
+            case CType::CTYPES_DOUBLE:
+            case CType::CTYPES_POINTER:
+            case CType::CTYPES_STRING:
+            case CType::CTYPES_WSTRING:
+            case CType::CTYPES_SIZE_T:
+            case CType::CTYPES_SSIZE_T:
                 alignment_ = sizeof(void *);
                 break;
             default:
@@ -65,6 +64,8 @@ namespace ctypes
 
     ffi_type *ArrayInfo::GetFFIType()
     {
+        spdlog::trace(__FUNCTION__);
+
         if (ffi_type_)
         {
             return ffi_type_.get();
@@ -104,6 +105,8 @@ namespace ctypes
 
     bool ArrayInfo::JSToArray(Napi::Env env, Napi::Value val, void *buffer, size_t bufsize)
     {
+        spdlog::trace(__FUNCTION__);
+
         if (bufsize < size_)
         {
             Napi::TypeError::New(env, "Buffer too small for array").ThrowAsJavaScriptException();
@@ -159,7 +162,7 @@ namespace ctypes
             size_t copy_size = std::min(buf.Length(), size_);
             std::memcpy(buffer, buf.Data(), copy_size);
         }
-        else if (val.IsString() && element_type_ == CType::INT8)
+        else if (val.IsString() && element_type_ == CType::CTYPES_INT8)
         {
             // Stringa → char array
             std::string str = val.As<Napi::String>().Utf8Value();
@@ -178,6 +181,8 @@ namespace ctypes
 
     Napi::Array ArrayInfo::ArrayToJS(Napi::Env env, const void *buffer)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Array arr = Napi::Array::New(env, count_);
 
         for (size_t i = 0; i < count_; i++)
@@ -203,26 +208,26 @@ namespace ctypes
     // ArrayType - Napi wrapper
     // ============================================================================
 
-    Napi::Object ArrayType::Init(Napi::Env env, Napi::Object exports)
+    Napi::Function ArrayType::GetClass(Napi::Env env)
     {
-        Napi::Function func = DefineClass(env, "ArrayType",
-                                          {
-                                              InstanceMethod("getSize", &ArrayType::GetSize),
-                                              InstanceMethod("getLength", &ArrayType::GetLength),
-                                              InstanceMethod("getAlignment", &ArrayType::GetAlignment),
-                                              InstanceMethod("create", &ArrayType::Create),
-                                          });
+        spdlog::trace(__FUNCTION__);
 
-        constructor = Napi::Persistent(func);
-        constructor.SuppressDestruct();
-
-        exports.Set("ArrayType", func);
-        return exports;
+        return DefineClass(
+            env,
+            "ArrayType",
+            {
+                InstanceMethod("getSize", &ArrayType::GetSize),
+                InstanceMethod("getLength", &ArrayType::GetLength),
+                InstanceMethod("getAlignment", &ArrayType::GetAlignment),
+                InstanceMethod("create", &ArrayType::Create),
+            });
     }
 
     ArrayType::ArrayType(const Napi::CallbackInfo &info)
         : Napi::ObjectWrap<ArrayType>(info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (info.Length() < 2)
@@ -243,14 +248,14 @@ namespace ctypes
         {
             Napi::Object type_obj = info[0].As<Napi::Object>();
 
-            // Check if StructType
-            if (type_obj.InstanceOf(StructType::constructor.Value()))
+            // Check if StructType (duck typing: has addField method)
+            if (IsStructType(type_obj))
             {
                 StructType *st = Napi::ObjectWrap<StructType>::Unwrap(type_obj);
                 element_struct = st->GetStructInfo();
-                element_type = CType::STRUCT;
+                element_type = CType::CTYPES_STRUCT;
             }
-            else if (type_obj.InstanceOf(TypeInfo::constructor.Value()))
+            else if (IsTypeInfo(type_obj))
             {
                 element_type = Napi::ObjectWrap<TypeInfo>::Unwrap(type_obj)->GetCType();
             }
@@ -274,21 +279,29 @@ namespace ctypes
 
     Napi::Value ArrayType::GetSize(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         return Napi::Number::New(info.Env(), array_info_->GetSize());
     }
 
     Napi::Value ArrayType::GetLength(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         return Napi::Number::New(info.Env(), array_info_->GetCount());
     }
 
     Napi::Value ArrayType::GetAlignment(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         return Napi::Number::New(info.Env(), array_info_->GetAlignment());
     }
 
     Napi::Value ArrayType::Create(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         size_t size = array_info_->GetSize();

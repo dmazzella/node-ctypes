@@ -1,15 +1,11 @@
 #ifndef CTYPES_ARRAY_H
 #define CTYPES_ARRAY_H
 
-#include <napi.h>
-#include <ffi.h>
-#include <vector>
-#include <memory>
+#include "shared.h"
 #include "types.h"
 
 namespace ctypes
 {
-
     // Forward declarations
     class StructInfo;
     class TypeInfo;
@@ -52,8 +48,7 @@ namespace ctypes
     class ArrayType : public Napi::ObjectWrap<ArrayType>
     {
     public:
-        static Napi::Object Init(Napi::Env env, Napi::Object exports);
-        static Napi::FunctionReference constructor;
+        static Napi::Function GetClass(Napi::Env env);
 
         ArrayType(const Napi::CallbackInfo &info);
 

@@ -1,5 +1,4 @@
-#include <napi.h>
-#include <stdexcept>
+#include "addon.h"
 #include "version.h"
 #include "types.h"
 #include "library.h"
@@ -10,16 +9,134 @@
 
 namespace ctypes
 {
-
-    // Funzione helper per caricare una libreria (scorciatoia)
-    Napi::Value LoadLibrary(const Napi::CallbackInfo &info)
+    // Helper per creare l'oggetto Version (dichiarato prima dell'uso)
+    Napi::Object CreateVersionObject(Napi::Env env)
     {
-        return Library::constructor.New({info[0]});
+        Napi::Object version = Napi::Object::New(env);
+        version.Set("major", Napi::Number::New(env, CTYPES_MAJOR_VERSION));
+        version.Set("minor", Napi::Number::New(env, CTYPES_MINOR_VERSION));
+        version.Set("patch", Napi::Number::New(env, CTYPES_PATCH_VERSION));
+        version.Set("toString", Napi::Function::New(env, [](const Napi::CallbackInfo &info) -> Napi::Value
+                                                    { return Napi::String::New(info.Env(), fmt::format("{}.{}.{}", CTYPES_MAJOR_VERSION, CTYPES_MINOR_VERSION, CTYPES_PATCH_VERSION)); }));
+        return version;
     }
 
-    // Funzione per allocare memoria nativa
-    Napi::Value Alloc(const Napi::CallbackInfo &info)
+    // Helper template per inizializzare un wrapper (simile a node-cryptoki)
+    template <typename T>
+    std::unique_ptr<Napi::FunctionReference> SafeInitializeWrapper(Napi::Env env, const char *name)
     {
+        spdlog::trace("SafeInitializeWrapper: {}", name);
+        Napi::Function func = T::GetClass(env);
+        auto ref = std::make_unique<Napi::FunctionReference>();
+        *ref = Napi::Persistent(func);
+        return ref;
+    }
+
+    CTypesAddon::CTypesAddon(Napi::Env env, Napi::Object exports)
+    {
+        InitializeLogging();
+        spdlog::trace(__FUNCTION__);
+
+        // Inizializza tutti i constructor come membri di istanza
+        TypeInfoConstructor = SafeInitializeWrapper<TypeInfo>(env, "CType");
+        LibraryConstructor = SafeInitializeWrapper<Library>(env, "Library");
+        FFIFunctionConstructor = SafeInitializeWrapper<FFIFunction>(env, "FFIFunction");
+        CallbackConstructor = SafeInitializeWrapper<Callback>(env, "Callback");
+        ThreadSafeCallbackConstructor = SafeInitializeWrapper<ThreadSafeCallback>(env, "ThreadSafeCallback");
+        StructTypeConstructor = SafeInitializeWrapper<StructType>(env, "StructType");
+        ArrayTypeConstructor = SafeInitializeWrapper<ArrayType>(env, "ArrayType");
+
+        // Definisci l'addon con tutte le esportazioni
+        DefineAddon(
+            exports,
+            {
+                // Version info (semplice oggetto, non classe)
+                InstanceValue("Version", CreateVersionObject(env), napi_enumerable),
+
+                // Classi wrapper
+                InstanceValue("CType", TypeInfoConstructor->Value(), napi_enumerable),
+                InstanceValue("Library", LibraryConstructor->Value(), napi_enumerable),
+                InstanceValue("FFIFunction", FFIFunctionConstructor->Value(), napi_enumerable),
+                InstanceValue("Callback", CallbackConstructor->Value(), napi_enumerable),
+                InstanceValue("ThreadSafeCallback", ThreadSafeCallbackConstructor->Value(), napi_enumerable),
+                InstanceValue("StructType", StructTypeConstructor->Value(), napi_enumerable),
+                InstanceValue("ArrayType", ArrayTypeConstructor->Value(), napi_enumerable),
+
+                // Funzioni helper
+                InstanceMethod("load", &CTypesAddon::LoadLibrary),
+                InstanceMethod("alloc", &CTypesAddon::Alloc),
+                InstanceMethod("readValue", &CTypesAddon::ReadValue),
+                InstanceMethod("writeValue", &CTypesAddon::WriteValue),
+                InstanceMethod("sizeof", &CTypesAddon::SizeOf),
+                InstanceMethod("cstring", &CTypesAddon::CreateCString),
+                InstanceMethod("readCString", &CTypesAddon::ReadCString),
+                InstanceMethod("ptrToBuffer", &CTypesAddon::PtrToBuffer),
+
+                // Tipi predefiniti
+                InstanceValue("types", CreatePredefinedTypes(env, *TypeInfoConstructor), napi_enumerable),
+
+                // Costanti
+                InstanceValue("POINTER_SIZE", Napi::Number::New(env, sizeof(void *)), napi_enumerable),
+                InstanceValue("WCHAR_SIZE", Napi::Number::New(env, sizeof(wchar_t)), napi_enumerable),
+                InstanceValue("NULL", env.Null(), napi_enumerable),
+            });
+
+        spdlog::trace("{} - completed", __FUNCTION__);
+    }
+
+    CTypesAddon::~CTypesAddon()
+    {
+        spdlog::trace(__FUNCTION__);
+    }
+
+    void CTypesAddon::InitializeLogging()
+    {
+        dotenv::init("node-ctypes.env");
+
+        std::string path_env = dotenv::getenv("NODE_CTYPES_LOG_PATH", "");
+        if (!path_env.empty() && std::filesystem::exists(path_env) && std::filesystem::is_directory(path_env))
+        {
+            std::string level_env = dotenv::getenv("NODE_CTYPES_LOG_LEVEL", "error");
+            spdlog::level::level_enum logger_level = spdlog::level::from_str(level_env);
+            constexpr std::size_t max_file_size = 10 * 1024 * 1024;
+            std::filesystem::path log_path = std::filesystem::path(path_env) / "node-ctypes.log";
+
+            std::shared_ptr<spdlog::logger> rotating_logger = spdlog::rotating_logger_mt("node-ctypes", log_path.string(), max_file_size, 1, false);
+            rotating_logger->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] [%P] [%t] [%n] %v");
+            rotating_logger->set_level(logger_level);
+            rotating_logger->flush_on(logger_level);
+            spdlog::set_default_logger(rotating_logger);
+            spdlog::set_level(logger_level);
+        }
+        else
+        {
+            std::shared_ptr<spdlog::logger> null_logger = spdlog::null_logger_mt("node-ctypes");
+            spdlog::set_default_logger(null_logger);
+            spdlog::set_level(spdlog::level::off);
+        }
+    }
+
+    // ========== Helper functions ==========
+
+    Napi::Value CTypesAddon::LoadLibrary(const Napi::CallbackInfo &info)
+    {
+        spdlog::trace(__FUNCTION__);
+
+        Napi::Env env = info.Env();
+
+        if (!LibraryConstructor)
+        {
+            Napi::Error::New(env, "Addon not properly initialized").ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        return LibraryConstructor->New({info[0]});
+    }
+
+    Napi::Value CTypesAddon::Alloc(const Napi::CallbackInfo &info)
+    {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (info.Length() < 1 || !info[0].IsNumber())
@@ -36,17 +153,15 @@ namespace ctypes
             return env.Null();
         }
 
-        // Usa un Buffer Node.js per la memoria
-        // Questo ha il vantaggio di essere garbage-collected automaticamente
         return Napi::Buffer<uint8_t>::New(env, size);
     }
 
-    // Funzione per leggere un valore dalla memoria
-    Napi::Value ReadValue(const Napi::CallbackInfo &info)
+    Napi::Value CTypesAddon::ReadValue(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
-        // readValue(pointer, type, [offset])
         if (info.Length() < 2)
         {
             Napi::TypeError::New(env, "Pointer and type required")
@@ -91,7 +206,7 @@ namespace ctypes
             else if (info[1].IsObject())
             {
                 Napi::Object obj = info[1].As<Napi::Object>();
-                if (obj.InstanceOf(TypeInfo::constructor.Value()))
+                if (TypeInfoConstructor && obj.InstanceOf(TypeInfoConstructor->Value()))
                 {
                     TypeInfo *ti = Napi::ObjectWrap<TypeInfo>::Unwrap(obj);
                     ctype = ti->GetCType();
@@ -123,17 +238,16 @@ namespace ctypes
             return env.Null();
         }
 
-        // Leggi il valore
         void *read_ptr = static_cast<uint8_t *>(ptr) + offset;
         return CToJS(env, read_ptr, ctype);
     }
 
-    // Funzione per scrivere un valore in memoria
-    Napi::Value WriteValue(const Napi::CallbackInfo &info)
+    Napi::Value CTypesAddon::WriteValue(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
-        // writeValue(pointer, type, value, [offset])
         if (info.Length() < 3)
         {
             Napi::TypeError::New(env, "Pointer, type and value required")
@@ -178,7 +292,7 @@ namespace ctypes
             else if (info[1].IsObject())
             {
                 Napi::Object obj = info[1].As<Napi::Object>();
-                if (obj.InstanceOf(TypeInfo::constructor.Value()))
+                if (TypeInfoConstructor && obj.InstanceOf(TypeInfoConstructor->Value()))
                 {
                     TypeInfo *ti = Napi::ObjectWrap<TypeInfo>::Unwrap(obj);
                     ctype = ti->GetCType();
@@ -212,7 +326,6 @@ namespace ctypes
             return env.Undefined();
         }
 
-        // Scrivi il valore
         void *write_ptr = static_cast<uint8_t *>(ptr) + offset;
         size_t type_size = CTypeSize(ctype);
 
@@ -227,9 +340,10 @@ namespace ctypes
         return Napi::Number::New(env, written);
     }
 
-    // Funzione per ottenere la dimensione di un tipo
-    Napi::Value SizeOf(const Napi::CallbackInfo &info)
+    Napi::Value CTypesAddon::SizeOf(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (info.Length() < 1)
@@ -249,7 +363,7 @@ namespace ctypes
             else if (info[0].IsObject())
             {
                 Napi::Object obj = info[0].As<Napi::Object>();
-                if (obj.InstanceOf(TypeInfo::constructor.Value()))
+                if (TypeInfoConstructor && obj.InstanceOf(TypeInfoConstructor->Value()))
                 {
                     TypeInfo *ti = Napi::ObjectWrap<TypeInfo>::Unwrap(obj);
                     ctype = ti->GetCType();
@@ -273,9 +387,10 @@ namespace ctypes
         return Napi::Number::New(env, static_cast<double>(CTypeSize(ctype)));
     }
 
-    // Crea una stringa C null-terminata da una stringa JS
-    Napi::Value CreateCString(const Napi::CallbackInfo &info)
+    Napi::Value CTypesAddon::CreateCString(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (info.Length() < 1 || !info[0].IsString())
@@ -287,16 +402,16 @@ namespace ctypes
 
         std::string str = info[0].As<Napi::String>().Utf8Value();
 
-        // Crea un buffer con la stringa null-terminata
         auto buffer = Napi::Buffer<char>::New(env, str.length() + 1);
         memcpy(buffer.Data(), str.c_str(), str.length() + 1);
 
         return buffer;
     }
 
-    // Legge una stringa C da un puntatore
-    Napi::Value ReadCString(const Napi::CallbackInfo &info)
+    Napi::Value CTypesAddon::ReadCString(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (info.Length() < 1)
@@ -330,14 +445,12 @@ namespace ctypes
             return env.Null();
         }
 
-        // Limite opzionale sulla lunghezza
         size_t max_len = SIZE_MAX;
         if (info.Length() > 1 && info[1].IsNumber())
         {
             max_len = static_cast<size_t>(info[1].ToNumber().Int64Value());
         }
 
-        // Trova la lunghezza della stringa (con limite)
         size_t len = 0;
         while (len < max_len && ptr[len] != '\0')
         {
@@ -347,10 +460,10 @@ namespace ctypes
         return Napi::String::New(env, ptr, len);
     }
 
-    // Crea un Buffer che punta a un indirizzo di memoria esistente
-    // ATTENZIONE: Pericoloso! L'utente deve garantire che la memoria sia valida
-    Napi::Value PtrToBuffer(const Napi::CallbackInfo &info)
+    Napi::Value CTypesAddon::PtrToBuffer(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (info.Length() < 2)
@@ -387,52 +500,19 @@ namespace ctypes
 
         size_t size = static_cast<size_t>(info[1].ToNumber().Int64Value());
 
-        // Crea un Buffer esterno che punta alla memoria esistente
-        // NON viene deallocato automaticamente quando il Buffer viene GC'd
         return Napi::Buffer<uint8_t>::New(
             env,
             static_cast<uint8_t *>(ptr),
             size,
             [](Napi::Env, void *)
             {
-                // No-op finalizer: non deallochiamo memoria che non abbiamo allocato
+                // No-op finalizer
             });
     }
 
-    // Inizializzazione del modulo
-    Napi::Object Init(Napi::Env env, Napi::Object exports)
-    {
-        // Inizializza le classi
-        Version::Init(env, exports);
-        TypeInfo::Init(env, exports);
-        Library::Init(env, exports);
-        FFIFunction::Init(env, exports);
-        Callback::Init(env, exports);
-        ThreadSafeCallback::Init(env, exports);
-        StructType::Init(env, exports);
-        ArrayType::Init(env, exports);
-
-        // Esporta funzioni helper
-        exports.Set("load", Napi::Function::New(env, LoadLibrary));
-        exports.Set("alloc", Napi::Function::New(env, Alloc));
-        exports.Set("readValue", Napi::Function::New(env, ReadValue));
-        exports.Set("writeValue", Napi::Function::New(env, WriteValue));
-        exports.Set("sizeof", Napi::Function::New(env, SizeOf));
-        exports.Set("cstring", Napi::Function::New(env, CreateCString));
-        exports.Set("readCString", Napi::Function::New(env, ReadCString));
-        exports.Set("ptrToBuffer", Napi::Function::New(env, PtrToBuffer));
-
-        // Esporta i tipi predefiniti
-        exports.Set("types", CreatePredefinedTypes(env));
-
-        // Costanti utili
-        exports.Set("POINTER_SIZE", Napi::Number::New(env, sizeof(void *)));
-        exports.Set("WCHAR_SIZE", Napi::Number::New(env, sizeof(wchar_t)));
-        exports.Set("NULL", env.Null());
-
-        return exports;
-    }
-
-    NODE_API_MODULE(node_ctypes, Init)
-
 } // namespace ctypes
+
+// Alias fuori dal namespace per la macro NODE_API_ADDON
+using CTypesAddon = ctypes::CTypesAddon;
+
+NODE_API_ADDON(CTypesAddon)

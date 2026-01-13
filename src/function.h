@@ -1,11 +1,7 @@
 #ifndef CTYPES_FUNCTION_H
 #define CTYPES_FUNCTION_H
 
-#include <napi.h>
-#include <ffi.h>
-#include <vector>
-#include <string>
-#include <memory>
+#include "shared.h"
 #include "types.h"
 #include "struct.h"
 #include "array.h"
@@ -16,11 +12,11 @@ namespace ctypes
     // Calling conventions supportate
     enum class CallConv
     {
-        DEFAULT,
-        CDECL,
-        STDCALL,
-        FASTCALL,
-        THISCALL
+        CTYPES_DEFAULT,
+        CTYPES_CDECL,
+        CTYPES_STDCALL,
+        CTYPES_FASTCALL,
+        CTYPES_THISCALL
     };
 
     CallConv StringToCallConv(const std::string &name);
@@ -70,8 +66,7 @@ namespace ctypes
     class FFIFunction : public Napi::ObjectWrap<FFIFunction>
     {
     public:
-        static Napi::Object Init(Napi::Env env, Napi::Object exports);
-        static Napi::FunctionReference constructor;
+        static Napi::Function GetClass(Napi::Env env);
 
         FFIFunction(const Napi::CallbackInfo &info);
         ~FFIFunction();

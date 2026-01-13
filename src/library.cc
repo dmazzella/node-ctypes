@@ -1,20 +1,15 @@
 #include "library.h"
 #include "function.h"
-
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <dlfcn.h>
-#endif
+#include "addon.h"
 
 namespace ctypes
 {
 
-    Napi::FunctionReference Library::constructor;
-
     // Platform-specific implementations
     void *LoadSharedLibrary(const std::string &path, std::string &error)
     {
+        spdlog::trace(__FUNCTION__);
+
 #ifdef _WIN32
         HMODULE handle = LoadLibraryA(path.c_str());
         if (!handle)
@@ -39,6 +34,8 @@ namespace ctypes
 
     void *GetSymbolAddress(void *handle, const std::string &name, std::string &error)
     {
+        spdlog::trace(__FUNCTION__);
+
 #ifdef _WIN32
         void *addr = reinterpret_cast<void *>(
             GetProcAddress(static_cast<HMODULE>(handle), name.c_str()));
@@ -65,6 +62,8 @@ namespace ctypes
 
     bool CloseSharedLibrary(void *handle)
     {
+        spdlog::trace(__FUNCTION__);
+
         if (!handle)
             return true;
 #ifdef _WIN32
@@ -75,26 +74,27 @@ namespace ctypes
     }
 
     // Library class implementation
-    Napi::Object Library::Init(Napi::Env env, Napi::Object exports)
+    Napi::Function Library::GetClass(Napi::Env env)
     {
-        Napi::Function func = DefineClass(env, "Library", {
-                                                              InstanceMethod("func", &Library::GetFunction),
-                                                              InstanceMethod("symbol", &Library::GetSymbol),
-                                                              InstanceMethod("close", &Library::Close),
-                                                              InstanceAccessor("path", &Library::GetPath, nullptr),
-                                                              InstanceAccessor("loaded", &Library::GetIsLoaded, nullptr),
-                                                          });
+        spdlog::trace(__FUNCTION__);
 
-        constructor = Napi::Persistent(func);
-        constructor.SuppressDestruct();
-
-        exports.Set("Library", func);
-        return exports;
+        return DefineClass(
+            env,
+            "Library",
+            {
+                InstanceMethod("func", &Library::GetFunction),
+                InstanceMethod("symbol", &Library::GetSymbol),
+                InstanceMethod("close", &Library::Close),
+                InstanceAccessor("path", &Library::GetPath, nullptr),
+                InstanceAccessor("loaded", &Library::GetIsLoaded, nullptr),
+            });
     }
 
     Library::Library(const Napi::CallbackInfo &info)
         : Napi::ObjectWrap<Library>(info), handle_(nullptr), is_loaded_(false)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (info.Length() < 1)
@@ -152,6 +152,8 @@ namespace ctypes
 
     Library::~Library()
     {
+        spdlog::trace(__FUNCTION__);
+
         if (is_loaded_ && handle_ && !path_.empty())
         {
             CloseSharedLibrary(handle_);
@@ -160,6 +162,8 @@ namespace ctypes
 
     Napi::Value Library::GetFunction(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (!is_loaded_)
@@ -223,11 +227,20 @@ namespace ctypes
             args.push_back(info[3]);
         }
 
-        return FFIFunction::constructor.New(args);
+        // Ottieni il costruttore FFIFunction dall'addon
+        CTypesAddon *addon = env.GetInstanceData<CTypesAddon>();
+        if (!addon || !addon->FFIFunctionConstructor)
+        {
+            Napi::Error::New(env, "FFIFunction constructor not available").ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        return addon->FFIFunctionConstructor->New(args);
     }
 
     Napi::Value Library::GetSymbol(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (!is_loaded_)
@@ -263,6 +276,8 @@ namespace ctypes
 
     Napi::Value Library::Close(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (is_loaded_ && handle_ && !path_.empty())
@@ -277,11 +292,15 @@ namespace ctypes
 
     Napi::Value Library::GetPath(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         return Napi::String::New(info.Env(), path_);
     }
 
     Napi::Value Library::GetIsLoaded(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         return Napi::Boolean::New(info.Env(), is_loaded_);
     }
 

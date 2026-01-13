@@ -1,14 +1,7 @@
 #ifndef CTYPES_CALLBACK_H
 #define CTYPES_CALLBACK_H
 
-#include <napi.h>
-#include <ffi.h>
-#include <vector>
-#include <memory>
-#include <mutex>
-#include <condition_variable>
-#include <thread>
-#include <atomic>
+#include "shared.h"
 #include "types.h"
 
 namespace ctypes
@@ -37,8 +30,7 @@ namespace ctypes
     class Callback : public Napi::ObjectWrap<Callback>
     {
     public:
-        static Napi::Object Init(Napi::Env env, Napi::Object exports);
-        static Napi::FunctionReference constructor;
+        static Napi::Function GetClass(Napi::Env env);
 
         Callback(const Napi::CallbackInfo &info);
         ~Callback();
@@ -82,8 +74,7 @@ namespace ctypes
     class ThreadSafeCallback : public Napi::ObjectWrap<ThreadSafeCallback>
     {
     public:
-        static Napi::Object Init(Napi::Env env, Napi::Object exports);
-        static Napi::FunctionReference constructor;
+        static Napi::Function GetClass(Napi::Env env);
 
         ThreadSafeCallback(const Napi::CallbackInfo &info);
         ~ThreadSafeCallback();

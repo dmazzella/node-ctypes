@@ -1,26 +1,22 @@
 #include "callback.h"
-#include <cstring>
-#include <stdexcept>
-#include <chrono>
 
 namespace ctypes
 {
-
     // ========================================================================
     // Callback - Solo main thread, semplice e veloce
     // ========================================================================
 
-    Napi::FunctionReference Callback::constructor;
-
     // Handler per Callback (main thread only)
     static void CallbackHandler(ffi_cif *cif, void *ret, void **args, void *user_data)
     {
+        spdlog::trace(__FUNCTION__);
+
         CallbackData *data = static_cast<CallbackData *>(user_data);
 
         if (data->released.load(std::memory_order_acquire))
         {
             // Callback rilasciato, ritorna zero
-            if (data->return_type != CType::VOID)
+            if (data->return_type != CType::CTYPES_VOID)
             {
                 memset(ret, 0, CTypeSize(data->return_type));
             }
@@ -86,7 +82,7 @@ namespace ctypes
             }
 
             // Ritorna valore zero per evitare comportamenti indefiniti in C
-            if (data->return_type != CType::VOID)
+            if (data->return_type != CType::CTYPES_VOID)
             {
                 memset(ret, 0, CTypeSize(data->return_type));
             }
@@ -113,7 +109,7 @@ namespace ctypes
                 }
             }
 
-            if (data->return_type != CType::VOID)
+            if (data->return_type != CType::CTYPES_VOID)
             {
                 memset(ret, 0, CTypeSize(data->return_type));
             }
@@ -121,7 +117,7 @@ namespace ctypes
         }
 
         // Converti risultato JS -> C
-        if (data->return_type != CType::VOID)
+        if (data->return_type != CType::CTYPES_VOID)
         {
             size_t ret_size = CTypeSize(data->return_type);
             uint8_t buffer[64];
@@ -138,26 +134,27 @@ namespace ctypes
         }
     }
 
-    Napi::Object Callback::Init(Napi::Env env, Napi::Object exports)
+    Napi::Function Callback::GetClass(Napi::Env env)
     {
-        Napi::Function func = DefineClass(env, "Callback", {
-                                                               InstanceMethod("getPointer", &Callback::GetPointer),
-                                                               InstanceMethod("release", &Callback::Release),
-                                                               InstanceMethod("setErrorHandler", &Callback::SetErrorHandler),
-                                                               InstanceMethod("getLastError", &Callback::GetLastError),
-                                                               InstanceAccessor("pointer", &Callback::GetPointer, nullptr),
-                                                           });
+        spdlog::trace(__FUNCTION__);
 
-        constructor = Napi::Persistent(func);
-        constructor.SuppressDestruct();
-
-        exports.Set("Callback", func);
-        return exports;
+        return DefineClass(
+            env,
+            "Callback",
+            {
+                InstanceMethod("getPointer", &Callback::GetPointer),
+                InstanceMethod("release", &Callback::Release),
+                InstanceMethod("setErrorHandler", &Callback::SetErrorHandler),
+                InstanceMethod("getLastError", &Callback::GetLastError),
+                InstanceAccessor("pointer", &Callback::GetPointer, nullptr),
+            });
     }
 
     Callback::Callback(const Napi::CallbackInfo &info)
         : Napi::ObjectWrap<Callback>(info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (info.Length() < 3)
@@ -184,7 +181,7 @@ namespace ctypes
             {
                 data_->return_type = StringToCType(info[1].As<Napi::String>().Utf8Value());
             }
-            else if (info[1].IsObject() && info[1].As<Napi::Object>().InstanceOf(TypeInfo::constructor.Value()))
+            else if (info[1].IsObject() && IsTypeInfo(info[1].As<Napi::Object>()))
             {
                 data_->return_type = Napi::ObjectWrap<TypeInfo>::Unwrap(info[1].As<Napi::Object>())->GetCType();
             }
@@ -218,7 +215,7 @@ namespace ctypes
                 {
                     data_->arg_types.push_back(StringToCType(elem.As<Napi::String>().Utf8Value()));
                 }
-                else if (elem.IsObject() && elem.As<Napi::Object>().InstanceOf(TypeInfo::constructor.Value()))
+                else if (elem.IsObject() && IsTypeInfo(elem.As<Napi::Object>()))
                 {
                     data_->arg_types.push_back(
                         Napi::ObjectWrap<TypeInfo>::Unwrap(elem.As<Napi::Object>())->GetCType());
@@ -290,6 +287,8 @@ namespace ctypes
 
     Callback::~Callback()
     {
+        spdlog::trace(__FUNCTION__);
+
         // Cleanup - il flag atomico previene double-free
         if (data_ && !data_->released.exchange(true))
         {
@@ -309,6 +308,8 @@ namespace ctypes
 
     Napi::Value Callback::GetPointer(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (!data_ || data_->released.load())
@@ -322,6 +323,8 @@ namespace ctypes
 
     Napi::Value Callback::Release(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         if (data_ && !data_->released.exchange(true))
         {
             if (data_->closure)
@@ -340,6 +343,8 @@ namespace ctypes
 
     Napi::Value Callback::SetErrorHandler(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (!data_ || data_->released.load())
@@ -360,6 +365,8 @@ namespace ctypes
 
     Napi::Value Callback::GetLastError(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (!data_)
@@ -380,16 +387,16 @@ namespace ctypes
     // ThreadSafeCallback - Supporta chiamate da qualsiasi thread
     // ========================================================================
 
-    Napi::FunctionReference ThreadSafeCallback::constructor;
-
     // Handler per ThreadSafeCallback
     static void ThreadSafeCallbackHandler(ffi_cif *cif, void *ret, void **args, void *user_data)
     {
+        spdlog::trace(__FUNCTION__);
+
         ThreadSafeCallbackData *data = static_cast<ThreadSafeCallbackData *>(user_data);
 
         if (data->released.load(std::memory_order_acquire))
         {
-            if (data->return_type != CType::VOID)
+            if (data->return_type != CType::CTYPES_VOID)
             {
                 memset(ret, 0, CTypeSize(data->return_type));
             }
@@ -454,7 +461,7 @@ namespace ctypes
                     }
                 }
 
-                if (data->return_type != CType::VOID)
+                if (data->return_type != CType::CTYPES_VOID)
                 {
                     memset(ret, 0, CTypeSize(data->return_type));
                 }
@@ -481,14 +488,14 @@ namespace ctypes
                     }
                 }
 
-                if (data->return_type != CType::VOID)
+                if (data->return_type != CType::CTYPES_VOID)
                 {
                     memset(ret, 0, CTypeSize(data->return_type));
                 }
                 return;
             }
 
-            if (data->return_type != CType::VOID)
+            if (data->return_type != CType::CTYPES_VOID)
             {
                 size_t ret_size = CTypeSize(data->return_type);
                 uint8_t buffer[64];
@@ -596,7 +603,7 @@ namespace ctypes
                 // Salva risultato
                 {
                     std::lock_guard<std::mutex> lock(data->result_mutex);
-                    if (data->return_type != CType::VOID && !result.IsEmpty())
+                    if (data->return_type != CType::CTYPES_VOID && !result.IsEmpty())
                     {
                         JSToC(env, result, data->return_type, data->result_buffer, sizeof(data->result_buffer));
                     }
@@ -608,7 +615,7 @@ namespace ctypes
             // Verifica nuovamente se rilasciato (race condition check)
             if (data->released.load(std::memory_order_acquire))
             {
-                if (data->return_type != CType::VOID)
+                if (data->return_type != CType::CTYPES_VOID)
                 {
                     memset(ret, 0, CTypeSize(data->return_type));
                 }
@@ -624,7 +631,7 @@ namespace ctypes
                     data->last_error = "Failed to queue callback (napi_status: " + std::to_string(status) + ")";
                 }
 
-                if (data->return_type != CType::VOID)
+                if (data->return_type != CType::CTYPES_VOID)
                 {
                     memset(ret, 0, CTypeSize(data->return_type));
                 }
@@ -639,33 +646,34 @@ namespace ctypes
             }
 
             // Copia risultato
-            if (data->return_type != CType::VOID)
+            if (data->return_type != CType::CTYPES_VOID)
             {
                 memcpy(ret, data->result_buffer, CTypeSize(data->return_type));
             }
         }
     }
 
-    Napi::Object ThreadSafeCallback::Init(Napi::Env env, Napi::Object exports)
+    Napi::Function ThreadSafeCallback::GetClass(Napi::Env env)
     {
-        Napi::Function func = DefineClass(env, "ThreadSafeCallback", {
-                                                                         InstanceMethod("getPointer", &ThreadSafeCallback::GetPointer),
-                                                                         InstanceMethod("release", &ThreadSafeCallback::Release),
-                                                                         InstanceMethod("setErrorHandler", &ThreadSafeCallback::SetErrorHandler),
-                                                                         InstanceMethod("getLastError", &ThreadSafeCallback::GetLastError),
-                                                                         InstanceAccessor("pointer", &ThreadSafeCallback::GetPointer, nullptr),
-                                                                     });
+        spdlog::trace(__FUNCTION__);
 
-        constructor = Napi::Persistent(func);
-        constructor.SuppressDestruct();
-
-        exports.Set("ThreadSafeCallback", func);
-        return exports;
+        return DefineClass(
+            env,
+            "ThreadSafeCallback",
+            {
+                InstanceMethod("getPointer", &ThreadSafeCallback::GetPointer),
+                InstanceMethod("release", &ThreadSafeCallback::Release),
+                InstanceMethod("setErrorHandler", &ThreadSafeCallback::SetErrorHandler),
+                InstanceMethod("getLastError", &ThreadSafeCallback::GetLastError),
+                InstanceAccessor("pointer", &ThreadSafeCallback::GetPointer, nullptr),
+            });
     }
 
     ThreadSafeCallback::ThreadSafeCallback(const Napi::CallbackInfo &info)
         : Napi::ObjectWrap<ThreadSafeCallback>(info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (info.Length() < 3)
@@ -695,7 +703,7 @@ namespace ctypes
             {
                 data_->return_type = StringToCType(info[1].As<Napi::String>().Utf8Value());
             }
-            else if (info[1].IsObject() && info[1].As<Napi::Object>().InstanceOf(TypeInfo::constructor.Value()))
+            else if (info[1].IsObject() && IsTypeInfo(info[1].As<Napi::Object>()))
             {
                 data_->return_type = Napi::ObjectWrap<TypeInfo>::Unwrap(info[1].As<Napi::Object>())->GetCType();
             }
@@ -729,7 +737,7 @@ namespace ctypes
                 {
                     data_->arg_types.push_back(StringToCType(elem.As<Napi::String>().Utf8Value()));
                 }
-                else if (elem.IsObject() && elem.As<Napi::Object>().InstanceOf(TypeInfo::constructor.Value()))
+                else if (elem.IsObject() && IsTypeInfo(elem.As<Napi::Object>()))
                 {
                     data_->arg_types.push_back(
                         Napi::ObjectWrap<TypeInfo>::Unwrap(elem.As<Napi::Object>())->GetCType());
@@ -811,11 +819,15 @@ namespace ctypes
 
     ThreadSafeCallback::~ThreadSafeCallback()
     {
+        spdlog::trace(__FUNCTION__);
+
         // Il cleanup verrà fatto in Release()
     }
 
     Napi::Value ThreadSafeCallback::SetErrorHandler(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (!data_ || data_->released.load())
@@ -836,6 +848,8 @@ namespace ctypes
 
     Napi::Value ThreadSafeCallback::GetLastError(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (!data_)
@@ -854,6 +868,8 @@ namespace ctypes
 
     Napi::Value ThreadSafeCallback::GetPointer(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (!data_ || data_->released.load())
@@ -867,6 +883,8 @@ namespace ctypes
 
     Napi::Value ThreadSafeCallback::Release(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         if (data_ && !data_->released.exchange(true))
         {
             if (data_->closure)

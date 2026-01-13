@@ -23,6 +23,7 @@
     "install": "cmake-js compile --target ctypes",
     "build": "cmake-js compile --target ctypes",
     "build:debug": "cmake-js compile --debug",
+    "build:electron": "cmake-js compile --target ctypes --runtime=electron --runtime-version=39.2.7 --arch=x64",
     "rebuild": "cmake-js rebuild",
     "clean": "cmake-js clean"
   },

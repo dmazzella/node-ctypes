@@ -1,12 +1,8 @@
 #include "struct.h"
 #include "array.h"
-#include <cstring>
-#include <algorithm>
 
 namespace ctypes
 {
-
-    Napi::FunctionReference StructType::constructor;
 
     // ============================================================================
     // StructInfo - Core logic (come CPython StgInfo)
@@ -15,12 +11,15 @@ namespace ctypes
     StructInfo::StructInfo(bool is_union)
         : is_union_(is_union), size_(0), alignment_(1)
     {
+        spdlog::trace(__FUNCTION__);
     }
 
     StructInfo::~StructInfo() = default;
 
     size_t StructInfo::GetTypeAlignment(CType type, std::shared_ptr<StructInfo> nested, std::shared_ptr<ArrayInfo> array)
     {
+        spdlog::trace(__FUNCTION__);
+
         if (array)
         {
             return array->GetAlignment();
@@ -33,28 +32,28 @@ namespace ctypes
 
         switch (type)
         {
-        case CType::INT8:
-        case CType::UINT8:
-        case CType::BOOL:
+        case CType::CTYPES_INT8:
+        case CType::CTYPES_UINT8:
+        case CType::CTYPES_BOOL:
             return 1;
-        case CType::INT16:
-        case CType::UINT16:
-        case CType::WCHAR:
+        case CType::CTYPES_INT16:
+        case CType::CTYPES_UINT16:
+        case CType::CTYPES_WCHAR:
             return 2;
-        case CType::INT32:
-        case CType::UINT32:
-        case CType::FLOAT:
-        case CType::LONG: // 4 su Windows
-        case CType::ULONG:
+        case CType::CTYPES_INT32:
+        case CType::CTYPES_UINT32:
+        case CType::CTYPES_FLOAT:
+        case CType::CTYPES_LONG: // 4 su Windows
+        case CType::CTYPES_ULONG:
             return 4;
-        case CType::INT64:
-        case CType::UINT64:
-        case CType::DOUBLE:
-        case CType::POINTER:
-        case CType::STRING:
-        case CType::WSTRING:
-        case CType::SIZE_T:
-        case CType::SSIZE_T:
+        case CType::CTYPES_INT64:
+        case CType::CTYPES_UINT64:
+        case CType::CTYPES_DOUBLE:
+        case CType::CTYPES_POINTER:
+        case CType::CTYPES_STRING:
+        case CType::CTYPES_WSTRING:
+        case CType::CTYPES_SIZE_T:
+        case CType::CTYPES_SSIZE_T:
             return sizeof(void *); // 8 su x64, 4 su x86
         default:
             return 1;
@@ -63,6 +62,8 @@ namespace ctypes
 
     bool StructInfo::AddField(const std::string &name, CType type, std::shared_ptr<StructInfo> nested, bool is_anonymous)
     {
+        spdlog::trace(__FUNCTION__);
+
         FieldInfo field;
         field.name = name;
         field.type = type;
@@ -85,9 +86,11 @@ namespace ctypes
 
     bool StructInfo::AddArrayField(const std::string &name, std::shared_ptr<ArrayInfo> array_type)
     {
+        spdlog::trace(__FUNCTION__);
+
         FieldInfo field;
         field.name = name;
-        field.type = CType::ARRAY;
+        field.type = CType::CTYPES_ARRAY;
         field.struct_type = nullptr;
         field.array_type = array_type;
         field.size = array_type->GetSize();
@@ -99,6 +102,8 @@ namespace ctypes
 
     void StructInfo::CalculateLayout()
     {
+        spdlog::trace(__FUNCTION__);
+
         if (fields_.empty())
         {
             size_ = 0;
@@ -153,6 +158,8 @@ namespace ctypes
 
     ffi_type *StructInfo::GetFFIType()
     {
+        spdlog::trace(__FUNCTION__);
+
         if (ffi_type_)
         {
             return ffi_type_.get();
@@ -188,6 +195,8 @@ namespace ctypes
 
     bool StructInfo::JSToStruct(Napi::Env env, Napi::Object obj, void *buffer, size_t bufsize)
     {
+        spdlog::trace(__FUNCTION__);
+
         if (bufsize < size_)
         {
             Napi::TypeError::New(env, "Buffer too small for struct").ThrowAsJavaScriptException();
@@ -265,6 +274,8 @@ namespace ctypes
 
     Napi::Object StructInfo::StructToJS(Napi::Env env, const void *buffer)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Object obj = Napi::Object::New(env);
 
         for (const auto &field : fields_)
@@ -310,27 +321,27 @@ namespace ctypes
     // StructType - Napi wrapper
     // ============================================================================
 
-    Napi::Object StructType::Init(Napi::Env env, Napi::Object exports)
+    Napi::Function StructType::GetClass(Napi::Env env)
     {
-        Napi::Function func = DefineClass(env, "StructType",
-                                          {
-                                              InstanceMethod("addField", &StructType::AddField),
-                                              InstanceMethod("getSize", &StructType::GetSize),
-                                              InstanceMethod("getAlignment", &StructType::GetAlignment),
-                                              InstanceMethod("create", &StructType::Create),
-                                              InstanceMethod("read", &StructType::Read),
-                                          });
+        spdlog::trace(__FUNCTION__);
 
-        constructor = Napi::Persistent(func);
-        constructor.SuppressDestruct();
-
-        exports.Set("StructType", func);
-        return exports;
+        return DefineClass(
+            env,
+            "StructType",
+            {
+                InstanceMethod("addField", &StructType::AddField),
+                InstanceMethod("getSize", &StructType::GetSize),
+                InstanceMethod("getAlignment", &StructType::GetAlignment),
+                InstanceMethod("create", &StructType::Create),
+                InstanceMethod("read", &StructType::Read),
+            });
     }
 
     StructType::StructType(const Napi::CallbackInfo &info)
         : Napi::ObjectWrap<StructType>(info)
     {
+        spdlog::trace(__FUNCTION__);
+
         // Napi::Env env = info.Env();
 
         // Opzionale: { union: true }
@@ -349,6 +360,8 @@ namespace ctypes
 
     Napi::Value StructType::AddField(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (info.Length() < 2)
@@ -383,27 +396,27 @@ namespace ctypes
         else if (info[1].IsObject())
         {
             Napi::Object type_obj = info[1].As<Napi::Object>();
-            if (type_obj.InstanceOf(StructType::constructor.Value()))
+            if (IsStructType(type_obj))
             {
                 StructType *st = Napi::ObjectWrap<StructType>::Unwrap(type_obj);
                 nested = st->GetStructInfo();
-                type = CType::STRUCT;
+                type = CType::CTYPES_STRUCT;
             }
-            else if (type_obj.InstanceOf(ArrayType::constructor.Value()))
+            else if (IsArrayType(type_obj))
             {
                 ArrayType *at = Napi::ObjectWrap<ArrayType>::Unwrap(type_obj);
                 array = at->GetArrayInfo();
-                type = CType::ARRAY;
+                type = CType::CTYPES_ARRAY;
             }
             else if (type_obj.Has("_native") && type_obj.Get("_native").IsObject())
             {
                 // È un wrapper JavaScript di array() - estrai il _native
                 Napi::Object native_obj = type_obj.Get("_native").As<Napi::Object>();
-                if (native_obj.InstanceOf(ArrayType::constructor.Value()))
+                if (IsArrayType(native_obj))
                 {
                     ArrayType *at = Napi::ObjectWrap<ArrayType>::Unwrap(native_obj);
                     array = at->GetArrayInfo();
-                    type = CType::ARRAY;
+                    type = CType::CTYPES_ARRAY;
                 }
                 else
                 {
@@ -438,16 +451,22 @@ namespace ctypes
 
     Napi::Value StructType::GetSize(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         return Napi::Number::New(info.Env(), struct_info_->GetSize());
     }
 
     Napi::Value StructType::GetAlignment(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         return Napi::Number::New(info.Env(), struct_info_->GetAlignment());
     }
 
     Napi::Value StructType::Create(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         // Crea buffer e popola da JS object (se fornito)
@@ -471,6 +490,8 @@ namespace ctypes
 
     Napi::Value StructType::Read(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (info.Length() < 1 || !info[0].IsBuffer())

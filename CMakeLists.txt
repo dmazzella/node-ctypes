@@ -1,11 +1,15 @@
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
+
 project(ctypes)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-add_compile_definitions(NAPI_VERSION=9)
-add_compile_definitions(NAPI_CPP_EXCEPTIONS)
+add_definitions(-DNAPI_VERSION=9)
+add_definitions(-DNAPI_CPP_EXCEPTIONS)
+add_definitions(-DNODE_GYP_MODULE_NAME=ctypes)
 
 include(FetchContent)
 
@@ -117,16 +121,7 @@ endif()
 # node-ctypes module
 # ============================================================================
 
-set(SOURCE_FILES
-    src/version.cc
-    src/ctypes.cc
-    src/library.cc
-    src/function.cc
-    src/types.cc
-    src/callback.cc
-    src/struct.cc
-    src/array.cc
-)
+file(GLOB_RECURSE SOURCE_FILES "src/*.cc" "src/*.h")
 
 add_library(${PROJECT_NAME} SHARED ${SOURCE_FILES})
 
@@ -149,6 +144,9 @@ if(NODE_ADDON_API_DIR)
     string(REPLACE "\"" "" NODE_ADDON_API_DIR ${NODE_ADDON_API_DIR})
     target_include_directories(${PROJECT_NAME} PRIVATE ${NODE_ADDON_API_DIR})
 endif()
+
+# third-party
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/third-party)
 
 # libffi
 target_include_directories(${PROJECT_NAME} PRIVATE ${FFI_INCLUDE_DIRS})

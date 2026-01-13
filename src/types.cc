@@ -1,7 +1,4 @@
 #include "types.h"
-#include <cstring>
-#include <cwchar>
-#include <stdexcept>
 
 // ssize_t non esiste su Windows MSVC
 #ifdef _MSC_VER
@@ -12,62 +9,62 @@ typedef SSIZE_T ssize_t;
 namespace ctypes
 {
 
-    Napi::FunctionReference TypeInfo::constructor;
-
     // Mappa stringa -> CType
     static const std::unordered_map<std::string, CType> type_map = {
-        {"void", CType::VOID},
-        {"int8", CType::INT8},
-        {"int8_t", CType::INT8},
-        {"char", CType::INT8},
-        {"uint8", CType::UINT8},
-        {"uint8_t", CType::UINT8},
-        {"uchar", CType::UINT8},
-        {"unsigned char", CType::UINT8},
-        {"int16", CType::INT16},
-        {"int16_t", CType::INT16},
-        {"short", CType::INT16},
-        {"uint16", CType::UINT16},
-        {"uint16_t", CType::UINT16},
-        {"ushort", CType::UINT16},
-        {"unsigned short", CType::UINT16},
-        {"int32", CType::INT32},
-        {"int32_t", CType::INT32},
-        {"int", CType::INT32},
-        {"uint32", CType::UINT32},
-        {"uint32_t", CType::UINT32},
-        {"uint", CType::UINT32},
-        {"unsigned int", CType::UINT32},
-        {"int64", CType::INT64},
-        {"int64_t", CType::INT64},
-        {"long long", CType::INT64},
-        {"uint64", CType::UINT64},
-        {"uint64_t", CType::UINT64},
-        {"unsigned long long", CType::UINT64},
-        {"float", CType::FLOAT},
-        {"double", CType::DOUBLE},
-        {"pointer", CType::POINTER},
-        {"void*", CType::POINTER},
-        {"ptr", CType::POINTER},
-        {"string", CType::STRING},
-        {"char*", CType::STRING},
-        {"cstring", CType::STRING},
-        {"wstring", CType::WSTRING},
-        {"wchar_t*", CType::WSTRING},
-        {"wchar", CType::WCHAR},
-        {"wchar_t", CType::WCHAR},
-        {"bool", CType::BOOL},
-        {"_Bool", CType::BOOL},
-        {"size_t", CType::SIZE_T},
-        {"ssize_t", CType::SSIZE_T},
-        {"long", CType::LONG},
-        {"c_long", CType::LONG},
-        {"ulong", CType::ULONG},
-        {"unsigned long", CType::ULONG},
-        {"c_ulong", CType::ULONG}};
+        {"void", CType::CTYPES_VOID},
+        {"int8", CType::CTYPES_INT8},
+        {"int8_t", CType::CTYPES_INT8},
+        {"char", CType::CTYPES_INT8},
+        {"uint8", CType::CTYPES_UINT8},
+        {"uint8_t", CType::CTYPES_UINT8},
+        {"uchar", CType::CTYPES_UINT8},
+        {"unsigned char", CType::CTYPES_UINT8},
+        {"int16", CType::CTYPES_INT16},
+        {"int16_t", CType::CTYPES_INT16},
+        {"short", CType::CTYPES_INT16},
+        {"uint16", CType::CTYPES_UINT16},
+        {"uint16_t", CType::CTYPES_UINT16},
+        {"ushort", CType::CTYPES_UINT16},
+        {"unsigned short", CType::CTYPES_UINT16},
+        {"int32", CType::CTYPES_INT32},
+        {"int32_t", CType::CTYPES_INT32},
+        {"int", CType::CTYPES_INT32},
+        {"uint32", CType::CTYPES_UINT32},
+        {"uint32_t", CType::CTYPES_UINT32},
+        {"uint", CType::CTYPES_UINT32},
+        {"unsigned int", CType::CTYPES_UINT32},
+        {"int64", CType::CTYPES_INT64},
+        {"int64_t", CType::CTYPES_INT64},
+        {"long long", CType::CTYPES_INT64},
+        {"uint64", CType::CTYPES_UINT64},
+        {"uint64_t", CType::CTYPES_UINT64},
+        {"unsigned long long", CType::CTYPES_UINT64},
+        {"float", CType::CTYPES_FLOAT},
+        {"double", CType::CTYPES_DOUBLE},
+        {"pointer", CType::CTYPES_POINTER},
+        {"void*", CType::CTYPES_POINTER},
+        {"ptr", CType::CTYPES_POINTER},
+        {"string", CType::CTYPES_STRING},
+        {"char*", CType::CTYPES_STRING},
+        {"cstring", CType::CTYPES_STRING},
+        {"wstring", CType::CTYPES_WSTRING},
+        {"wchar_t*", CType::CTYPES_WSTRING},
+        {"wchar", CType::CTYPES_WCHAR},
+        {"wchar_t", CType::CTYPES_WCHAR},
+        {"bool", CType::CTYPES_BOOL},
+        {"_Bool", CType::CTYPES_BOOL},
+        {"size_t", CType::CTYPES_SIZE_T},
+        {"ssize_t", CType::CTYPES_SSIZE_T},
+        {"long", CType::CTYPES_LONG},
+        {"c_long", CType::CTYPES_LONG},
+        {"ulong", CType::CTYPES_ULONG},
+        {"unsigned long", CType::CTYPES_ULONG},
+        {"c_ulong", CType::CTYPES_ULONG}};
 
     CType StringToCType(const std::string &name)
     {
+        spdlog::trace(__FUNCTION__);
+
         auto it = type_map.find(name);
         if (it != type_map.end())
         {
@@ -78,57 +75,59 @@ namespace ctypes
 
     ffi_type *CTypeToFFI(CType type)
     {
+        spdlog::trace(__FUNCTION__);
+
         switch (type)
         {
-        case CType::VOID:
+        case CType::CTYPES_VOID:
             return &ffi_type_void;
-        case CType::INT8:
+        case CType::CTYPES_INT8:
             return &ffi_type_sint8;
-        case CType::UINT8:
+        case CType::CTYPES_UINT8:
             return &ffi_type_uint8;
-        case CType::INT16:
+        case CType::CTYPES_INT16:
             return &ffi_type_sint16;
-        case CType::UINT16:
+        case CType::CTYPES_UINT16:
             return &ffi_type_uint16;
-        case CType::INT32:
+        case CType::CTYPES_INT32:
             return &ffi_type_sint32;
-        case CType::UINT32:
+        case CType::CTYPES_UINT32:
             return &ffi_type_uint32;
-        case CType::INT64:
+        case CType::CTYPES_INT64:
             return &ffi_type_sint64;
-        case CType::UINT64:
+        case CType::CTYPES_UINT64:
             return &ffi_type_uint64;
-        case CType::FLOAT:
+        case CType::CTYPES_FLOAT:
             return &ffi_type_float;
-        case CType::DOUBLE:
+        case CType::CTYPES_DOUBLE:
             return &ffi_type_double;
-        case CType::POINTER:
+        case CType::CTYPES_POINTER:
             return &ffi_type_pointer;
-        case CType::STRING:
+        case CType::CTYPES_STRING:
             return &ffi_type_pointer;
-        case CType::WSTRING:
+        case CType::CTYPES_WSTRING:
             return &ffi_type_pointer;
-        case CType::WCHAR:
+        case CType::CTYPES_WCHAR:
             // wchar_t è 16-bit su Windows, 32-bit su Unix
 #ifdef _WIN32
             return &ffi_type_uint16;
 #else
             return &ffi_type_uint32;
 #endif
-        case CType::BOOL:
+        case CType::CTYPES_BOOL:
             return &ffi_type_uint8;
-        case CType::SIZE_T:
+        case CType::CTYPES_SIZE_T:
             return &ffi_type_pointer; // size_t è tipicamente pointer-sized
-        case CType::SSIZE_T:
+        case CType::CTYPES_SSIZE_T:
             return &ffi_type_pointer;
-        case CType::LONG:
+        case CType::CTYPES_LONG:
             // long è 32-bit su Windows (LLP64), 64-bit su Unix 64-bit (LP64)
 #ifdef _WIN32
             return &ffi_type_sint32;
 #else
             return sizeof(long) == 8 ? &ffi_type_sint64 : &ffi_type_sint32;
 #endif
-        case CType::ULONG:
+        case CType::CTYPES_ULONG:
 #ifdef _WIN32
             return &ffi_type_uint32;
 #else
@@ -141,47 +140,49 @@ namespace ctypes
 
     size_t CTypeSize(CType type)
     {
+        spdlog::trace(__FUNCTION__);
+
         switch (type)
         {
-        case CType::VOID:
+        case CType::CTYPES_VOID:
             return 0;
-        case CType::INT8:
+        case CType::CTYPES_INT8:
             return 1;
-        case CType::UINT8:
+        case CType::CTYPES_UINT8:
             return 1;
-        case CType::INT16:
+        case CType::CTYPES_INT16:
             return 2;
-        case CType::UINT16:
+        case CType::CTYPES_UINT16:
             return 2;
-        case CType::INT32:
+        case CType::CTYPES_INT32:
             return 4;
-        case CType::UINT32:
+        case CType::CTYPES_UINT32:
             return 4;
-        case CType::INT64:
+        case CType::CTYPES_INT64:
             return 8;
-        case CType::UINT64:
+        case CType::CTYPES_UINT64:
             return 8;
-        case CType::FLOAT:
+        case CType::CTYPES_FLOAT:
             return 4;
-        case CType::DOUBLE:
+        case CType::CTYPES_DOUBLE:
             return 8;
-        case CType::POINTER:
+        case CType::CTYPES_POINTER:
             return sizeof(void *);
-        case CType::STRING:
+        case CType::CTYPES_STRING:
             return sizeof(char *);
-        case CType::WSTRING:
+        case CType::CTYPES_WSTRING:
             return sizeof(wchar_t *);
-        case CType::WCHAR:
+        case CType::CTYPES_WCHAR:
             return sizeof(wchar_t);
-        case CType::BOOL:
+        case CType::CTYPES_BOOL:
             return 1;
-        case CType::SIZE_T:
+        case CType::CTYPES_SIZE_T:
             return sizeof(size_t);
-        case CType::SSIZE_T:
+        case CType::CTYPES_SSIZE_T:
             return sizeof(ssize_t);
-        case CType::LONG:
+        case CType::CTYPES_LONG:
             return sizeof(long);
-        case CType::ULONG:
+        case CType::CTYPES_ULONG:
             return sizeof(unsigned long);
         default:
             return 0;
@@ -190,12 +191,14 @@ namespace ctypes
 
     int JSToC(Napi::Env env, Napi::Value value, CType type, void *buffer, size_t bufsize)
     {
+        spdlog::trace(__FUNCTION__);
+
         switch (type)
         {
-        case CType::VOID:
+        case CType::CTYPES_VOID:
             return 0;
 
-        case CType::INT8:
+        case CType::CTYPES_INT8:
         {
             if (bufsize < 1)
                 return -1;
@@ -204,7 +207,7 @@ namespace ctypes
             return 1;
         }
 
-        case CType::UINT8:
+        case CType::CTYPES_UINT8:
         {
             if (bufsize < 1)
                 return -1;
@@ -213,7 +216,7 @@ namespace ctypes
             return 1;
         }
 
-        case CType::INT16:
+        case CType::CTYPES_INT16:
         {
             if (bufsize < 2)
                 return -1;
@@ -222,7 +225,7 @@ namespace ctypes
             return 2;
         }
 
-        case CType::UINT16:
+        case CType::CTYPES_UINT16:
         {
             if (bufsize < 2)
                 return -1;
@@ -231,7 +234,7 @@ namespace ctypes
             return 2;
         }
 
-        case CType::INT32:
+        case CType::CTYPES_INT32:
         {
             if (bufsize < 4)
                 return -1;
@@ -240,7 +243,7 @@ namespace ctypes
             return 4;
         }
 
-        case CType::UINT32:
+        case CType::CTYPES_UINT32:
         {
             if (bufsize < 4)
                 return -1;
@@ -249,7 +252,7 @@ namespace ctypes
             return 4;
         }
 
-        case CType::INT64:
+        case CType::CTYPES_INT64:
         {
             if (bufsize < 8)
                 return -1;
@@ -267,7 +270,7 @@ namespace ctypes
             return 8;
         }
 
-        case CType::UINT64:
+        case CType::CTYPES_UINT64:
         {
             if (bufsize < 8)
                 return -1;
@@ -285,7 +288,7 @@ namespace ctypes
             return 8;
         }
 
-        case CType::FLOAT:
+        case CType::CTYPES_FLOAT:
         {
             if (bufsize < 4)
                 return -1;
@@ -294,7 +297,7 @@ namespace ctypes
             return 4;
         }
 
-        case CType::DOUBLE:
+        case CType::CTYPES_DOUBLE:
         {
             if (bufsize < 8)
                 return -1;
@@ -303,7 +306,7 @@ namespace ctypes
             return 8;
         }
 
-        case CType::BOOL:
+        case CType::CTYPES_BOOL:
         {
             if (bufsize < 1)
                 return -1;
@@ -312,7 +315,7 @@ namespace ctypes
             return 1;
         }
 
-        case CType::POINTER:
+        case CType::CTYPES_POINTER:
         {
             if (bufsize < sizeof(void *))
                 return -1;
@@ -346,7 +349,7 @@ namespace ctypes
             return sizeof(void *);
         }
 
-        case CType::STRING:
+        case CType::CTYPES_STRING:
         {
             if (bufsize < sizeof(char *))
                 return -1;
@@ -373,7 +376,7 @@ namespace ctypes
             return sizeof(char *);
         }
 
-        case CType::WSTRING:
+        case CType::CTYPES_WSTRING:
         {
             if (bufsize < sizeof(wchar_t *))
                 return -1;
@@ -394,7 +397,7 @@ namespace ctypes
             return sizeof(wchar_t *);
         }
 
-        case CType::WCHAR:
+        case CType::CTYPES_WCHAR:
         {
             if (bufsize < sizeof(wchar_t))
                 return -1;
@@ -417,7 +420,7 @@ namespace ctypes
             return sizeof(wchar_t);
         }
 
-        case CType::SIZE_T:
+        case CType::CTYPES_SIZE_T:
         {
             if (bufsize < sizeof(size_t))
                 return -1;
@@ -435,7 +438,7 @@ namespace ctypes
             return sizeof(size_t);
         }
 
-        case CType::SSIZE_T:
+        case CType::CTYPES_SSIZE_T:
         {
             if (bufsize < sizeof(ssize_t))
                 return -1;
@@ -453,7 +456,7 @@ namespace ctypes
             return sizeof(ssize_t);
         }
 
-        case CType::LONG:
+        case CType::CTYPES_LONG:
         {
             if (bufsize < sizeof(long))
                 return -1;
@@ -471,7 +474,7 @@ namespace ctypes
             return sizeof(long);
         }
 
-        case CType::ULONG:
+        case CType::CTYPES_ULONG:
         {
             if (bufsize < sizeof(unsigned long))
                 return -1;
@@ -496,89 +499,91 @@ namespace ctypes
 
     Napi::Value CToJS(Napi::Env env, const void *buffer, CType type)
     {
+        spdlog::trace(__FUNCTION__);
+
         switch (type)
         {
-        case CType::VOID:
+        case CType::CTYPES_VOID:
             return env.Undefined();
 
-        case CType::INT8:
+        case CType::CTYPES_INT8:
         {
             int8_t val;
             memcpy(&val, buffer, 1);
             return Napi::Number::New(env, val);
         }
 
-        case CType::UINT8:
+        case CType::CTYPES_UINT8:
         {
             uint8_t val;
             memcpy(&val, buffer, 1);
             return Napi::Number::New(env, val);
         }
 
-        case CType::INT16:
+        case CType::CTYPES_INT16:
         {
             int16_t val;
             memcpy(&val, buffer, 2);
             return Napi::Number::New(env, val);
         }
 
-        case CType::UINT16:
+        case CType::CTYPES_UINT16:
         {
             uint16_t val;
             memcpy(&val, buffer, 2);
             return Napi::Number::New(env, val);
         }
 
-        case CType::INT32:
+        case CType::CTYPES_INT32:
         {
             int32_t val;
             memcpy(&val, buffer, 4);
             return Napi::Number::New(env, val);
         }
 
-        case CType::UINT32:
+        case CType::CTYPES_UINT32:
         {
             uint32_t val;
             memcpy(&val, buffer, 4);
             return Napi::Number::New(env, val);
         }
 
-        case CType::INT64:
+        case CType::CTYPES_INT64:
         {
             int64_t val;
             memcpy(&val, buffer, 8);
             return Napi::BigInt::New(env, val);
         }
 
-        case CType::UINT64:
+        case CType::CTYPES_UINT64:
         {
             uint64_t val;
             memcpy(&val, buffer, 8);
             return Napi::BigInt::New(env, val);
         }
 
-        case CType::FLOAT:
+        case CType::CTYPES_FLOAT:
         {
             float val;
             memcpy(&val, buffer, 4);
             return Napi::Number::New(env, val);
         }
 
-        case CType::DOUBLE:
+        case CType::CTYPES_DOUBLE:
         {
             double val;
             memcpy(&val, buffer, 8);
             return Napi::Number::New(env, val);
         }
 
-        case CType::BOOL:
+        case CType::CTYPES_BOOL:
         {
             uint8_t val;
             memcpy(&val, buffer, 1);
             return Napi::Boolean::New(env, val != 0);
         }
 
-        case CType::POINTER:
+        case CType::CTYPES_POINTER:
         {
             void *ptr;
             memcpy(&ptr, buffer, sizeof(void *));
@@ -589,7 +594,7 @@ namespace ctypes
             return Napi::BigInt::New(env, reinterpret_cast<uint64_t>(ptr));
         }
 
-        case CType::STRING:
+        case CType::CTYPES_STRING:
         {
             char *str;
             memcpy(&str, buffer, sizeof(char *));
@@ -600,7 +605,7 @@ namespace ctypes
             return Napi::String::New(env, str);
         }
 
-        case CType::WSTRING:
+        case CType::CTYPES_WSTRING:
         {
             wchar_t *str;
             memcpy(&str, buffer, sizeof(wchar_t *));
@@ -646,7 +651,7 @@ namespace ctypes
 #endif
         }
 
-        case CType::WCHAR:
+        case CType::CTYPES_WCHAR:
         {
             wchar_t val;
             memcpy(&val, buffer, sizeof(wchar_t));
@@ -654,21 +659,21 @@ namespace ctypes
             return Napi::Number::New(env, static_cast<uint32_t>(val));
         }
 
-        case CType::SIZE_T:
+        case CType::CTYPES_SIZE_T:
         {
             size_t val;
             memcpy(&val, buffer, sizeof(size_t));
             return Napi::BigInt::New(env, static_cast<uint64_t>(val));
         }
 
-        case CType::SSIZE_T:
+        case CType::CTYPES_SSIZE_T:
         {
             ssize_t val;
             memcpy(&val, buffer, sizeof(ssize_t));
             return Napi::BigInt::New(env, static_cast<int64_t>(val));
         }
 
-        case CType::LONG:
+        case CType::CTYPES_LONG:
         {
             long val;
             memcpy(&val, buffer, sizeof(long));
@@ -683,7 +688,7 @@ namespace ctypes
             }
         }
 
-        case CType::ULONG:
+        case CType::CTYPES_ULONG:
         {
             unsigned long val;
             memcpy(&val, buffer, sizeof(unsigned long));
@@ -703,24 +708,26 @@ namespace ctypes
     }
 
     // TypeInfo class implementation
-    Napi::Object TypeInfo::Init(Napi::Env env, Napi::Object exports)
+    Napi::Function TypeInfo::GetClass(Napi::Env env)
     {
-        Napi::Function func = DefineClass(env, "CType", {
-                                                            InstanceMethod("size", &TypeInfo::GetSize),
-                                                            InstanceMethod("name", &TypeInfo::GetName),
-                                                            InstanceAccessor("sizeof", &TypeInfo::GetSize, nullptr),
-                                                        });
+        spdlog::trace("{} - start", __FUNCTION__);
 
-        constructor = Napi::Persistent(func);
-        constructor.SuppressDestruct();
-
-        exports.Set("CType", func);
-        return exports;
+        Napi::Function func = DefineClass(
+            env,
+            "CType",
+            {
+                InstanceMethod("size", &TypeInfo::GetSize),
+                InstanceMethod("name", &TypeInfo::GetName),
+                InstanceAccessor("sizeof", &TypeInfo::GetSize, nullptr),
+            });
+        return func;
     }
 
     TypeInfo::TypeInfo(const Napi::CallbackInfo &info)
         : Napi::ObjectWrap<TypeInfo>(info)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Env env = info.Env();
 
         if (info.Length() < 1 || !info[0].IsString())
@@ -746,23 +753,29 @@ namespace ctypes
 
     Napi::Value TypeInfo::GetSize(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         return Napi::Number::New(info.Env(), static_cast<double>(size_));
     }
 
     Napi::Value TypeInfo::GetName(const Napi::CallbackInfo &info)
     {
+        spdlog::trace(__FUNCTION__);
+
         return Napi::String::New(info.Env(), name_);
     }
 
     // Crea i tipi predefiniti
-    Napi::Object CreatePredefinedTypes(Napi::Env env)
+    Napi::Object CreatePredefinedTypes(Napi::Env env, Napi::FunctionReference &typeInfoConstructor)
     {
+        spdlog::trace(__FUNCTION__);
+
         Napi::Object types = Napi::Object::New(env);
 
         auto createType = [&](const char *name)
         {
             Napi::Value arg = Napi::String::New(env, name);
-            return TypeInfo::constructor.New({arg});
+            return typeInfoConstructor.New({arg});
         };
 
         // Tipi base

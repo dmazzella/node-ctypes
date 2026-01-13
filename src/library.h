@@ -1,8 +1,7 @@
 #ifndef CTYPES_LIBRARY_H
 #define CTYPES_LIBRARY_H
 
-#include <napi.h>
-#include <string>
+#include "shared.h"
 
 namespace ctypes
 {
@@ -11,8 +10,7 @@ namespace ctypes
     class Library : public Napi::ObjectWrap<Library>
     {
     public:
-        static Napi::Object Init(Napi::Env env, Napi::Object exports);
-        static Napi::FunctionReference constructor;
+        static Napi::Function GetClass(Napi::Env env);
 
         Library(const Napi::CallbackInfo &info);
         ~Library();
