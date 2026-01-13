@@ -101,17 +101,6 @@ endif()
 # node-ctypes module
 # ============================================================================
 
-file(GLOB_RECURSE SOURCE_FILES "src/*.cc" "src/*.h")
-
-add_library(${PROJECT_NAME} SHARED ${SOURCE_FILES})
-
-set_target_properties(${PROJECT_NAME} PROPERTIES PREFIX "" SUFFIX ".node")
-
-# Include directories
-if(CMAKE_JS_INC)
-    target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_JS_INC})
-endif()
-
 # node-addon-api
 execute_process(
     COMMAND node -p "require('node-addon-api').include"
@@ -120,9 +109,20 @@ execute_process(
     OUTPUT_STRIP_TRAILING_WHITESPACE
     ERROR_QUIET
 )
+file(GLOB_RECURSE SOURCE_FILES "src/*.cc" "src/*.h")
+
+add_library(${PROJECT_NAME} SHARED ${SOURCE_FILES} ${CMAKE_JS_SRC})
+
+set_target_properties(${PROJECT_NAME} PROPERTIES PREFIX "" SUFFIX ".node")
+
 if(NODE_ADDON_API_DIR)
     string(REGEX REPLACE "[\r\n\"]" "" NODE_ADDON_API_DIR "${NODE_ADDON_API_DIR}")
     target_include_directories(${PROJECT_NAME} PRIVATE ${NODE_ADDON_API_DIR})
+endif()
+
+# Include directories
+if(CMAKE_JS_INC)
+    target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_JS_INC})
 endif()
 
 # third-party
