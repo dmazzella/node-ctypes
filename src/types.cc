@@ -710,7 +710,7 @@ namespace ctypes
     // TypeInfo class implementation
     Napi::Function TypeInfo::GetClass(Napi::Env env)
     {
-        spdlog::trace("{} - start", __FUNCTION__);
+        spdlog::trace(__FUNCTION__);
 
         Napi::Function func = DefineClass(
             env,
