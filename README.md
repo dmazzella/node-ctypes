@@ -333,7 +333,7 @@ compare.release();
 ### Variadic Functions - printf, sprintf
 
 ```javascript
-import { CDLL, alloc, cstring, readCString, c_int, c_void_p, c_char_p } from 'node-ctypes';
+import { CDLL, create_string_buffer, string_at, c_int, c_void_p, c_char_p } from 'node-ctypes';
 
 const libc = new CDLL('msvcrt.dll');  // Windows
 // const libc = new CDLL('libc.so.6');  // Linux
@@ -341,20 +341,20 @@ const libc = new CDLL('msvcrt.dll');  // Windows
 // Define only the fixed parameters - variadic args detected automatically!
 const sprintf = libc.func('sprintf', c_int, [c_void_p, c_char_p]);
 
-const buffer = alloc(256);
+const buffer = Buffer.alloc(256);
 
 // Pass extra arguments - automatically handled as variadic
-sprintf(buffer, cstring('Hello %s!'), cstring('World'));
-console.log(readCString(buffer));  // "Hello World!"
+sprintf(buffer, create_string_buffer('Hello %s!'), create_string_buffer('World'));
+console.log(string_at(buffer));  // "Hello World!"
 
-sprintf(buffer, cstring('Number: %d'), 42);
-console.log(readCString(buffer));  // "Number: 42"
+sprintf(buffer, create_string_buffer('Number: %d'), 42);
+console.log(string_at(buffer));  // "Number: 42"
 
-sprintf(buffer, cstring('%s: %d + %d = %d'), cstring('Sum'), 10, 20, 30);
-console.log(readCString(buffer));  // "Sum: 10 + 20 = 30"
+sprintf(buffer, create_string_buffer('%s: %d + %d = %d'), create_string_buffer('Sum'), 10, 20, 30);
+console.log(string_at(buffer));  // "Sum: 10 + 20 = 30"
 
-sprintf(buffer, cstring('Pi ≈ %.2f'), 3.14159);
-console.log(readCString(buffer));  // "Pi ≈ 3.14"
+sprintf(buffer, create_string_buffer('Pi ≈ %.2f'), 3.14159);
+console.log(string_at(buffer));  // "Pi ≈ 3.14"
 ```
 
 **Automatic variadic detection** - When you pass more arguments than specified, node-ctypes:
@@ -410,10 +410,10 @@ const MessageBoxW = user32.func('MessageBoxW', c_int, [
 ### Memory Operations - Low-level Control
 
 ```javascript
-import { alloc, readValue, writeValue, sizeof, cstring, readCString, c_int, c_double, c_void_p } from 'node-ctypes';
+import { readValue, writeValue, sizeof, create_string_buffer, string_at, c_int, c_double, c_void_p } from 'node-ctypes';
 
 // Allocate memory
-const buf = alloc(16);
+const buf = Buffer.alloc(16);
 
 // Write values at specific offsets
 writeValue(buf, c_int, 12345, 0);
@@ -429,8 +429,8 @@ console.log(sizeof(c_double));   // 8
 console.log(sizeof(c_void_p));   // 8 (on 64-bit)
 
 // String handling
-const str = cstring('Hello, World!');
-console.log(readCString(str));  // "Hello, World!"
+const str = create_string_buffer('Hello, World!');
+console.log(string_at(str));  // "Hello, World!"
 ```
 
 ## Performance Benchmarks
@@ -486,6 +486,115 @@ Load a shared library using stdcall calling convention (Windows).
 #### `Library(libPath)`
 Low-level library wrapper.
 
+---
+
+## Reference API dettagliata (da lib/index.js)
+
+Questa sezione fornisce una descrizione più completa delle API esportate da `lib/index.js`, con esempi rapidi e note di utilizzo.
+
+**Classi ed esportazioni native**
+- `Version` - Informazioni di versione esposte dal modulo nativo.
+- `Library` - Rappresenta una libreria nativa caricata ed espone funzioni low-level per simboli e gestione della libreria.
+- `FFIFunction` - Oggetto a basso livello che rappresenta una funzione FFI (ha proprietà come `address` e metodi interni).
+- `Callback` - Costruisce callback JS invocabili da C (main thread).
+- `ThreadSafeCallback` - Costruisce callback JS thread-safe (può essere chiamato da thread esterni).
+- `CType`, `StructType`, `ArrayType` - Tipi e helper esposti dal layer nativo.
+
+**Caricamento librerie e wrapper**
+- `load(libPath)` → `Library` : carica una libreria nativa; `libPath` può essere `null` per l'eseguibile corrente.
+- `CDLL(libPath)` : wrapper ad uso comune per chiamate C con convenzione cdecl; mantiene una cache di funzioni e fornisce `func()` più comodo.
+- `WinDLL(libPath)` : come `CDLL` ma con `abi: 'stdcall'` di default (utile per WinAPI).
+
+Esempio:
+```js
+import { CDLL } from './lib/index.js';
+const libc = new CDLL(null);
+const abs = libc.func('abs', 'int32', ['int32']);
+console.log(abs(-5));
+```
+
+**CDLL API dettagliata**
+- `func(name, returnType, argTypes = [], options = {})` → `Function` : ottiene una funzione callable. La funzione restituita è ottimizzata e:
+    - estrae automaticamente `._buffer` dagli oggetti struct passati come argomenti;
+    - espone metadati non-enumerabili: `funcName`, `address`, `_ffi`; 
+    - fornisce la proprietà `errcheck` come getter/setter per intercettare errori di ritorno.
+- `symbol(name)` → `BigInt` : indirizzo di un simbolo.
+- `close()` : chiude la libreria e svuota la cache.
+- `path` (getter) : percorso della libreria.
+- `loaded` (getter) : stato di caricamento.
+
+**Callback**
+- `callback(fn, returnType, argTypes = [])` → `{ pointer, release(), _callback }` : callback veloce, solo main thread.
+- `threadSafeCallback(fn, returnType, argTypes = [])` → `{ pointer, release(), _callback }` : callback sicuro per thread esterni.
+
+Nota: chiamare sempre `release()` quando un callback non è più necessario.
+
+**Allocazione e stringhe**
+
+- `Buffer.alloc(size)` → `Buffer` : alloca memoria nativa.
+- `create_string_buffer(init)` → `Buffer` : crea stringa C null-terminated (init: size|string|Buffer).
+- `create_unicode_buffer(init)` → `Buffer` : crea stringa wide (wchar_t) null-terminated.
+- `ptrToBuffer(address, size)` → `Buffer` : vista su indirizzo nativo (usa con cautela).
+- `addressof(ptr)` → `BigInt` : ottieni l'indirizzo come BigInt.
+
+Esempio creazione stringa e passaggio a funzione:
+```js
+import { create_string_buffer, CDLL } from './lib/index.js';
+const libc = new CDLL(null);
+const puts = libc.func('puts', 'int32', ['pointer']);
+const s = create_string_buffer('hello');
+puts(s);
+```
+
+**Lettura e scrittura di valori**
+- `readValue(ptr, type, offset = 0)` : supporta fast-path per Buffer + tipi base (`int8`, `uint8`, `int16`, `int32`, `int64`, `float`, `double`, `bool`).
+- `writeValue(ptr, type, value, offset = 0)` : scrive valori con fast-path per Buffer.
+
+**Tipi e helper**
+- `sizeof(type)` → `number` : dimensione in bytes di un tipo.
+- `POINTER(baseType)` : crea un tipo puntatore con helper `create()`, `fromBuffer()`, `deref()`, `set()`.
+- `byref(buffer)` : passa un buffer per riferimento (compatibilità Python ctypes).
+- `cast(ptr, targetType)` : interpreta un puntatore come un altro tipo (restituisce wrapper per struct).
+
+**Struct / Union / Array / Bitfield**
+- `struct(fields, options)` : definisce struct con supporto per nested, bitfields, anonymous fields, packed option. Ritorna un object con `create()`, `get()`, `set()`, `toObject()`, `getNestedBuffer()`.
+- `union(fields)` : definisce union; fornisce `create()`, `get()`, `set()`, `toObject()` e ritorna oggetti plain con proprietà.
+- `array(elementType, count)` : definisce ArrayType; `wrap(buffer)` ritorna Proxy con indexing.
+- `bitfield(baseType, bits)` : definizione di bitfield.
+
+Esempio struct:
+```js
+const Point = struct({ x: 'int32', y: 'int32' });
+const p = Point.create({ x: 1, y: 2 });
+console.log(Point.toObject(p));
+```
+
+**Convenienze Python-compatibili**
+- `create_string_buffer(init)` : create string buffer da numero/string/Buffer.
+- `create_unicode_buffer(init)` : create wide string buffer.
+- `string_at(address, size)` / `wstring_at(address, size)` : leggere stringhe da indirizzo.
+
+**Memoria: utilità**
+- `memmove(dst, src, count)` : copia memoria.
+- `memset(dst, value, count)` : setta memoria.
+
+**Error handling e WinAPI helpers**
+- `get_errno()` / `set_errno(value)` : accesso ad errno (implementazione platform-specific).
+- `_initWinError()` internals; helpers pubblici: `GetLastError()`, `SetLastError(code)`, `FormatError(code)`, `WinError(code)`.
+
+**Alias tipi**
+I seguenti alias sono esposti (mappati da `native.types`):
+`c_int, c_uint, c_int8, c_uint8, c_int16, c_uint16, c_int32, c_uint32, c_int64, c_uint64, c_float, c_double, c_char, c_char_p, c_wchar, c_wchar_p, c_void_p, c_bool, c_size_t, c_long, c_ulong`.
+
+**Costanti**
+- `POINTER_SIZE` - dimensione puntatore (da `native.POINTER_SIZE`).
+- `WCHAR_SIZE` - dimensione wchar (da `native.WCHAR_SIZE`).
+- `NULL` - valore null esportato.
+
+---
+
+Se vuoi, posso generare snippet aggiuntivi specifici per Windows o Linux, oppure integrare esempi nel directory `tests/`.
+
 ### Functions
 
 #### `load(libPath)` → `Library`
@@ -494,14 +603,14 @@ Load a shared library.
 #### `callback(fn, returnType, argTypes)` → `{pointer, release()}`
 Create a callback from a JavaScript function.
 
-#### `alloc(size)` → `Buffer`
-Allocate native memory.
+#### `create_string_buffer(init)` → `Buffer`
+Create a null-terminated C string buffer (like Python ctypes). `init` può essere una dimensione, una stringa o un existing `Buffer`.
 
-#### `cstring(str)` → `Buffer`
-Create a null-terminated C string.
+#### `create_unicode_buffer(init)` → `Buffer`
+Create a wide (wchar_t) null-terminated buffer (UTF-16LE su Windows).
 
-#### `readCString(ptr, [maxLen])` → `string`
-Read a C string from a pointer.
+#### `string_at(address, [size])` → `string`
+Read a C string from an address or buffer.
 
 #### `readValue(ptr, type, [offset])` → `value`
 Read a value from memory.
@@ -528,7 +637,7 @@ Create a simple struct definition.
 | **Arrays** | `c_int * 5` | `c_int * 5` |
 | **Bit fields** | `("flags", c_uint, 3)` | `bitfield(c_uint32, 3)` |
 | **Callbacks** | `CFUNCTYPE(c_int, c_int)` | `callback(fn, c_int, [c_int])` |
-| **Strings** | `c_char_p(b"hello")` | `cstring("hello")` |
+| **Strings** | `c_char_p(b"hello")` | `create_string_buffer("hello")` |
 | **Pointers** | `POINTER(c_int)` | `c_void_p` or `"pointer"` |
 | **Variadic** | `sprintf(buf, b"%d", 42)` | `sprintf(buf, fmt, 42)` (auto) |
 | **Sizeof** | `sizeof(c_int)` | `sizeof(c_int)` |
