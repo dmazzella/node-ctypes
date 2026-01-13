@@ -267,10 +267,7 @@ describe("errcheck (Python ctypes compatible)", function () {
         return;
       }
 
-      const sprintf = libc.func("sprintf", "int32", [
-        "pointer",
-        "string",
-      ]);
+      const sprintf = libc.func("sprintf", "int32", ["pointer", "string"]);
 
       let callCount = 0;
 

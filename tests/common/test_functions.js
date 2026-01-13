@@ -17,9 +17,7 @@ describe("Functions and Callbacks", function () {
     if (process.platform === "win32") {
       libc = new ctypes.CDLL("msvcrt.dll");
     } else {
-      const LIBC = platform === "darwin"
-      ? "libc.dylib"
-      : "libc.so.6";
+      const LIBC = platform === "darwin" ? "libc.dylib" : "libc.so.6";
       libc = new ctypes.CDLL(LIBC);
     }
   });

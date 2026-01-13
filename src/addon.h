@@ -22,8 +22,6 @@ namespace ctypes
         ~CTypesAddon();
 
     private:
-        void InitializeLogging();
-
         // Helper functions esportate (metodi membro per InstanceMethod)
         Napi::Value LoadLibrary(const Napi::CallbackInfo &info);
         Napi::Value Alloc(const Napi::CallbackInfo &info);
