@@ -6,9 +6,12 @@
   "type": "module",
   "scripts": {
     "test": "node --test **/test_*.js --timeout 5000",
+    "test:common": "node --test common/test_*.js --timeout 5000",
+    "test:windows": "node --test windows/test_*.js --timeout 5000",
+    "test:unix": "node --test unix/test_*.js --timeout 5000",
     "test:python": "python -Bm pytest . -v",
     "bench:koffi": "node benchmarks/benchmark_koffi.js",
-    "bench:ffi-napi": "node tests/benchmarks/benchmark_ffi-napi.js"
+    "bench:ffi-napi": "node benchmarks/benchmark_ffi-napi.js"
   },
   "dependencies": {
     "node-ctypes": ".."

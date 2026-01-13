@@ -4,8 +4,11 @@
  */
 
 import assert, { strictEqual, throws } from "node:assert";
+import os from "node:os";
 import { describe, it, before, after } from "node:test";
 import * as ctypes from "node-ctypes";
+
+const platform = os.platform();
 
 describe("Functions and Callbacks", function () {
   let libc;
@@ -14,7 +17,10 @@ describe("Functions and Callbacks", function () {
     if (process.platform === "win32") {
       libc = new ctypes.CDLL("msvcrt.dll");
     } else {
-      libc = new ctypes.CDLL("libc.so.6");
+      const LIBC = platform === "darwin"
+      ? "libc.dylib"
+      : "libc.so.6";
+      libc = new ctypes.CDLL(LIBC);
     }
   });
 

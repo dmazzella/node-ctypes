@@ -3,8 +3,11 @@
  */
 
 import assert from "node:assert";
+import os from "node:os";
 import { describe, it, before, after } from "node:test";
 import * as ctypes from "node-ctypes";
+
+const platform = os.platform();
 
 describe("errcheck (Python ctypes compatible)", function () {
   let libc;
@@ -13,7 +16,8 @@ describe("errcheck (Python ctypes compatible)", function () {
     if (process.platform === "win32") {
       libc = new ctypes.CDLL("msvcrt.dll");
     } else {
-      libc = new ctypes.CDLL("libc.so.6");
+      const LIBC = platform === "darwin" ? "libc.dylib" : "libc.so.6";
+      libc = new ctypes.CDLL(LIBC);
     }
   });
 
@@ -134,6 +138,7 @@ describe("errcheck (Python ctypes compatible)", function () {
     it("should check GetLastError and throw on failure", function () {
       if (process.platform !== "win32") {
         this.skip();
+        return;
       }
 
       const kernel32 = new ctypes.CDLL("kernel32.dll");
@@ -265,7 +270,6 @@ describe("errcheck (Python ctypes compatible)", function () {
       const sprintf = libc.func("sprintf", "int32", [
         "pointer",
         "string",
-        "...",
       ]);
 
       let callCount = 0;
