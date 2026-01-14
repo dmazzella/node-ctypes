@@ -146,7 +146,6 @@ namespace ctypes
                 InstanceMethod("release", &Callback::Release),
                 InstanceMethod("setErrorHandler", &Callback::SetErrorHandler),
                 InstanceMethod("getLastError", &Callback::GetLastError),
-                InstanceAccessor("pointer", &Callback::GetPointer, nullptr),
             });
     }
 
@@ -283,6 +282,10 @@ namespace ctypes
 
         // Il cleanup del FunctionReference verrà fatto in Release() o nel distruttore
         // N-API gestisce automaticamente il GC in modo thread-safe
+
+        // Imposta la proprietà pointer come BigInt (ottimizzazione per accesso frequente)
+        Napi::Object obj = info.This().As<Napi::Object>();
+        obj.Set("pointer", Napi::BigInt::New(env, reinterpret_cast<uint64_t>(data_->code_ptr)));
     }
 
     Callback::~Callback()
@@ -665,7 +668,6 @@ namespace ctypes
                 InstanceMethod("release", &ThreadSafeCallback::Release),
                 InstanceMethod("setErrorHandler", &ThreadSafeCallback::SetErrorHandler),
                 InstanceMethod("getLastError", &ThreadSafeCallback::GetLastError),
-                InstanceAccessor("pointer", &ThreadSafeCallback::GetPointer, nullptr),
             });
     }
 
@@ -815,6 +817,10 @@ namespace ctypes
         }
 
         // Il cleanup verrà fatto in Release() o nel distruttore
+
+        // Imposta la proprietà pointer come BigInt (ottimizzazione per accesso frequente)
+        Napi::Object obj = info.This().As<Napi::Object>();
+        obj.Set("pointer", Napi::BigInt::New(env, reinterpret_cast<uint64_t>(data_->code_ptr)));
     }
 
     ThreadSafeCallback::~ThreadSafeCallback()

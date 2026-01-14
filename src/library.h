@@ -20,6 +20,9 @@ namespace ctypes
         // Ottiene un puntatore a funzione
         Napi::Value GetFunction(const Napi::CallbackInfo &info);
 
+        // Ottiene un callback
+        Napi::Value GetCallback(const Napi::CallbackInfo &info);
+
         // Ottiene un puntatore a simbolo (variabile globale)
         Napi::Value GetSymbol(const Napi::CallbackInfo &info);
 

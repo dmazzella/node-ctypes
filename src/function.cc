@@ -319,10 +319,18 @@ namespace ctypes
             return env.Undefined();
 
         case CType::CTYPES_INT32:
-            return Napi::Number::New(env, return_value_.i32);
+        {
+            napi_value result;
+            napi_create_int32(env, return_value_.i32, &result);
+            return Napi::Value(env, result);
+        }
 
         case CType::CTYPES_UINT32:
-            return Napi::Number::New(env, return_value_.u32);
+        {
+            napi_value result;
+            napi_create_uint32(env, return_value_.u32, &result);
+            return Napi::Value(env, result);
+        }
 
         case CType::CTYPES_INT64:
             return Napi::BigInt::New(env, return_value_.i64);
@@ -332,10 +340,18 @@ namespace ctypes
             return Napi::BigInt::New(env, return_value_.u64);
 
         case CType::CTYPES_DOUBLE:
-            return Napi::Number::New(env, return_value_.d);
+        {
+            napi_value result;
+            napi_create_double(env, return_value_.d, &result);
+            return Napi::Value(env, result);
+        }
 
         case CType::CTYPES_FLOAT:
-            return Napi::Number::New(env, static_cast<double>(return_value_.f));
+        {
+            napi_value result;
+            napi_create_double(env, static_cast<double>(return_value_.f), &result);
+            return Napi::Value(env, result);
+        }
 
         case CType::CTYPES_BOOL:
             return Napi::Boolean::New(env, return_value_.u8 != 0);
@@ -348,11 +364,15 @@ namespace ctypes
             return Napi::BigInt::New(env, reinterpret_cast<uint64_t>(return_value_.p));
 
         case CType::CTYPES_STRING:
+        {
             if (return_value_.str == nullptr)
             {
                 return env.Null();
             }
-            return Napi::String::New(env, return_value_.str);
+            napi_value result;
+            napi_create_string_utf8(env, return_value_.str, NAPI_AUTO_LENGTH, &result);
+            return Napi::Value(env, result);
+        }
 
         case CType::CTYPES_WSTRING:
         {
@@ -501,7 +521,19 @@ namespace ctypes
         if (argc == 0)
         {
             ffi_call(&cif_, FFI_FN(fn_ptr_), &return_value_, nullptr);
-            return ApplyErrcheck(env, ConvertReturnValue(env), info);
+            if (return_type_ == CType::CTYPES_VOID)
+            {
+                if (errcheck_callback_.IsEmpty())
+                    return env.Undefined();
+                return ApplyErrcheck(env, env.Undefined(), info);
+            }
+            else
+            {
+                Napi::Value result = ConvertReturnValue(env);
+                if (errcheck_callback_.IsEmpty())
+                    return result;
+                return ApplyErrcheck(env, result, info);
+            }
         }
 
         // =====================================================================
@@ -685,7 +717,19 @@ namespace ctypes
             napi_get_value_int32(env, info[0], &arg);
             void *arg_ptr = &arg;
             ffi_call(&cif_, FFI_FN(fn_ptr_), &return_value_, &arg_ptr);
-            return ApplyErrcheck(env, ConvertReturnValue(env), info);
+            if (return_type_ == CType::CTYPES_VOID)
+            {
+                if (errcheck_callback_.IsEmpty())
+                    return env.Undefined();
+                return ApplyErrcheck(env, env.Undefined(), info);
+            }
+            else
+            {
+                Napi::Value result = ConvertReturnValue(env);
+                if (errcheck_callback_.IsEmpty())
+                    return result;
+                return ApplyErrcheck(env, result, info);
+            }
         }
 
         // =====================================================================
@@ -704,7 +748,10 @@ namespace ctypes
             napi_get_value_double(env, info[0], &arg);
             void *arg_ptr = &arg;
             ffi_call(&cif_, FFI_FN(fn_ptr_), &return_value_, &arg_ptr);
-            return ApplyErrcheck(env, ConvertReturnValue(env), info);
+            Napi::Value result = ConvertReturnValue(env);
+            if (errcheck_callback_.IsEmpty())
+                return result;
+            return ApplyErrcheck(env, result, info);
         }
 
         // =====================================================================
@@ -734,7 +781,42 @@ namespace ctypes
 
             void *arg_ptr = &str_ptr;
             ffi_call(&cif_, FFI_FN(fn_ptr_), &return_value_, &arg_ptr);
-            return ApplyErrcheck(env, ConvertReturnValue(env), info);
+            Napi::Value result = ConvertReturnValue(env);
+            if (errcheck_callback_.IsEmpty())
+                return result;
+            return ApplyErrcheck(env, result, info);
+        }
+
+        // =====================================================================
+        // Fast path: 2 argomenti int32 (es. add, sub)
+        // =====================================================================
+        if (argc == 2 && arg_types_[0] == CType::CTYPES_INT32 && arg_types_[1] == CType::CTYPES_INT32)
+        {
+            int32_t arg0, arg1;
+            napi_get_value_int32(env, info[0], &arg0);
+            napi_get_value_int32(env, info[1], &arg1);
+            void *arg_ptrs[2] = {&arg0, &arg1};
+            ffi_call(&cif_, FFI_FN(fn_ptr_), &return_value_, arg_ptrs);
+            Napi::Value result = ConvertReturnValue(env);
+            if (errcheck_callback_.IsEmpty())
+                return result;
+            return ApplyErrcheck(env, result, info);
+        }
+
+        // =====================================================================
+        // Fast path: 2 argomenti double (es. pow)
+        // =====================================================================
+        if (argc == 2 && arg_types_[0] == CType::CTYPES_DOUBLE && arg_types_[1] == CType::CTYPES_DOUBLE)
+        {
+            double arg0, arg1;
+            napi_get_value_double(env, info[0], &arg0);
+            napi_get_value_double(env, info[1], &arg1);
+            void *arg_ptrs[2] = {&arg0, &arg1};
+            ffi_call(&cif_, FFI_FN(fn_ptr_), &return_value_, arg_ptrs);
+            Napi::Value result = ConvertReturnValue(env);
+            if (errcheck_callback_.IsEmpty())
+                return result;
+            return ApplyErrcheck(env, result, info);
         }
 
         // =====================================================================
@@ -804,14 +886,18 @@ namespace ctypes
             {
             case CType::CTYPES_INT32:
             {
-                int32_t v = val.As<Napi::Number>().Int32Value();
+                napi_value nv = val;
+                int32_t v;
+                napi_get_value_int32(env, nv, &v);
                 memcpy(slot, &v, 4);
                 break;
             }
 
             case CType::CTYPES_UINT32:
             {
-                uint32_t v = val.As<Napi::Number>().Uint32Value();
+                napi_value nv = val;
+                uint32_t v;
+                napi_get_value_uint32(env, nv, &v);
                 memcpy(slot, &v, 4);
                 break;
             }
@@ -829,7 +915,8 @@ namespace ctypes
                 }
                 else
                 {
-                    v = val.As<Napi::Number>().Int64Value();
+                    napi_value nv = val;
+                    napi_get_value_int64(env, nv, &v);
                 }
                 memcpy(slot, &v, 8);
                 break;
@@ -837,14 +924,19 @@ namespace ctypes
 
             case CType::CTYPES_DOUBLE:
             {
-                double v = val.As<Napi::Number>().DoubleValue();
+                napi_value nv = val;
+                double v;
+                napi_get_value_double(env, nv, &v);
                 memcpy(slot, &v, 8);
                 break;
             }
 
             case CType::CTYPES_FLOAT:
             {
-                float v = static_cast<float>(val.As<Napi::Number>().FloatValue());
+                napi_value nv = val;
+                double dv;
+                napi_get_value_double(env, nv, &dv);
+                float v = static_cast<float>(dv);
                 memcpy(slot, &v, 4);
                 break;
             }
@@ -867,8 +959,10 @@ namespace ctypes
                 }
                 else if (val.IsNumber())
                 {
-                    ptr = reinterpret_cast<void *>(static_cast<uintptr_t>(
-                        val.As<Napi::Number>().Int64Value()));
+                    napi_value nv = val;
+                    int64_t v;
+                    napi_get_value_int64(env, nv, &v);
+                    ptr = reinterpret_cast<void *>(static_cast<uintptr_t>(v));
                 }
                 memcpy(slot, &ptr, sizeof(void *));
                 break;
@@ -1047,12 +1141,31 @@ namespace ctypes
                     }
                     else if (val.IsObject())
                     {
-                        // JS object: converti usando JSToStruct
-                        if (!struct_info->JSToStruct(env, val.As<Napi::Object>(), slot, ARG_SLOT_SIZE))
+                        Napi::Object obj = val.As<Napi::Object>();
+                        if (obj.Has("_buffer") && obj.Get("_buffer").IsBuffer())
                         {
-                            Napi::Error::New(env, "Failed to convert JS object to struct at argument " + std::to_string(i))
-                                .ThrowAsJavaScriptException();
-                            return env.Undefined();
+                            // Struct instance creato con create(): usa il buffer interno
+                            Napi::Buffer<uint8_t> buf = obj.Get("_buffer").As<Napi::Buffer<uint8_t>>();
+                            if (buf.Length() >= struct_size)
+                            {
+                                memcpy(slot, buf.Data(), struct_size);
+                            }
+                            else
+                            {
+                                Napi::TypeError::New(env, "Internal buffer too small for struct at argument " + std::to_string(i))
+                                    .ThrowAsJavaScriptException();
+                                return env.Undefined();
+                            }
+                        }
+                        else
+                        {
+                            // JS object plain: converti usando JSToStruct
+                            if (!struct_info->JSToStruct(env, obj, slot, ARG_SLOT_SIZE))
+                            {
+                                Napi::Error::New(env, "Failed to convert JS object to struct at argument " + std::to_string(i))
+                                    .ThrowAsJavaScriptException();
+                                return env.Undefined();
+                            }
                         }
                     }
                     else
@@ -1120,18 +1233,13 @@ namespace ctypes
         }
 
         // Effettua la chiamata con il CIF appropriato (cached o appena creato)
-        // CRITICAL: Ultimo check di sicurezza prima della chiamata
-        if (fn_ptr_ == nullptr)
-        {
-            Napi::Error::New(env, "Function pointer is NULL - cannot execute call")
-                .ThrowAsJavaScriptException();
-            return env.Undefined();
-        }
-
         ffi_call(active_cif, FFI_FN(fn_ptr_), &return_value_, arg_values);
 
         // Converti il return value e applica errcheck se presente
-        return ApplyErrcheck(env, ConvertReturnValue(env), info);
+        Napi::Value result = ConvertReturnValue(env);
+        if (errcheck_callback_.IsEmpty())
+            return result;
+        return ApplyErrcheck(env, result, info);
     }
 
     Napi::Value FFIFunction::SetErrcheck(const Napi::CallbackInfo &info)

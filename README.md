@@ -18,6 +18,9 @@
 - 🏗️ **Complex data structures** - Nested structs, unions in structs, arrays in structs
 - ⚡ **High performance** - Eager loading for struct properties, optimized FFI wrapper
 - 🔍 **Transparent API** - Pass struct objects directly to FFI functions
+- 🔧 **Extended type support** - All ctypes types (int8, uint8, int16, uint16, etc.)
+- 📊 **Memory utilities** - readValue/writeValue for direct memory access, enhanced sizeof
+- 🏗️ **Advanced array support** - String initialization, improved proxy behavior
 
 ## Installation
 
@@ -461,10 +464,23 @@ Benchmarked on Windows with Node.js v24.11.0:
 - Multiple arguments: **153.47x faster**
 - Struct read/write: **5.22x faster**
 
-**vs koffi** (competitive performance):
-- Simple calls: 1.44x slower (koffi uses highly optimized assembly)
-- **Struct read/write: 1.29x faster** (eager loading architecture)
-- Multiple arguments: **1.75x faster**
+**vs koffi** (comprehensive 10-benchmark comparison, geometric mean: **3.27x slower**):
+- Simple int32 function: 1.74x slower
+- String parameter: 1.95x slower  
+- Floating point: 1.83x slower
+- No arguments: 2.11x slower
+- Multiple arguments: **1.40x faster**
+- Variadic function: 1.28x slower
+- **Struct read/write: 14.91x slower**
+- Buffer allocation: 40.5% overhead
+- Raw vs CDLL wrapper: 7.3% overhead
+- **Callback creation: 1.51x slower**
+
+**Key Insights:**
+- koffi excels at simple operations and struct access
+- node-ctypes competitive on complex argument handling
+- **Struct performance gap**: koffi 15x faster due to direct object manipulation
+- **Callback overhead**: koffi 1.5x faster at callback creation
 
 **Transparent API overhead**: Only **3.5%** for auto `._buffer` extraction!
 
@@ -710,7 +726,9 @@ For complete, working examples, see the test suite:
 - **Structs & unions**: [tests/common/test_structs.js](tests/common/test_structs.js)
 - **Nested structures**: [tests/common/test_nested_structs.js](tests/common/test_nested_structs.js)
 - **Arrays**: [tests/common/test_arrays.js](tests/common/test_arrays.js)
-- **Functions & callbacks**: [tests/common/test_functions.js](tests/common/test_functions.js)
+- **Functions**: [tests/common/test_functions.js](tests/common/test_functions.js)
+- **Callbacks**: [tests/common/test_callbacks.js](tests/common/test_callbacks.js)
+- **Version info**: [tests/common/test_version.js](tests/common/test_version.js)
 - **Windows API**: [tests/windows/test_winapi.js](tests/windows/test_winapi.js)
 - **Python compatibility**: [tests/common/*.py](tests/common/) (parallel Python implementations)
 

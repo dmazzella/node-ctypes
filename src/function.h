@@ -25,10 +25,10 @@ namespace ctypes
     static constexpr size_t MAX_INLINE_ARGS = 16;
     static constexpr size_t ARG_SLOT_SIZE = 16; // Abbastanza per qualsiasi tipo base
     static constexpr size_t RETURN_BUFFER_SIZE = 64;
-    static constexpr size_t MAX_VARIADIC_EXTRA_ARGS = 8;  // Per stack allocation
-    static constexpr size_t MAX_CACHED_VARIADIC_CIFS = 4; // Cache per pattern comuni
-    static constexpr size_t SMALL_STRING_BUFFER = 256;    // Stack buffer per stringhe piccole
-    static constexpr int MAX_AS_PARAMETER_DEPTH = 100;    // Ricorsione _as_parameter_ (come CPython)
+    static constexpr size_t MAX_VARIADIC_EXTRA_ARGS = 8;   // Per stack allocation
+    static constexpr size_t MAX_CACHED_VARIADIC_CIFS = 16; // Cache per pattern comuni
+    static constexpr size_t SMALL_STRING_BUFFER = 1024;    // Stack buffer per stringhe piccole
+    static constexpr int MAX_AS_PARAMETER_DEPTH = 100;     // Ricorsione _as_parameter_ (come CPython)
 
     // Union per return value (come CPython - migliore cache locality)
     union ReturnValue

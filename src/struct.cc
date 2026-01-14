@@ -334,6 +334,7 @@ namespace ctypes
                 InstanceMethod("getAlignment", &StructType::GetAlignment),
                 InstanceMethod("create", &StructType::Create),
                 InstanceMethod("read", &StructType::Read),
+                InstanceMethod("toObject", &StructType::ToObject),
             });
     }
 
@@ -469,7 +470,7 @@ namespace ctypes
 
         Napi::Env env = info.Env();
 
-        // Crea buffer e popola da JS object (se fornito)
+        // Crea buffer interno
         size_t size = struct_info_->GetSize();
         Napi::Buffer<uint8_t> buffer = Napi::Buffer<uint8_t>::New(env, size);
 
@@ -485,7 +486,42 @@ namespace ctypes
             std::memset(buffer.Data(), 0, size);
         }
 
-        return buffer;
+        // Crea oggetto JS con accessor per ogni campo
+        Napi::Object obj = Napi::Object::New(env);
+
+        // Aggiungi campo dati interno (nascosto)
+        obj.Set("_buffer", buffer);
+
+        // Per ogni campo, aggiungi getter/setter
+        for (const auto &field : struct_info_->GetFields())
+        {
+            std::string fieldName = field.name;
+
+            // Getter
+            auto getter = [buffer, offset = field.offset, type = field.type](const Napi::CallbackInfo &info) -> Napi::Value
+            {
+                Napi::Env env = info.Env();
+                uint8_t *data = buffer.Data() + offset;
+                return CToJS(env, data, type);
+            };
+
+            // Setter
+            auto setter = [buffer, offset = field.offset, type = field.type](const Napi::CallbackInfo &info) -> Napi::Value
+            {
+                Napi::Env env = info.Env();
+                if (info.Length() > 0)
+                {
+                    JSToC(env, info[0], type, buffer.Data() + offset, 0); // Size not used for single values
+                }
+                return env.Undefined();
+            };
+
+            Napi::PropertyDescriptor desc = Napi::PropertyDescriptor::Accessor(
+                env, obj, fieldName, getter, setter, napi_default, nullptr);
+            obj.DefineProperty(desc);
+        }
+
+        return obj;
     }
 
     Napi::Value StructType::Read(const Napi::CallbackInfo &info)
@@ -502,6 +538,46 @@ namespace ctypes
 
         Napi::Buffer<uint8_t> buffer = info[0].As<Napi::Buffer<uint8_t>>();
         return struct_info_->StructToJS(env, buffer.Data());
+    }
+
+    Napi::Value StructType::ToObject(const Napi::CallbackInfo &info)
+    {
+        spdlog::trace(__FUNCTION__);
+
+        Napi::Env env = info.Env();
+
+        if (info.Length() < 1)
+        {
+            Napi::TypeError::New(env, "Expected at least one argument").ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        Napi::Value arg = info[0];
+
+        // Se è un buffer, convertilo direttamente
+        if (arg.IsBuffer())
+        {
+            Napi::Buffer<uint8_t> buffer = arg.As<Napi::Buffer<uint8_t>>();
+            return struct_info_->StructToJS(env, buffer.Data());
+        }
+
+        // Se è un oggetto con _buffer, estrai il buffer
+        if (arg.IsObject())
+        {
+            Napi::Object obj = arg.As<Napi::Object>();
+            if (obj.Has("_buffer"))
+            {
+                Napi::Value bufferVal = obj.Get("_buffer");
+                if (bufferVal.IsBuffer())
+                {
+                    Napi::Buffer<uint8_t> buffer = bufferVal.As<Napi::Buffer<uint8_t>>();
+                    return struct_info_->StructToJS(env, buffer.Data());
+                }
+            }
+        }
+
+        Napi::TypeError::New(env, "Expected a Buffer or struct instance").ThrowAsJavaScriptException();
+        return env.Undefined();
     }
 
 } // namespace ctypes

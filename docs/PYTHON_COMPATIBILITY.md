@@ -520,6 +520,14 @@ const addr = addressOf(buf);
 |---------|-------------|
 | `threadSafeCallback()` | Thread-safe callback for external threads (Python does NOT support this!) |
 
+### ✅ Complete Test Coverage
+
+Full test suites available:
+- `tests/common/test_callbacks.js` - JavaScript tests
+- `tests/common/test_callbacks.py` - Python tests
+
+Both test qsort with integer/float callbacks, reverse sorting, and callback properties.
+
 ### Comparative Example
 
 ```python

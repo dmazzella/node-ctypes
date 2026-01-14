@@ -83,6 +83,7 @@ namespace ctypes
             "Library",
             {
                 InstanceMethod("func", &Library::GetFunction),
+                InstanceMethod("callback", &Library::GetCallback),
                 InstanceMethod("symbol", &Library::GetSymbol),
                 InstanceMethod("close", &Library::Close),
                 InstanceAccessor("path", &Library::GetPath, nullptr),
@@ -288,6 +289,43 @@ namespace ctypes
         }
 
         return env.Undefined();
+    }
+
+    Napi::Value Library::GetCallback(const Napi::CallbackInfo &info)
+    {
+        spdlog::trace(__FUNCTION__);
+
+        Napi::Env env = info.Env();
+
+        // callback(returnType, [argTypes], jsFunction)
+        if (info.Length() < 3)
+        {
+            Napi::TypeError::New(env, "Callback requires returnType, argTypes, jsFunction")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        if (!info[2].IsFunction())
+        {
+            Napi::TypeError::New(env, "Third argument must be a function")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        // Crea Callback object - ordine: jsFunction, returnType, argTypes
+        std::vector<napi_value> args;
+        args.push_back(info[2]); // jsFunction
+        args.push_back(info[0]); // returnType
+        args.push_back(info[1]); // argTypes
+
+        // Ottieni il costruttore Callback dall'addon
+        CTypesAddon *addon = env.GetInstanceData<CTypesAddon>();
+        if (!addon || !addon->CallbackConstructor)
+        {
+            Napi::Error::New(env, "Callback constructor not available").ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        return addon->CallbackConstructor->New(args);
     }
 
     Napi::Value Library::GetPath(const Napi::CallbackInfo &info)

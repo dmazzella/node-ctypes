@@ -11,7 +11,8 @@
     "test:unix": "node --test unix/test_*.js --timeout 5000",
     "test:python": "python -Bm pytest . -v",
     "bench:koffi": "node benchmarks/benchmark_koffi.js",
-    "bench:ffi-napi": "node benchmarks/benchmark_ffi-napi.js"
+    "bench:ffi-napi": "node benchmarks/benchmark_ffi-napi.js",
+    "bench:python": "python benchmarks/benchmark_python.py"
   },
   "dependencies": {
     "node-ctypes": ".."

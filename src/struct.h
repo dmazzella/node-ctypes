@@ -75,8 +75,9 @@ namespace ctypes
         Napi::Value AddField(const Napi::CallbackInfo &info);
         Napi::Value GetSize(const Napi::CallbackInfo &info);
         Napi::Value GetAlignment(const Napi::CallbackInfo &info);
-        Napi::Value Create(const Napi::CallbackInfo &info); // crea istanza struct
-        Napi::Value Read(const Napi::CallbackInfo &info);   // legge struct da buffer
+        Napi::Value Create(const Napi::CallbackInfo &info);   // crea istanza struct
+        Napi::Value Read(const Napi::CallbackInfo &info);     // legge struct da buffer
+        Napi::Value ToObject(const Napi::CallbackInfo &info); // converte buffer in plain object
 
         std::shared_ptr<StructInfo> GetStructInfo() const { return struct_info_; }
 
