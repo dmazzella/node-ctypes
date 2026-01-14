@@ -236,4 +236,47 @@ describe("Structs and Unions", function () {
       });
     });
   });
+
+  describe("Subclassing compatibility", function () {
+    it("should support class extends Structure with positional args and properties", function () {
+      class PointCls extends ctypes.Structure {
+        static _fields_ = [
+          ["x", ctypes.c_int],
+          ["y", ctypes.c_int],
+        ];
+      }
+
+      const p = new PointCls(10, 20);
+      assert.strictEqual(p.x, 10);
+      assert.strictEqual(p.y, 20);
+
+      const p2 = PointCls.create({ x: 1, y: 2 });
+      assert.ok(p2 instanceof PointCls);
+      assert.strictEqual(p2.x, 1);
+    });
+
+    it("should support anonymous nested fields via static _anonymous_", function () {
+      const Inner = ctypes.struct({ a: "int32", b: "int32" });
+      class OuterCls extends ctypes.Structure {
+        static _fields_ = { inner: Inner, tag: "int32" };
+        static _anonymous_ = ["inner"];
+      }
+
+      const o = new OuterCls({ a: 5, b: 6, tag: 9 });
+      assert.strictEqual(o.a, 5);
+      assert.strictEqual(o.b, 6);
+      assert.strictEqual(o.tag, 9);
+    });
+
+    it("should support Union subclassing", function () {
+      class UCls extends ctypes.Union {
+        static _fields_ = [
+          ["i", "int32"],
+          ["f", "float"],
+        ];
+      }
+      const u = UCls.create({ f: 2.5 });
+      assert.ok(u.i !== undefined);
+    });
+  });
 });

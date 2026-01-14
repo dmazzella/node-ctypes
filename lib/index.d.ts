@@ -218,6 +218,51 @@ export interface StructDef {
   getNestedBuffer(buf: Buffer, fieldName: string): Buffer;
 }
 
+// Helper types for improved typed structs
+export type FieldSpec =
+  | CTypeString
+  | CType
+  | StructDef
+  | ArrayTypeDef
+  | BitFieldDef
+  | AnonymousField;
+
+type JsFromCType<T> = T extends "int64" | "uint64" | "size_t"
+  ? bigint
+  : T extends
+      | "int8"
+      | "uint8"
+      | "int16"
+      | "uint16"
+      | "int32"
+      | "uint32"
+      | "int"
+      | "uint"
+      | "short"
+      | "ushort"
+      | "char"
+      | "uchar"
+      | "float"
+      | "double"
+  ? number
+  : T extends "bool"
+  ? boolean
+  : T extends "string" | "c_char_p" | "c_char"
+  ? string | Buffer
+  : T extends "wstring" | "c_wchar_p"
+  ? string
+  : T extends StructDef
+  ? any
+  : T extends ArrayTypeDef
+  ? any
+  : T extends BitFieldDef
+  ? number
+  : any;
+
+type FieldsToInstance<F extends Record<string, FieldSpec>> = {
+  [K in keyof F]: JsFromCType<F[K]>;
+};
+
 /** Union definition (same interface as struct) */
 export interface UnionDef extends StructDef {
   readonly isUnion: true;
@@ -304,6 +349,44 @@ export class ArrayType {
   create(values?: any[]): Buffer;
 }
 
+/**
+ * Python-like Structure base class.
+ * Subclasses should define `static _fields_` as array of [name, type]
+ * or an object map { name: type }.
+ */
+export class Structure<
+  F extends Record<string, FieldSpec> = Record<string, any>
+> {
+  constructor(...args: any[]);
+  static _fields_?: Array<[string, FieldSpec]> | Record<string, FieldSpec>;
+  static _pack_?: boolean;
+  static _anonymous_?: string[];
+  static create<ThisT extends Structure<F>>(
+    this: new (...args: any[]) => ThisT,
+    values?: Partial<FieldsToInstance<F>> | Buffer
+  ): ThisT;
+  static toObject<ThisT extends Structure<F>>(
+    this: new (...args: any[]) => ThisT,
+    buf: Buffer | any
+  ): FieldsToInstance<F>;
+  _buffer: Buffer;
+  _structDef: StructDef;
+  get<K extends keyof F & string>(fieldName: K): FieldsToInstance<F>[K];
+  set<K extends keyof F & string>(
+    fieldName: K,
+    value: FieldsToInstance<F>[K]
+  ): void;
+  toObject(): FieldsToInstance<F>;
+  [field: string]: any; // instance has dynamic properties for fields
+}
+
+/**
+ * Python-like Union base class.
+ */
+export class Union<
+  F extends Record<string, FieldSpec> = Record<string, any>
+> extends Structure<F> {}
+
 // =============================================================================
 // Functions
 // =============================================================================
@@ -374,6 +457,14 @@ export function union(
     CTypeString | CType | StructDef | ArrayTypeDef | BitFieldDef
   >
 ): UnionDef;
+// Factory helpers that return a typed class extending Structure/Union
+export function defineStruct<F extends Record<string, FieldSpec>>(
+  fields: F,
+  options?: StructOptions
+): new (...args: any[]) => Structure<F>;
+export function defineUnion<F extends Record<string, FieldSpec>>(
+  fields: F
+): new (...args: any[]) => Union<F>;
 export function array(elementType: CTypeString, count: number): ArrayTypeDef;
 export function bitfield(baseType: CTypeString, bits: number): BitFieldDef;
 
