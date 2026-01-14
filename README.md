@@ -72,20 +72,21 @@ print(p.x, p.y)  # 10 20
 
 **node-ctypes (identical patterns!):**
 ```javascript
-import { CDLL, c_int, struct } from 'node-ctypes';
+import { CDLL, c_int, Structure } from 'node-ctypes';
 
 const libc = new CDLL("libc.so.6");
 const abs = libc.func("abs", c_int, [c_int]);
 console.log(abs(-42));  // 42
 
-const Point = struct({
-    x: c_int,
-    y: c_int
-});
+class Point extends Structure {
+    static _fields_ = [
+        ["x", c_int],
+        ["y", c_int]
+    ];
+}
 
-const p = Point.create({ x: 10, y: 20 });
-const obj = Point.toObject(p);
-console.log(obj.x, obj.y);  // 10 20
+const p = new Point(10, 20);
+console.log(p.x, p.y);  // 10 20
 ```
 
 ## Usage
@@ -117,100 +118,101 @@ console.log(sqrt(16.0));  // 4.0
 ### Structs - Full Python ctypes Compatibility
 
 ```javascript
-import { struct, c_int, c_uint32 } from 'node-ctypes';
+import { Structure, c_int, c_uint32 } from 'node-ctypes';
 
-// Simple struct
-const Point = struct({
-    x: c_int,
-    y: c_int
-});
+// Simple struct - Python-like class syntax
+class Point extends Structure {
+    static _fields_ = [
+        ["x", c_int],
+        ["y", c_int]
+    ];
+}
 
-// Create and initialize
-const p = Point.create({ x: 10, y: 20 });
+// Create and initialize - direct property access!
+const p = new Point(10, 20);
+console.log(p.x, p.y);  // 10 20
 
-// Convert to JavaScript object (eager loading - high performance!)
-const obj = Point.toObject(p);
-console.log(obj.x, obj.y);  // 10 20
-
-// Modify and sync back to buffer
-obj.x = 100;
-obj._sync();  // Write changes back to buffer
+// Modify properties directly
+p.x = 100;
+console.log(p.x);  // 100
 
 // Get struct size
 console.log(Point.size);  // 8
 
 // Nested structs
-const Rectangle = struct({
-    topLeft: Point,
-    bottomRight: Point,
-    color: c_uint32
-});
+class Rectangle extends Structure {
+    static _fields_ = [
+        ["topLeft", Point],
+        ["bottomRight", Point],
+        ["color", c_uint32]
+    ];
+}
 
-const rect = Rectangle.create({
+const rect = new Rectangle({
     topLeft: { x: 0, y: 0 },
     bottomRight: { x: 100, y: 200 },
     color: 0xff0000
 });
 
-const rectObj = Rectangle.toObject(rect);
-console.log(rectObj.topLeft.x);      // 0
-console.log(rectObj.bottomRight.x);  // 100
-console.log(rectObj.color);          // 16711680
+console.log(rect.topLeft.x);      // 0
+console.log(rect.bottomRight.x);  // 100
+console.log(rect.color);          // 16711680
 ```
 
 ### Unions - Shared Memory Regions
 
 ```javascript
-import { union, c_int, c_float } from 'node-ctypes';
+import { Union, c_int, c_float } from 'node-ctypes';
 
 // Union - all fields share the same memory
-const IntOrFloat = union({
-    i: c_int,
-    f: c_float
-});
+class IntOrFloat extends Union {
+    static _fields_ = [
+        ["i", c_int],
+        ["f", c_float]
+    ];
+}
 
-const u = IntOrFloat.create();
-const obj = IntOrFloat.toObject(u);
+const u = new IntOrFloat();
+u.f = 3.14159;
+console.log(u.i);  // Bit pattern of float as integer
 
-obj.f = 3.14159;
-console.log(obj.i);  // Bit pattern of float as integer
-
-obj.i = 42;
-console.log(obj.f);  // 42 reinterpreted as float
+u.i = 42;
+console.log(u.f);  // 42 reinterpreted as float
 ```
 
 ### Bit Fields - Compact Data Structures
 
 ```javascript
-import { struct, bitfield, c_uint32 } from 'node-ctypes';
+import { Structure, bitfield, c_uint32 } from 'node-ctypes';
 
 // Bit fields for flags and compact data
-const Flags = struct({
-    enabled: bitfield(c_uint32, 1),   // 1 bit
-    mode: bitfield(c_uint32, 3),      // 3 bits
-    priority: bitfield(c_uint32, 4),  // 4 bits
-    reserved: bitfield(c_uint32, 24)  // 24 bits
-});
+class Flags extends Structure {
+    static _fields_ = [
+        ["enabled", bitfield(c_uint32, 1)],   // 1 bit
+        ["mode", bitfield(c_uint32, 3)],      // 3 bits
+        ["priority", bitfield(c_uint32, 4)],  // 4 bits
+        ["reserved", bitfield(c_uint32, 24)]  // 24 bits
+    ];
+}
 
-const flags = Flags.create();
-const obj = Flags.toObject(flags);
+const flags = new Flags();
 
-obj.enabled = 1;
-obj.mode = 5;
-obj.priority = 12;
+flags.enabled = 1;
+flags.mode = 5;
+flags.priority = 12;
 
-console.log(obj.enabled);   // 1
-console.log(obj.mode);      // 5
-console.log(obj.priority);  // 12
+console.log(flags.enabled);   // 1
+console.log(flags.mode);      // 5
+console.log(flags.priority);  // 12
 ```
 
 ### Arrays - Fixed-size and Dynamic
 
 ```javascript
-import { c_int, c_uint8 } from 'node-ctypes';
+import { c_int, c_uint8, array } from 'node-ctypes';
 
 // Fixed-size array
-const IntArray = c_int * 5;
+const IntArray = array('int32', 5);
 const arr = IntArray.create([1, 2, 3, 4, 5]);
 
 // Array access
@@ -223,20 +225,21 @@ for (const val of arr) {
 }
 
 // Arrays in structs
-import { struct } from 'node-ctypes';
+import { Structure, array } from 'node-ctypes';
 
-const Packet = struct({
-    header: c_uint8 * 8,
-    data: c_uint8 * 256
-});
+class Packet extends Structure {
+    static _fields_ = [
+        ["header", array("c_uint8", 8)],
+        ["data", array("c_uint8", 256)]
+    ];
+}
 
-const pkt = Packet.create({
+const pkt = new Packet({
     header: [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08],
     data: new Array(256).fill(0)
 });
 
-const pktObj = Packet.toObject(pkt);
-console.log(pktObj.header);  // [1, 2, 3, 4, 5, 6, 7, 8]
+console.log(pkt.header);  // [1, 2, 3, 4, 5, 6, 7, 8]
 ```
 
 ### Complex Nested Structures
@@ -244,38 +247,46 @@ console.log(pktObj.header);  // [1, 2, 3, 4, 5, 6, 7, 8]
 Real-world example from our test suite:
 
 ```javascript
-import { struct, union, c_uint8, c_uint16, c_int32 } from 'node-ctypes';
+import { Structure, Union, c_uint8, c_uint16, c_int32, array } from 'node-ctypes';
 
 // RGB color components
-const RGB = struct({
-    r: c_uint8,
-    g: c_uint8,
-    b: c_uint8,
-    a: c_uint8
-});
+class RGB extends Structure {
+    static _fields_ = [
+        ["r", c_uint8],
+        ["g", c_uint8],
+        ["b", c_uint8],
+        ["a", c_uint8]
+    ];
+}
 
 // Union for color access (as RGB or as 32-bit value)
-const Color = union({
-    rgb: RGB,
-    value: c_int32
-});
+class Color extends Union {
+    static _fields_ = [
+        ["rgb", RGB],
+        ["value", c_int32]
+    ];
+}
 
 // Pixel with position and color
-const Pixel = struct({
-    x: c_uint16,
-    y: c_uint16,
-    color: Color
-});
+class Pixel extends Structure {
+    static _fields_ = [
+        ["x", c_uint16],
+        ["y", c_uint16],
+        ["color", Color]
+    ];
+}
 
 // Image with array of pixels
-const Image = struct({
-    width: c_uint16,
-    height: c_uint16,
-    pixels: Pixel * 2
-});
+class Image extends Structure {
+    static _fields_ = [
+        ["width", c_uint16],
+        ["height", c_uint16],
+        ["pixels", array(Pixel, 2)]
+    ];
+}
 
 // Create and manipulate
-const img = Image.create({
+const img = new Image({
     width: 640,
     height: 480,
     pixels: [
@@ -284,18 +295,17 @@ const img = Image.create({
     ]
 });
 
-const imgObj = Image.toObject(img);
-console.log(imgObj.pixels[0].color.rgb.r);  // 255
-console.log(imgObj.pixels[1].color.value);  // -16711936 (0xFF00FF00 as signed)
+console.log(img.pixels[0].color.rgb.r);  // 255
+console.log(img.pixels[1].color.value);  // -16711936 (0xFF00FF00 as signed)
 
-// Union nested in struct - automatic caching!
-imgObj.pixels[0].color.rgb.g = 128;  // Works correctly!
+// Union nested in struct - direct property access!
+img.pixels[0].color.rgb.g = 128;  // Works correctly!
 ```
 
 ### Callbacks - JavaScript Functions in C
 
 ```javascript
-import { CDLL, callback, c_int, c_void_p } from 'node-ctypes';
+import { CDLL, callback, c_int, c_void_p, readValue, writeValue, create_string_buffer } from 'node-ctypes';
 
 const libc = new CDLL('msvcrt.dll');  // or libc.so.6 on Linux
 
@@ -303,8 +313,8 @@ const libc = new CDLL('msvcrt.dll');  // or libc.so.6 on Linux
 const compare = callback(
     (a, b) => {
         // a and b are pointers to int32 values
-        const aVal = a.readInt32LE(0);
-        const bVal = b.readInt32LE(0);
+        const aVal = readValue(a, 'int32');
+        const bVal = readValue(b, 'int32');
         return aVal - bVal;
     },
     c_int,              // return type
@@ -319,12 +329,14 @@ const qsort = libc.func('qsort', 'void', [
     c_void_p   // comparison function
 ]);
 
-const arr = Buffer.from([5, 2, 8, 1, 9].flatMap(n => [n, 0, 0, 0]));
-qsort(arr, 5n, 4n, compare.pointer);
+const arr = create_string_buffer(5 * 4);
+const values = [5, 2, 8, 1, 9];
+values.forEach((v, i) => writeValue(arr, 'int32', v, i * 4));
+qsort(arr, 5, 4, compare.pointer);
 
 // Array is now sorted: [1, 2, 5, 8, 9]
-console.log(arr.readInt32LE(0));  // 1
-console.log(arr.readInt32LE(4));  // 2
+console.log(readValue(arr, 'int32', 0));  // 1
+console.log(readValue(arr, 'int32', 4));  // 2
 
 // IMPORTANT: Release callback when done
 compare.release();
@@ -368,32 +380,33 @@ console.log(string_at(buffer));  // "Pi ≈ 3.14"
 ### Windows API - Full Support
 
 ```javascript
-import { WinDLL, struct, c_uint16, c_void_p, c_wchar_p, c_int } from 'node-ctypes';
+import { WinDLL, Structure, c_uint16, c_void_p, c_wchar_p, c_int } from 'node-ctypes';
 
 // WinDLL uses __stdcall convention (default for Windows API)
 const kernel32 = new WinDLL('kernel32.dll');
 
 // SYSTEMTIME structure (from tests/windows/test_winapi.js)
-const SYSTEMTIME = struct({
-    wYear: c_uint16,
-    wMonth: c_uint16,
-    wDayOfWeek: c_uint16,
-    wDay: c_uint16,
-    wHour: c_uint16,
-    wMinute: c_uint16,
-    wSecond: c_uint16,
-    wMilliseconds: c_uint16
-});
+class SYSTEMTIME extends Structure {
+    static _fields_ = [
+        ["wYear", c_uint16],
+        ["wMonth", c_uint16],
+        ["wDayOfWeek", c_uint16],
+        ["wDay", c_uint16],
+        ["wHour", c_uint16],
+        ["wMinute", c_uint16],
+        ["wSecond", c_uint16],
+        ["wMilliseconds", c_uint16]
+    ];
+}
 
 // Get local time
 const GetLocalTime = kernel32.func('GetLocalTime', 'void', [c_void_p]);
 
-const st = SYSTEMTIME.create();
+const st = new SYSTEMTIME();
 GetLocalTime(st);  // Pass struct directly - automatic _buffer extraction!
 
-const time = SYSTEMTIME.toObject(st);
-console.log(`${time.wYear}-${time.wMonth}-${time.wDay}`);
-console.log(`${time.wHour}:${time.wMinute}:${time.wSecond}`);
+console.log(`${st.wYear}-${st.wMonth}-${st.wDay}`);
+console.log(`${st.wHour}:${st.wMinute}:${st.wSecond}`);
 
 // MessageBox (wide string version)
 const user32 = new WinDLL('user32.dll');
@@ -404,7 +417,11 @@ const MessageBoxW = user32.func('MessageBoxW', c_int, [
     'uint32'    // uType
 ]);
 
-// MessageBoxW(null, 'Hello from node-ctypes!', 'node-ctypes', 0);
+// Create UTF-16 buffers for wide strings
+const text = Buffer.from('Hello from node-ctypes!\0', 'utf16le');
+const caption = Buffer.from('node-ctypes\0', 'utf16le');
+
+MessageBoxW(null, text, caption, 0);
 ```
 
 ### Memory Operations - Low-level Control
@@ -488,24 +505,24 @@ Low-level library wrapper.
 
 ---
 
-## Reference API dettagliata (da lib/index.js)
+## Detailed API Reference (from lib/index.js)
 
-Questa sezione fornisce una descrizione più completa delle API esportate da `lib/index.js`, con esempi rapidi e note di utilizzo.
+This section provides a more complete description of the APIs exported from `lib/index.js`, with quick examples and usage notes.
 
-**Classi ed esportazioni native**
-- `Version` - Informazioni di versione esposte dal modulo nativo.
-- `Library` - Rappresenta una libreria nativa caricata ed espone funzioni low-level per simboli e gestione della libreria.
-- `FFIFunction` - Oggetto a basso livello che rappresenta una funzione FFI (ha proprietà come `address` e metodi interni).
-- `Callback` - Costruisce callback JS invocabili da C (main thread).
-- `ThreadSafeCallback` - Costruisce callback JS thread-safe (può essere chiamato da thread esterni).
-- `CType`, `StructType`, `ArrayType` - Tipi e helper esposti dal layer nativo.
+**Native classes and exports**
+- `Version` - Version information exposed by the native module.
+- `Library` - Represents a loaded native library and exposes low-level functions for symbols and library management.
+- `FFIFunction` - Low-level object representing an FFI function (has properties like `address` and internal methods).
+- `Callback` - Builds JS callbacks callable from C (main thread).
+- `ThreadSafeCallback` - Builds thread-safe JS callbacks (can be called from external threads).
+- `CType`, `StructType`, `ArrayType` - Types and helpers exposed by the native layer.
 
-**Caricamento librerie e wrapper**
-- `load(libPath)` → `Library` : carica una libreria nativa; `libPath` può essere `null` per l'eseguibile corrente.
-- `CDLL(libPath)` : wrapper ad uso comune per chiamate C con convenzione cdecl; mantiene una cache di funzioni e fornisce `func()` più comodo.
-- `WinDLL(libPath)` : come `CDLL` ma con `abi: 'stdcall'` di default (utile per WinAPI).
+**Library loading and wrappers**
+- `load(libPath)` → `Library` : loads a native library; `libPath` can be `null` for the current executable.
+- `CDLL(libPath)` : common-use wrapper for C calls with cdecl convention; maintains a function cache and provides more convenient `func()`.
+- `WinDLL(libPath)` : like `CDLL` but with `abi: 'stdcall'` by default (useful for WinAPI).
 
-Esempio:
+Example:
 ```js
 import { CDLL } from './lib/index.js';
 const libc = new CDLL(null);
@@ -513,31 +530,31 @@ const abs = libc.func('abs', 'int32', ['int32']);
 console.log(abs(-5));
 ```
 
-**CDLL API dettagliata**
-- `func(name, returnType, argTypes = [], options = {})` → `Function` : ottiene una funzione callable. La funzione restituita è ottimizzata e:
-    - estrae automaticamente `._buffer` dagli oggetti struct passati come argomenti;
-    - espone metadati non-enumerabili: `funcName`, `address`, `_ffi`; 
-    - fornisce la proprietà `errcheck` come getter/setter per intercettare errori di ritorno.
-- `symbol(name)` → `BigInt` : indirizzo di un simbolo.
-- `close()` : chiude la libreria e svuota la cache.
-- `path` (getter) : percorso della libreria.
-- `loaded` (getter) : stato di caricamento.
+**Detailed CDLL API**
+- `func(name, returnType, argTypes = [], options = {})` → `Function` : gets a callable function. The returned function is optimized and:
+    - automatically extracts `._buffer` from struct objects passed as arguments;
+    - exposes non-enumerable metadata: `funcName`, `address`, `_ffi`; 
+    - provides the `errcheck` property as getter/setter to intercept return errors.
+- `symbol(name)` → `BigInt` : address of a symbol.
+- `close()` : closes the library and clears the cache.
+- `path` (getter) : library path.
+- `loaded` (getter) : loading status.
 
 **Callback**
-- `callback(fn, returnType, argTypes = [])` → `{ pointer, release(), _callback }` : callback veloce, solo main thread.
-- `threadSafeCallback(fn, returnType, argTypes = [])` → `{ pointer, release(), _callback }` : callback sicuro per thread esterni.
+- `callback(fn, returnType, argTypes = [])` → `{ pointer, release(), _callback }` : fast callback, main thread only.
+- `threadSafeCallback(fn, returnType, argTypes = [])` → `{ pointer, release(), _callback }` : thread-safe callback for external threads.
 
-Nota: chiamare sempre `release()` quando un callback non è più necessario.
+Note: always call `release()` when a callback is no longer needed.
 
-**Allocazione e stringhe**
+**Allocation and strings**
 
-- `Buffer.alloc(size)` → `Buffer` : alloca memoria nativa.
-- `create_string_buffer(init)` → `Buffer` : crea stringa C null-terminated (init: size|string|Buffer).
-- `create_unicode_buffer(init)` → `Buffer` : crea stringa wide (wchar_t) null-terminated.
-- `ptrToBuffer(address, size)` → `Buffer` : vista su indirizzo nativo (usa con cautela).
-- `addressof(ptr)` → `BigInt` : ottieni l'indirizzo come BigInt.
+- `Buffer.alloc(size)` → `Buffer` : allocates native memory.
+- `create_string_buffer(init)` → `Buffer` : creates null-terminated C string (init: size|string|Buffer).
+- `create_unicode_buffer(init)` → `Buffer` : creates null-terminated wide string (wchar_t).
+- `ptrToBuffer(address, size)` → `Buffer` : view on native address (use with caution).
+- `addressof(ptr)` → `BigInt` : get the address as BigInt.
 
-Esempio creazione stringa e passaggio a funzione:
+Example string creation and passing to function:
 ```js
 import { create_string_buffer, CDLL } from './lib/index.js';
 const libc = new CDLL(null);
@@ -546,54 +563,60 @@ const s = create_string_buffer('hello');
 puts(s);
 ```
 
-**Lettura e scrittura di valori**
-- `readValue(ptr, type, offset = 0)` : supporta fast-path per Buffer + tipi base (`int8`, `uint8`, `int16`, `int32`, `int64`, `float`, `double`, `bool`).
-- `writeValue(ptr, type, value, offset = 0)` : scrive valori con fast-path per Buffer.
+**Reading and writing values**
+- `readValue(ptr, type, offset = 0)` : supports fast-path for Buffer + basic types (`int8`, `uint8`, `int16`, `int32`, `int64`, `float`, `double`, `bool`).
+- `writeValue(ptr, type, value, offset = 0)` : writes values with fast-path for Buffer.
 
-**Tipi e helper**
-- `sizeof(type)` → `number` : dimensione in bytes di un tipo.
-- `POINTER(baseType)` : crea un tipo puntatore con helper `create()`, `fromBuffer()`, `deref()`, `set()`.
-- `byref(buffer)` : passa un buffer per riferimento (compatibilità Python ctypes).
-- `cast(ptr, targetType)` : interpreta un puntatore come un altro tipo (restituisce wrapper per struct).
+**Types and helpers**
+- `sizeof(type)` → `number` : size in bytes of a type.
+- `POINTER(baseType)` : creates a pointer type with helpers `create()`, `fromBuffer()`, `deref()`, `set()`.
+- `byref(buffer)` : passes a buffer by reference (Python ctypes compatibility).
+- `cast(ptr, targetType)` : interprets a pointer as another type (returns wrapper for struct).
 
 **Struct / Union / Array / Bitfield**
-- `struct(fields, options)` : definisce struct con supporto per nested, bitfields, anonymous fields, packed option. Ritorna un object con `create()`, `get()`, `set()`, `toObject()`, `getNestedBuffer()`.
-- `union(fields)` : definisce union; fornisce `create()`, `get()`, `set()`, `toObject()` e ritorna oggetti plain con proprietà.
-- `array(elementType, count)` : definisce ArrayType; `wrap(buffer)` ritorna Proxy con indexing.
-- `bitfield(baseType, bits)` : definizione di bitfield.
+- `struct(fields, options)` : defines struct with support for nested, bitfields, anonymous fields, packed option. Returns object with `create()`, `get()`, `set()`, `toObject()`, `getNestedBuffer()`.
+- `union(fields)` : defines union; provides `create()`, `get()`, `set()`, `toObject()` and returns plain objects with properties.
+- `array(elementType, count)` : defines ArrayType; `wrap(buffer)` returns Proxy with indexing.
+- `bitfield(baseType, bits)` : bitfield definition.
 
-Esempio struct:
+Struct example:
 ```js
-const Point = struct({ x: 'int32', y: 'int32' });
-const p = Point.create({ x: 1, y: 2 });
-console.log(Point.toObject(p));
+class Point extends Structure {
+    static _fields_ = [
+        ["x", c_int32],
+        ["y", c_int32]
+    ];
+}
+
+const p = new Point(1, 2);
+console.log(p.x, p.y);  // 1 2
 ```
 
-**Convenienze Python-compatibili**
-- `create_string_buffer(init)` : create string buffer da numero/string/Buffer.
+**Python-compatible conveniences**
+- `create_string_buffer(init)` : create string buffer from number/string/Buffer.
 - `create_unicode_buffer(init)` : create wide string buffer.
-- `string_at(address, size)` / `wstring_at(address, size)` : leggere stringhe da indirizzo.
+- `string_at(address, size)` / `wstring_at(address, size)` : read strings from address.
 
-**Memoria: utilità**
-- `memmove(dst, src, count)` : copia memoria.
-- `memset(dst, value, count)` : setta memoria.
+**Memory: utilities**
+- `memmove(dst, src, count)` : copy memory.
+- `memset(dst, value, count)` : set memory.
 
-**Error handling e WinAPI helpers**
-- `get_errno()` / `set_errno(value)` : accesso ad errno (implementazione platform-specific).
-- `_initWinError()` internals; helpers pubblici: `GetLastError()`, `SetLastError(code)`, `FormatError(code)`, `WinError(code)`.
+**Error handling and WinAPI helpers**
+- `get_errno()` / `set_errno(value)` : access to errno (platform-specific implementation).
+- `_initWinError()` internals; public helpers: `GetLastError()`, `SetLastError(code)`, `FormatError(code)`, `WinError(code)`.
 
-**Alias tipi**
-I seguenti alias sono esposti (mappati da `native.types`):
+**Type aliases**
+The following aliases are exposed (mapped from `native.types`):
 `c_int, c_uint, c_int8, c_uint8, c_int16, c_uint16, c_int32, c_uint32, c_int64, c_uint64, c_float, c_double, c_char, c_char_p, c_wchar, c_wchar_p, c_void_p, c_bool, c_size_t, c_long, c_ulong`.
 
-**Costanti**
-- `POINTER_SIZE` - dimensione puntatore (da `native.POINTER_SIZE`).
-- `WCHAR_SIZE` - dimensione wchar (da `native.WCHAR_SIZE`).
-- `NULL` - valore null esportato.
+**Constants**
+- `POINTER_SIZE` - pointer size (from `native.POINTER_SIZE`).
+- `WCHAR_SIZE` - wchar size (from `native.WCHAR_SIZE`).
+- `NULL` - exported null value.
 
 ---
 
-Se vuoi, posso generare snippet aggiuntivi specifici per Windows o Linux, oppure integrare esempi nel directory `tests/`.
+If you want, I can generate additional Windows or Linux-specific snippets, or integrate examples in the `tests/` directory.
 
 ### Functions
 
@@ -604,10 +627,10 @@ Load a shared library.
 Create a callback from a JavaScript function.
 
 #### `create_string_buffer(init)` → `Buffer`
-Create a null-terminated C string buffer (like Python ctypes). `init` può essere una dimensione, una stringa o un existing `Buffer`.
+Create a null-terminated C string buffer (like Python ctypes). `init` can be a size, a string, or an existing `Buffer`.
 
 #### `create_unicode_buffer(init)` → `Buffer`
-Create a wide (wchar_t) null-terminated buffer (UTF-16LE su Windows).
+Create a wide (wchar_t) null-terminated buffer (UTF-16LE on Windows).
 
 #### `string_at(address, [size])` → `string`
 Read a C string from an address or buffer.
@@ -624,6 +647,12 @@ Get the size of a type in bytes.
 #### `struct(fields)` → `StructDefinition`
 Create a simple struct definition.
 
+#### `Structure` (base class)
+Base class for Python-like struct definitions. Subclasses should define `static _fields_`.
+
+#### `Union` (base class)
+Base class for Python-like union definitions. Subclasses should define `static _fields_`.
+
 ## Python ctypes Compatibility Reference
 
 ### API Comparison
@@ -632,9 +661,9 @@ Create a simple struct definition.
 |---------|---------------|-------------|
 | **Load library** | `CDLL("lib.so")` | `new CDLL("lib.so")` |
 | **Define function** | `lib.func.argtypes = [c_int]`<br>`lib.func.restype = c_int` | `lib.func("func", c_int, [c_int])` |
-| **Structs** | `class Point(Structure):`<br>&nbsp;&nbsp;`_fields_ = [("x", c_int)]` | `const Point = struct({x: c_int})` |
-| **Unions** | `class U(Union):`<br>&nbsp;&nbsp;`_fields_ = [("i", c_int)]` | `const U = union({i: c_int})` |
-| **Arrays** | `c_int * 5` | `c_int * 5` |
+| **Structs** | `class Point(Structure):`<br>&nbsp;&nbsp;`_fields_ = [("x", c_int)]` | `class Point extends Structure`<br>&nbsp;&nbsp;`{ static _fields_ = [["x", c_int]] }` |
+| **Unions** | `class U(Union):`<br>&nbsp;&nbsp;`_fields_ = [("i", c_int)]` | `class U extends Union`<br>&nbsp;&nbsp;`{ static _fields_ = [["i", c_int]] }` |
+| **Arrays** | `c_int * 5` | `array(c_int, 5)` |
 | **Bit fields** | `("flags", c_uint, 3)` | `bitfield(c_uint32, 3)` |
 | **Callbacks** | `CFUNCTYPE(c_int, c_int)` | `callback(fn, c_int, [c_int])` |
 | **Strings** | `c_char_p(b"hello")` | `create_string_buffer("hello")` |
@@ -653,6 +682,7 @@ Create a simple struct definition.
 - Callbacks (with manual release)
 - Variadic functions (automatic detection)
 - Anonymous fields in structs/unions
+- **Class-based struct/union definitions** (`class MyStruct extends Structure`)
 - Platform-specific types (c_long, c_ulong, c_size_t)
 - Memory operations (alloc, read, write)
 - Windows API (__stdcall via WinDLL)
@@ -663,42 +693,6 @@ Create a simple struct definition.
 - Function definition is combined: `func(name, returnType, argTypes)` vs separate argtypes/restype
 - No `POINTER()` type - use `c_void_p` or type name string
 
-### Migration Examples
-
-**Python ctypes:**
-```python
-from ctypes import *
-
-class POINT(Structure):
-    _fields_ = [("x", c_int), ("y", c_int)]
-
-libc = CDLL("libc.so.6")
-abs_func = libc.abs
-abs_func.argtypes = [c_int]
-abs_func.restype = c_int
-result = abs_func(-42)
-
-p = POINT(10, 20)
-print(p.x, p.y)
-```
-
-**node-ctypes (equivalent):**
-```javascript
-import { CDLL, c_int, struct } from 'node-ctypes';
-
-const POINT = struct({
-    x: c_int,
-    y: c_int
-});
-
-const libc = new CDLL("libc.so.6");
-const abs_func = libc.func("abs", c_int, [c_int]);
-const result = abs_func(-42);
-
-const p = POINT.create({ x: 10, y: 20 });
-const obj = POINT.toObject(p);
-console.log(obj.x, obj.y);
-```
 
 ## Limitations & Known Issues
 

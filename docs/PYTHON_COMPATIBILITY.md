@@ -1,9 +1,9 @@
-# Analisi Compatibilità: node-ctypes vs Python ctypes
+# Compatibility Analysis: node-ctypes vs Python ctypes
 
-## Riepilogo
+## Summary
 
-| Categoria | Supportato | Parziale | Mancante |
-|-----------|------------|----------|----------|
+| Category | Supported | Partial | Missing |
+|----------|-----------|---------|---------|
 | Loading Libraries | 3 | 0 | 1 |
 | Basic Types | 19 | 0 | 1 |
 | Functions | 5 | 0 | 0 |
@@ -14,27 +14,27 @@
 | Memory | 12 | 0 | 0 |
 | Error Handling | 6 | 0 | 0 |
 
-**Compatibilità stimata: ~99%**
+**Estimated compatibility: ~99%**
 
 ---
 
 ## 1. Loading Libraries
 
-### ✅ Supportato
+### ✅ Supported
 
 | Python | node-ctypes | Note |
 |--------|-------------|------|
-| `CDLL("lib.dll")` | `new CDLL("lib.dll")` | Identico |
-| `WinDLL("lib.dll")` | `new WinDLL("lib.dll")` | Identico |
-| `cdll.LoadLibrary()` | `load()` | Diversa sintassi |
+| `CDLL("lib.dll")` | `new CDLL("lib.dll")` | Identical |
+| `WinDLL("lib.dll")` | `new WinDLL("lib.dll")` | Identical |
+| `cdll.LoadLibrary()` | `load()` | Different syntax |
 
-### ❌ Mancante
+### ❌ Missing
 
-| Python | Descrizione |
+| Python | Description |
 |--------|-------------|
-| `OleDLL()` | stdcall + controllo HRESULT automatico |
+| `OleDLL()` | stdcall + automatic HRESULT checking |
 
-### Esempio Comparativo
+### Comparative Example
 
 ```python
 # Python
@@ -54,7 +54,7 @@ const kernel32 = new WinDLL("kernel32");
 
 ## 2. Basic Types
 
-### ✅ Supportato
+### ✅ Supported
 
 | Python | node-ctypes | Size |
 |--------|-------------|------|
@@ -78,13 +78,13 @@ const kernel32 = new WinDLL("kernel32");
 | `c_size_t` | `c_size_t` / `'size_t'` | ptr |
 | `c_ssize_t` | `'ssize_t'` | ptr |
 
-**Note sui tipi platform-dependent:**
-- `c_long`: 32-bit su Windows (LLP64), 32/64-bit su Unix (LP64)
-- `c_wchar`: 16-bit su Windows (UTF-16), 32-bit su Unix (UTF-32)
+**Notes on platform-dependent types:**
+- `c_long`: 32-bit on Windows (LLP64), 32/64-bit on Unix (LP64)
+- `c_wchar`: 16-bit on Windows (UTF-16), 32-bit on Unix (UTF-32)
 
-### ❌ Mancante
+### ❌ Missing
 
-| Python | Descrizione |
+| Python | Description |
 |--------|-------------|
 | `c_longdouble` | Long double (80/128 bit) |
 
@@ -92,17 +92,17 @@ const kernel32 = new WinDLL("kernel32");
 
 ## 3. Functions
 
-### ✅ Supportato
+### ✅ Supported
 
 | Python | node-ctypes | Note |
 |--------|-------------|------|
-| `lib.func_name` | `lib.func(name, ret, args)` | Sintassi diversa |
-| `func.restype` | secondo parametro di `func()` | Integrato |
-| `func.argtypes` | terzo parametro di `func()` | Integrato |
-| `func.errcheck` | `func.errcheck = callback` | ✅ **IMPLEMENTATO!** |
-| Variadic functions | Auto-detection | Supportato automaticamente |
+| `lib.func_name` | `lib.func(name, ret, args)` | Different syntax |
+| `func.restype` | second parameter of `func()` | Integrated |
+| `func.argtypes` | third parameter of `func()` | Integrated |
+| `func.errcheck` | `func.errcheck = callback` | ✅ **IMPLEMENTED!** |
+| Variadic functions | Auto-detection | Automatically supported |
 
-### Esempio Comparativo
+### Comparative Example
 
 ```python
 # Python
@@ -110,12 +110,12 @@ from ctypes import CDLL, c_int, c_char_p, c_size_t
 
 libc = CDLL("msvcrt")
 
-# Metodo 1: attributi
+# Method 1: attributes
 libc.abs.restype = c_int
 libc.abs.argtypes = [c_int]
 result = libc.abs(-42)
 
-# Metodo 2: prototype
+# Method 2: prototype
 from ctypes import CFUNCTYPE
 abs_proto = CFUNCTYPE(c_int, c_int)
 abs_func = abs_proto(("abs", libc))
@@ -130,7 +130,7 @@ const abs = libc.func("abs", "int32", ["int32"]);
 const result = abs(-42);
 ```
 
-### Esempio errcheck
+### errcheck Example
 
 ```python
 # Python
@@ -141,7 +141,7 @@ malloc = libc.malloc
 malloc.restype = c_void_p
 malloc.argtypes = [c_size_t]
 
-# Aggiungi error checking
+# Add error checking
 def check_null(result, func, args):
     if result is None or result == 0:
         raise MemoryError("malloc failed")
@@ -149,7 +149,7 @@ def check_null(result, func, args):
 
 malloc.errcheck = check_null
 
-# Ora malloc solleva automaticamente MemoryError se fallisce
+# Now malloc automatically raises MemoryError if it fails
 ptr = malloc(1024)  # OK
 ```
 
@@ -160,7 +160,7 @@ const { CDLL } = require('node-ctypes');
 const libc = new CDLL("msvcrt");
 const malloc = libc.func("malloc", "pointer", ["size_t"]);
 
-// Aggiungi error checking ✅ IDENTICO A PYTHON!
+// Add error checking ✅ IDENTICAL TO PYTHON!
 malloc.errcheck = function(result, func, args) {
     if (!result || result === 0n) {
         throw new Error("malloc failed");
@@ -168,7 +168,7 @@ malloc.errcheck = function(result, func, args) {
     return result;
 };
 
-// Ora malloc solleva automaticamente Error se fallisce
+// Now malloc automatically raises Error if it fails
 const ptr = malloc(1024);  // OK
 ```
 
@@ -176,20 +176,20 @@ const ptr = malloc(1024);  // OK
 
 ## 4. Structures & Unions
 
-### ✅ Supportato
+### ✅ Supported
 
 | Feature | Python | node-ctypes |
 |---------|--------|-------------|
-| Definizione struct | `class S(Structure)` | `struct({...})` |
-| Definizione union | `class U(Union)` | `union({...})` |
-| Campi | `_fields_` | oggetto fields |
+| Struct definition | `class S(Structure)` | `struct({...})` |
+| Union definition | `class U(Union)` | `union({...})` |
+| Fields | `_fields_` | fields object |
 | Packed | `_pack_ = 1` | `{ packed: true }` |
 | sizeof | `sizeof(S)` | `structDef.size` |
-| Nested structs | Supportato | Accesso con dot notation |
-| Bit fields | `bitfield('uint32', 4)` | Simile a Python |
-| Anonymous fields | `_anonymous_` | ✅ **IMPLEMENTATO!** `{ anonymous: true }` |
+| Nested structs | Supported | Access with dot notation |
+| Bit fields | `bitfield('uint32', 4)` | Similar to Python |
+| Anonymous fields | `_anonymous_` | ✅ **IMPLEMENTED!** `{ anonymous: true }` |
 
-### Esempio Comparativo - Base
+### Comparative Example - Basic
 
 ```python
 # Python
@@ -212,7 +212,7 @@ print(p.x, p.y)
 
 u = IntOrFloat()
 u.f = 3.14
-print(u.i)  # Interpreta i bit come int
+print(u.i)  # Interprets bits as int
 ```
 
 ```javascript
@@ -234,10 +234,10 @@ console.log(Point.get(p, 'x'), Point.get(p, 'y'));
 
 const u = IntOrFloat.create();
 IntOrFloat.set(u, 'f', 3.14);
-console.log(IntOrFloat.get(u, 'i'));  // Interpreta i bit come int
+console.log(IntOrFloat.get(u, 'i'));  // Interprets bits as int
 ```
 
-### Esempio Comparativo - Nested Structs
+### Comparative Example - Nested Structs
 
 ```python
 # Python
@@ -260,7 +260,7 @@ print(rect.topLeft.x)  # 10
 ```
 
 ```javascript
-// node-ctypes - SUPPORTATO!
+// node-ctypes - SUPPORTED!
 const { struct } = require('node-ctypes');
 
 const Point = struct({ x: 'int32', y: 'int32' });
@@ -279,7 +279,7 @@ const rect = Rectangle.create({
 console.log(Rectangle.get(rect, 'topLeft.x'));  // 10 - Dot notation!
 ```
 
-### Esempio Comparativo - Bit Fields
+### Comparative Example - Bit Fields
 
 ```python
 # Python
@@ -301,7 +301,7 @@ print(f.enabled, f.mode, f.priority)  # 1 5 15
 ```
 
 ```javascript
-// node-ctypes - SUPPORTATO!
+// node-ctypes - SUPPORTED!
 const { struct, bitfield } = require('node-ctypes');
 
 const Flags = struct({
@@ -328,7 +328,7 @@ console.log(
 
 ## 5. Arrays
 
-### ✅ Supportato
+### ✅ Supported
 
 | Python | node-ctypes | Note |
 |--------|-------------|------|
@@ -336,12 +336,12 @@ console.log(
 | `(c_int * 5)(1,2,3,4,5)` | `IntArray5.create([1,2,3,4,5])` | Initialization |
 | `sizeof(arr)` | `ArrayType.getSize()` | Size in bytes |
 | `len(arr)` | `ArrayType.getLength()` | Number of elements |
-| `arr[i]` | ✅ **`arr[i]`** | ✅ **IMPLEMENTATO!** Syntactic sugar |
-| `arr[i] = value` | ✅ **`arr[i] = value`** | ✅ **IMPLEMENTATO!** Direct assignment |
+| `arr[i]` | ✅ **`arr[i]`** | ✅ **IMPLEMENTED!** Syntactic sugar |
+| `arr[i] = value` | ✅ **`arr[i] = value`** | ✅ **IMPLEMENTED!** Direct assignment |
 | Partial init | `create([1,2,3])` | Rest filled with zeros |
-| Iteration | `for (let v of arr)` | ✅ **IMPLEMENTATO!** Iterable |
+| Iteration | `for (let v of arr)` | ✅ **IMPLEMENTED!** Iterable |
 
-### Esempio Comparativo
+### Comparative Example
 
 ```python
 # Python
@@ -438,35 +438,35 @@ memcpy(dst, src, IntArray10.getSize());
 
 ## 6. Pointers
 
-### ✅ Supportato
+### ✅ Supported
 
 | Python | node-ctypes | Note |
 |--------|-------------|------|
-| `addressof(obj)` | `addressOf(buf)` | Identico |
-| `sizeof(type)` | `sizeof(type)` | Identico |
-| `byref(obj)` | `byref(buf)` | Passa per riferimento |
-| `cast(ptr, type)` | `cast(ptr, type)` | Cast tra tipi |
-| `POINTER(type)` | `POINTER(type)` | Tipo puntatore |
-| Pointer aritmetica | BigInt | Manuale con BigInt |
-| Dereferenziazione | `readValue()` | Diversa sintassi |
+| `addressof(obj)` | `addressOf(buf)` | Identical |
+| `sizeof(type)` | `sizeof(type)` | Identical |
+| `byref(obj)` | `byref(buf)` | Pass by reference |
+| `cast(ptr, type)` | `cast(ptr, type)` | Cast between types |
+| `POINTER(type)` | `POINTER(type)` | Pointer type |
+| Pointer arithmetic | BigInt | Manual with BigInt |
+| Dereferencing | `readValue()` | Different syntax |
 
 ### 🆕 Extra in node-ctypes
 
-| Feature | Descrizione |
+| Feature | Description |
 |---------|-------------|
-| `ptrToBuffer(addr, size)` | Crea Buffer da indirizzo raw |
+| `ptrToBuffer(addr, size)` | Create Buffer from raw address |
 
-### Esempio Comparativo
+### Comparative Example
 
 ```python
 # Python
 from ctypes import *
 
-# Alloca e scrivi
+# Allocate and write
 buf = create_string_buffer(100)
 value = c_int(42)
 
-# byref - passa per riferimento
+# byref - pass by reference
 GetSystemInfo(byref(sysInfo))
 
 # Pointer type
@@ -485,11 +485,11 @@ addr = addressof(value)
 // node-ctypes
 const { alloc, writeValue, readValue, addressOf, byref, cast, POINTER } = require('node-ctypes');
 
-// Alloca e scrivi
+// Allocate and write
 const buf = alloc(100);
 writeValue(buf, 'int32', 42);
 
-// byref - passa per riferimento
+// byref - pass by reference
 GetSystemInfo(byref(sysInfo));
 
 // Pointer type
@@ -507,20 +507,20 @@ const addr = addressOf(buf);
 
 ## 7. Callbacks
 
-### ✅ Supportato
+### ✅ Supported
 
 | Python | node-ctypes | Note |
 |--------|-------------|------|
-| `CFUNCTYPE(ret, *args)` | `callback(fn, ret, args)` | Simile |
+| `CFUNCTYPE(ret, *args)` | `callback(fn, ret, args)` | Similar |
 | `WINFUNCTYPE(ret, *args)` | `callback(fn, ret, args, {abi:'stdcall'})` | Windows |
 
 ### 🆕 Extra in node-ctypes
 
-| Feature | Descrizione |
+| Feature | Description |
 |---------|-------------|
-| `threadSafeCallback()` | Callback sicuro da thread esterni (Python NON supporta questo!) |
+| `threadSafeCallback()` | Thread-safe callback for external threads (Python does NOT support this!) |
 
-### Esempio Comparativo
+### Comparative Example
 
 ```python
 # Python
@@ -528,7 +528,7 @@ from ctypes import CDLL, CFUNCTYPE, c_int, c_void_p
 
 libc = CDLL("msvcrt")
 
-# Callback per qsort
+# Callback for qsort
 CMPFUNC = CFUNCTYPE(c_int, c_void_p, c_void_p)
 
 def py_compare(a, b):
@@ -551,7 +551,7 @@ const compare = callback((a, b) => {
     return aVal - bVal;
 }, 'int32', ['pointer', 'pointer']);
 
-// Per callback da thread esterni (es. CreateThread):
+// For callbacks from external threads (e.g. CreateThread):
 const threadProc = threadSafeCallback((param) => {
     console.log('Called from external thread!');
     return 0;
@@ -562,26 +562,26 @@ const threadProc = threadSafeCallback((param) => {
 
 ## 8. Memory Management
 
-### ✅ Supportato
+### ✅ Supported
 
 | Python | node-ctypes | Note |
 |--------|-------------|------|
-| `create_string_buffer(n)` | `create_string_buffer(n)` | **Identico!** |
-| `create_string_buffer(b"str")` | `create_string_buffer("str")` | **Identico!** |
-| `create_unicode_buffer(n)` | `create_unicode_buffer(n)` | **Identico!** |
-| `create_unicode_buffer(s)` | `create_unicode_buffer(s)` | **Identico!** |
-| `sizeof(type)` | `sizeof(type)` | **Identico!** |
-| `string_at(ptr, n)` | `string_at(ptr, n)` | **Identico!** |
-| `wstring_at(ptr, n)` | `wstring_at(ptr, n)` | **Identico!** |
-| `addressof(obj)` | `addressof(buf)` | **Identico!** |
-| `memmove(dst, src, n)` | `memmove(dst, src, n)` | **Identico!** |
-| `memset(dst, val, n)` | `memset(dst, val, n)` | **Identico!** |
-| Lettura/scrittura | `readValue/writeValue` | Extra |
+| `create_string_buffer(n)` | `create_string_buffer(n)` | **Identical!** |
+| `create_string_buffer(b"str")` | `create_string_buffer("str")` | **Identical!** |
+| `create_unicode_buffer(n)` | `create_unicode_buffer(n)` | **Identical!** |
+| `create_unicode_buffer(s)` | `create_unicode_buffer(s)` | **Identical!** |
+| `sizeof(type)` | `sizeof(type)` | **Identical!** |
+| `string_at(ptr, n)` | `string_at(ptr, n)` | **Identical!** |
+| `wstring_at(ptr, n)` | `wstring_at(ptr, n)` | **Identical!** |
+| `addressof(obj)` | `addressof(buf)` | **Identical!** |
+| `memmove(dst, src, n)` | `memmove(dst, src, n)` | **Identical!** |
+| `memset(dst, val, n)` | `memset(dst, val, n)` | **Identical!** |
+| Reading/writing | `readValue/writeValue` | Extra |
 | N/A | `ptrToBuffer(addr, size)` | **Extra!** |
 
-### Alias Disponibili
+### Available Aliases
 
-Per chi preferisce nomi più JavaScript-like:
+For those who prefer more JavaScript-like names:
 
 | Python-style | JS-style |
 |--------------|----------|
@@ -591,57 +591,57 @@ Per chi preferisce nomi più JavaScript-like:
 | `wstring_at` | `readWString` |
 | `addressof` | `addressOf` |
 
-### Esempio Comparativo
+### Comparative Example
 
 ```python
 # Python
 from ctypes import create_string_buffer, create_unicode_buffer, string_at, wstring_at, sizeof, c_int, memmove, memset
 
-# Buffer vuoto
+# Empty buffer
 buf = create_string_buffer(100)
 
-# Buffer con stringa
+# Buffer with string
 buf = create_string_buffer(b"Hello")
 
-# Buffer Unicode
+# Unicode buffer
 wbuf = create_unicode_buffer("Ciao")
 
-# Leggi stringa
+# Read string
 s = string_at(buf, 5)
 
-# Leggi wide string
+# Read wide string
 ws = wstring_at(wbuf, 4)
 
-# Copia memoria
+# Copy memory
 memmove(dst, src, 10)
 
-# Riempi memoria
+# Fill memory
 memset(buf, 0, 100)
 ```
 
 ```javascript
-// node-ctypes - IDENTICO!
+// node-ctypes - IDENTICAL!
 const { create_string_buffer, create_unicode_buffer, string_at, wstring_at, sizeof, memmove, memset } = require('node-ctypes');
 
-// Buffer vuoto
+// Empty buffer
 const buf = create_string_buffer(100);
 
-// Buffer con stringa
+// Buffer with string
 const buf2 = create_string_buffer("Hello");
 
-// Buffer Unicode
+// Unicode buffer
 const wbuf = create_unicode_buffer("Ciao");
 
-// Leggi stringa
+// Read string
 const s = string_at(buf2, 5);
 
-// Leggi wide string  
+// Read wide string  
 const ws = wstring_at(wbuf, 4);
 
-// Copia memoria
+// Copy memory
 memmove(dst, src, 10);
 
-// Riempi memoria
+// Fill memory
 memset(buf, 0, 100);
 ```
 
@@ -649,18 +649,18 @@ memset(buf, 0, 100);
 
 ## 9. Error Handling
 
-### ✅ Supportato
+### ✅ Supported
 
 | Python | node-ctypes | Note |
 |--------|-------------|------|
-| `get_errno()` | `get_errno()` | Identico |
-| `set_errno(n)` | `set_errno(n)` | Identico |
+| `get_errno()` | `get_errno()` | Identical |
+| `set_errno(n)` | `set_errno(n)` | Identical |
 | `GetLastError()` | `GetLastError()` | Windows |
 | `SetLastError(n)` | `SetLastError(n)` | Windows |
 | `FormatError(n)` | `FormatError(n)` | Windows |
 | `WinError(n)` | `WinError(n)` | Windows |
 
-### Esempio Comparativo
+### Comparative Example
 
 ```python
 # Python
@@ -705,11 +705,11 @@ throw WinError(code);
 | c_long/c_ulong | ✅ | ✅ | Platform-dependent |
 | c_wchar/c_wchar_p | ✅ | ✅ | Wide strings |
 | Functions | ✅ | ✅ | |
-| errcheck | ✅ | ❌ | Error callback |
+| errcheck | ✅ | ✅ | Error callback |
 | Structure | ✅ | ✅ | |
 | Union | ✅ | ✅ | |
-| Nested struct | ✅ | ✅ | **Implementato!** |
-| Bit fields | ✅ | ✅ | **Implementato!** |
+| Nested struct | ✅ | ✅ | **Implemented!** |
+| Bit fields | ✅ | ✅ | **Implemented!** |
 | POINTER() | ✅ | ✅ | |
 | byref() | ✅ | ✅ | |
 | cast() | ✅ | ✅ | |
@@ -724,35 +724,39 @@ throw WinError(code);
 | WinError | ✅ | ✅ | |
 | ptrToBuffer | ❌ | ✅ | **Extra!** |
 | wstring | ✅ | ✅ | Wide string buffer |
-| create_string_buffer | ✅ | ✅ | **Identico!** |
-| create_unicode_buffer | ✅ | ✅ | **Identico!** |
-| string_at | ✅ | ✅ | **Identico!** |
-| wstring_at | ✅ | ✅ | **Identico!** |
-| memmove | ✅ | ✅ | **Identico!** |
-| memset | ✅ | ✅ | **Identico!** |
+| create_string_buffer | ✅ | ✅ | **Identical!** |
+| create_unicode_buffer | ✅ | ✅ | **Identical!** |
+| string_at | ✅ | ✅ | **Identical!** |
+| wstring_at | ✅ | ✅ | **Identical!** |
+| memmove | ✅ | ✅ | **Identical!** |
+| memset | ✅ | ✅ | **Identical!** |
 
 ---
 
-## 10. Raccomandazioni per Migliorare Compatibilità
+## 10. Recommendations for Improving Compatibility
 
-### ✅ Recentemente Implementati
+### ✅ All Major Features Implemented!
 
-1. **Nested structures** - Strutture annidate con accesso dot notation
-2. **Bit fields** - Campi bit con `bitfield('uint32', 4)`
+All previously missing features have been implemented:
 
-### Priorità Media (Ancora Mancanti)
+1. **Nested structures** - Nested structures with dot notation access ✅
+2. **Bit fields** - Bit fields with `bitfield('uint32', 4)` ✅
+3. **errcheck** - Error callback checking with `func.errcheck = callback` ✅
+4. **_anonymous_** - Anonymous fields in structs with `{ anonymous: true }` ✅
+5. **Array indexing** - Direct array access with `arr[i]` and iteration ✅
 
-1. **`errcheck`** - Callback error checking
-2. **`_anonymous_`** - Campi anonimi nelle struct
+### Medium Priority (Still Missing)
 
-### Priorità Bassa
+None! 🎉
 
-3. **`OleDLL`** - COM automation
-4. **`c_longdouble`** - Raramente usato
+### Low Priority
+
+1. **`OleDLL`** - COM automation (Windows-specific)
+2. **`c_longdouble`** - Rarely used extended precision float
 
 ---
 
-## 11. Esempio Completo: Compatibilità Pratica
+## 11. Complete Example: Practical Compatibility
 
 ### Python
 
@@ -812,7 +816,7 @@ if code != 0:
     raise WinError(code)
 ```
 
-### node-ctypes (Equivalente)
+### node-ctypes (Equivalent)
 
 ```javascript
 const ctypes = require('node-ctypes');
@@ -878,51 +882,51 @@ if (code !== 0) {
 
 ---
 
-## 12. Feature Extra in node-ctypes
+## 12. Extra Features in node-ctypes
 
-node-ctypes include alcune feature **non presenti** in Python ctypes:
+node-ctypes includes some features **not present** in Python ctypes:
 
-| Feature | Descrizione |
+| Feature | Description |
 |---------|-------------|
-| `threadSafeCallback()` | Callback sicuro per thread esterni (CreateThread, etc.) |
-| `ptrToBuffer(addr, size)` | Crea Buffer Node.js da indirizzo di memoria raw |
-| Performance ottimizzate | Fast path per tipi comuni, buffer pre-allocati |
+| `threadSafeCallback()` | Thread-safe callback for external threads (CreateThread, etc.) |
+| `ptrToBuffer(addr, size)` | Create Node.js Buffer from raw memory address |
+| Optimized performance | Fast path for common types, pre-allocated buffers |
 
 ---
 
-## Conclusione
+## Conclusion
 
-**node-ctypes copre ~99% delle funzionalità di Python ctypes**, con praticamente tutte le feature implementate:
+**node-ctypes covers ~99% of Python ctypes functionality**, with practically all features implemented except two low-priority items:
 
 - ✅ Loading libraries (CDLL, WinDLL)
-- ✅ Tutti i tipi numerici base (inclusi c_long, c_ulong platform-dependent)
+- ✅ All basic numeric types (including c_long, c_ulong platform-dependent)
 - ✅ Wide strings (c_wchar, c_wchar_p, wstring, wstring_at)
-- ✅ Chiamate a funzioni con tipi
-- ✅ **Funzioni complete:**
+- ✅ Typed function calls
+- ✅ **Complete functions:**
   - ✅ **errcheck callback** - `func.errcheck = (result, func, args) => result`
   - ✅ Variadic functions (auto-detection)
-- ✅ **Strutture complete:**
-  - Strutture con alignment corretto
+- ✅ **Complete structures:**
+  - Structures with correct alignment
   - Union
-  - **Nested structs** con accesso dot notation (`outer.inner.field`)
-  - **Bit fields** con `bitfield('uint32', bits)`
+  - **Nested structs** with dot notation access (`outer.inner.field`)
+  - **Bit fields** with `bitfield('uint32', bits)`
   - ✅ **Anonymous fields** - `{ anonymous: true }`
-- ✅ **Arrays completi:**
+- ✅ **Complete arrays:**
   - ✅ **Array indexing** - `arr[i]` read/write
   - ✅ **Iteration** - `for (let v of arr)`
   - Arrays in struct fields
   - Arrays in function arguments/returns
-- ✅ Puntatori (byref, cast, POINTER, addressof)
-- ✅ Callbacks (incluso thread-safe!)
-- ✅ **Gestione memoria completa con nomi Python-identici!**
+- ✅ Pointers (byref, cast, POINTER, addressof)
+- ✅ Callbacks (including thread-safe!)
+- ✅ **Complete memory management with Python-identical names!**
   - create_string_buffer, create_unicode_buffer
   - string_at, wstring_at
   - memmove, memset, sizeof, addressof
-- ✅ Error handling completo (errno, GetLastError, WinError)
+- ✅ Complete error handling (errno, GetLastError, WinError)
 
-### Feature mancanti (low priority):
-1. ~~errcheck callback~~ ✅ **IMPLEMENTATO!**
-2. ~~_anonymous_ fields~~ ✅ **IMPLEMENTATO!**
-3. ~~Array indexing (arr[i])~~ ✅ **IMPLEMENTATO!**
-4. OleDLL (COM) - Windows-specific, bassa priorità
-5. c_longdouble - Tipo raro, poco usato
+### Missing features (low priority):
+1. ~~errcheck callback~~ ✅ **IMPLEMENTED!**
+2. ~~_anonymous_ fields~~ ✅ **IMPLEMENTED!**
+3. ~~Array indexing (arr[i])~~ ✅ **IMPLEMENTED!**
+4. OleDLL (COM) - Windows-specific, low priority
+5. c_longdouble - Rare type, rarely used
