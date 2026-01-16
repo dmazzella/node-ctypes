@@ -39,7 +39,7 @@ jobs:
     - name: Upload build artifacts
       uses: actions/upload-artifact@v6
       with:
-        name: ctypes-${{ matrix.os }}-node${{ matrix.node-version }}
+        name: ctypes-${{ matrix.os }}
         path: build/Release/ctypes.node
 
   package:
@@ -56,12 +56,31 @@ jobs:
 
     - name: Assemble multi-platform package
       run: |
-        mkdir -p package/lib/binding
-        # Copia i binari
-        cp artifacts/ctypes-windows-latest-node24/ctypes.node package/lib/binding/win32-x64-ctypes.node
-        cp artifacts/ctypes-ubuntu-latest-node24/ctypes.node package/lib/binding/linux-x64-ctypes.node
-        cp artifacts/ctypes-macos-latest-node24/ctypes.node package/lib/binding/darwin-arm64-ctypes.node
-        cp artifacts/ctypes-ubuntu-24.04-arm-node24/ctypes.node package/lib/binding/linux-arm64-ctypes.node
+        mkdir -p package/lib
+        mkdir -p package/build/Release
+        # Copia i binari dinamicamente con nomi specifici per piattaforma
+        for dir in artifacts/ctypes-*; do
+          if [ -d "$dir" ]; then
+            os=$(basename "$dir" | sed 's/ctypes-//')
+            case $os in
+              windows-latest)
+                cp "$dir/ctypes.node" package/build/Release/ctypes-win32-x64.node
+                ;;
+              ubuntu-latest)
+                cp "$dir/ctypes.node" package/build/Release/ctypes-linux-x64.node
+                ;;
+              macos-latest)
+                cp "$dir/ctypes.node" package/build/Release/ctypes-darwin-arm64.node
+                ;;
+              ubuntu-24.04-arm)
+                cp "$dir/ctypes.node" package/build/Release/ctypes-linux-arm64.node
+                ;;
+              *)
+                echo "OS non supportato: $os"
+                ;;
+            esac
+          fi
+        done
         # Copia i file sorgente
         cp -r lib/* package/lib/
         cp package.json package/
