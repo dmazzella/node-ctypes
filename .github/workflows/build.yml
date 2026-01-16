@@ -1,0 +1,37 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        node-version: [22, 24]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: ${{ matrix.node-version }}
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Build
+      run: npm run build
+
+    - name: Run tests (Windows only)
+      if: matrix.os == 'windows-latest'
+      run: |
+        cd tests
+        npm ci
+        npm test
