@@ -14,7 +14,7 @@ describe("errcheck (Python ctypes compatible)", function () {
 
   before(function () {
     if (process.platform === "win32") {
-      libc = new ctypes.CDLL("msvcrt.dll");
+      libc = new ctypes.WinDLL("msvcrt.dll");
     } else {
       const LIBC = platform === "darwin" ? "libc.dylib" : "libc.so.6";
       libc = new ctypes.CDLL(LIBC);
@@ -141,7 +141,7 @@ describe("errcheck (Python ctypes compatible)", function () {
         return;
       }
 
-      const kernel32 = new ctypes.CDLL("kernel32.dll");
+      const kernel32 = new ctypes.WinDLL("kernel32.dll");
       const DeleteFileW = kernel32.func("DeleteFileW", "bool", ["wstring"]);
 
       // Pattern Windows: controlla FALSE e usa GetLastError
