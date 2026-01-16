@@ -11,7 +11,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest, ubuntu-24.04-arm, macos-13]
+        os: [windows-latest, ubuntu-latest, macos-latest, ubuntu-24.04-arm]
         node-version: [24]
 
     steps:
@@ -62,7 +62,6 @@ jobs:
         cp artifacts/ctypes-ubuntu-latest-node24/ctypes.node package/lib/binding/linux-x64-ctypes.node
         cp artifacts/ctypes-macos-latest-node24/ctypes.node package/lib/binding/darwin-arm64-ctypes.node
         cp artifacts/ctypes-ubuntu-24.04-arm-node24/ctypes.node package/lib/binding/linux-arm64-ctypes.node
-        cp artifacts/ctypes-macos-13-node24/ctypes.node package/lib/binding/darwin-x64-ctypes.node
         # Copia i file sorgente
         cp -r lib/* package/lib/
         cp package.json package/
