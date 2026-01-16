@@ -5,19 +5,56 @@
 namespace ctypes
 {
 
+    std::string GetErrorMessage(const DWORD errorCode)
+    {
+        spdlog::trace(__FUNCTION__);
+        std::string result;
+
+#ifdef _WIN32
+        WCHAR localeName[LOCALE_NAME_MAX_LENGTH] = {0};
+        LANGID langId = MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT);
+        if (GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_SNAME, localeName, LOCALE_NAME_MAX_LENGTH))
+        {
+            LCID lcid = LocaleNameToLCID(localeName, 0);
+            if (lcid != 0)
+            {
+                langId = LANGIDFROMLCID(lcid);
+            }
+        }
+
+        LPWSTR msgBufW = nullptr;
+        DWORD dwFlags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_MAX_WIDTH_MASK;
+        if (FormatMessageW(dwFlags, NULL, errorCode, langId, (LPWSTR)&msgBufW, 0, NULL) && msgBufW)
+        {
+            int utf8Length = WideCharToMultiByte(CP_UTF8, 0, msgBufW, -1, nullptr, 0, nullptr, nullptr);
+            if (utf8Length > 0)
+            {
+                std::vector<char> utf8Buffer(utf8Length);
+                if (WideCharToMultiByte(CP_UTF8, 0, msgBufW, -1, utf8Buffer.data(), utf8Length, nullptr, nullptr) > 0)
+                {
+                    result = std::string(utf8Buffer.data());
+                }
+            }
+            LocalFree(msgBufW);
+        }
+#else
+        result = fmt::format("Error 0x{:08x}", static_cast<uint32_t>(errorCode));
+#endif
+
+        return result;
+    }
+
     // Platform-specific implementations
     void *LoadSharedLibrary(const std::string &path, std::string &error)
     {
         spdlog::trace(__FUNCTION__);
 
 #ifdef _WIN32
-        HMODULE handle = LoadLibraryA(path.c_str());
+        HMODULE handle = LoadLibraryExA(path.c_str(), NULL, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_USER_DIRS);
         if (!handle)
         {
             DWORD err = GetLastError();
-            char buf[256];
-            FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM, NULL, err, 0, buf, sizeof(buf), NULL);
-            error = buf;
+            error = fmt::format("LoadLibraryExA failed: 0x{:08x} {}", static_cast<uint32_t>(err), GetErrorMessage(err));
             return nullptr;
         }
         return static_cast<void *>(handle);
@@ -134,7 +171,61 @@ namespace ctypes
         }
         else
         {
+#ifdef _WIN32
+            try
+            {
+                std::filesystem::path lib_path(path_);
+                if (lib_path.has_parent_path() && lib_path.parent_path() != std::filesystem::path("."))
+                {
+                    std::filesystem::path parent_dir;
+                    if (lib_path.is_absolute())
+                    {
+                        parent_dir = lib_path.parent_path();
+                    }
+                    else
+                    {
+                        parent_dir = std::filesystem::current_path() / lib_path.parent_path();
+                    }
+
+                    if (!parent_dir.empty() && std::filesystem::exists(parent_dir))
+                    {
+                        if (SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_USER_DIRS))
+                        {
+                            std::wstring wparent = parent_dir.wstring();
+                            DLL_DIRECTORY_COOKIE cookie = AddDllDirectory(wparent.c_str());
+                            if (!cookie)
+                            {
+                                DWORD err = GetLastError();
+                                std::string errMsg = GetErrorMessage(err);
+                                spdlog::error("AddDllDirectory failed for {}: error {}: {}", parent_dir.string(), err, errMsg);
+                            }
+                            else
+                            {
+                                spdlog::trace("AddDllDirectory successful for {}", parent_dir.string());
+                                m_dll_directory_cookie.reset(reinterpret_cast<void *>(cookie));
+                            }
+                        }
+                        else
+                        {
+                            DWORD err = GetLastError();
+                            std::string errMsg = GetErrorMessage(err);
+                            spdlog::error("SetDefaultDllDirectories failed: error {}: {}", err, errMsg);
+                        }
+                    }
+                    else
+                    {
+                        spdlog::warn("Parent directory '{}' does not exist or is empty", parent_dir.string());
+                    }
+                }
+            }
+            catch (const std::exception &ex)
+            {
+                spdlog::warn("Exception inspecting library path '{}': {}", path_, ex.what());
+            }
             handle_ = LoadSharedLibrary(path_, error);
+#else
+            handle_ = LoadSharedLibrary(path_, error);
+#endif
         }
 
         if (!handle_)

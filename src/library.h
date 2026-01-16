@@ -5,6 +5,19 @@
 namespace ctypes
 {
 
+#ifdef _WIN32
+    struct DllDirectoryDeleter
+    {
+        void operator()(void *cookie) const noexcept
+        {
+            spdlog::trace(__FUNCTION__);
+            if (!cookie)
+                return;
+            RemoveDllDirectory(reinterpret_cast<DLL_DIRECTORY_COOKIE>(cookie));
+        }
+    };
+#endif
+
     // Wrapper per librerie dinamiche (dlopen/LoadLibrary)
     class Library : public Napi::ObjectWrap<Library>
     {
@@ -37,6 +50,9 @@ namespace ctypes
         void *handle_;
         std::string path_;
         bool is_loaded_;
+#ifdef _WIN32
+        std::unique_ptr<void, DllDirectoryDeleter> m_dll_directory_cookie;
+#endif
     };
 
     // Helper per caricare una libreria (wrapper di livello inferiore)
