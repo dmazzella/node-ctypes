@@ -141,7 +141,7 @@ namespace ctypes
                         Napi::Buffer<uint8_t> buf = elem.As<Napi::Buffer<uint8_t>>();
                         if (buf.Length() >= element_size_)
                         {
-                            std::memcpy(elem_ptr, buf.Data(), element_size_);
+                            memcpy(elem_ptr, buf.Data(), element_size_);
                         }
                     }
                 }
@@ -160,14 +160,14 @@ namespace ctypes
             // Buffer già pronto
             Napi::Buffer<uint8_t> buf = val.As<Napi::Buffer<uint8_t>>();
             size_t copy_size = std::min(buf.Length(), size_);
-            std::memcpy(buffer, buf.Data(), copy_size);
+            memcpy(buffer, buf.Data(), copy_size);
         }
         else if (val.IsString() && element_type_ == CType::CTYPES_INT8)
         {
             // Stringa → char array
             std::string str = val.As<Napi::String>().Utf8Value();
             size_t copy_len = std::min(str.length(), count_ - 1);
-            std::memcpy(buffer, str.c_str(), copy_len);
+            memcpy(buffer, str.c_str(), copy_len);
             static_cast<char *>(buffer)[copy_len] = '\0';
         }
         else

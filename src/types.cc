@@ -197,7 +197,7 @@ namespace ctypes
             if (bufsize < 1)
                 return -1;
             int8_t val = static_cast<int8_t>(value.ToNumber().Int32Value());
-            memcpy(buffer, &val, 1);
+            memcpy(buffer, &val, sizeof(val));
             return 1;
         }
 
@@ -206,7 +206,7 @@ namespace ctypes
             if (bufsize < 1)
                 return -1;
             uint8_t val = static_cast<uint8_t>(value.ToNumber().Uint32Value());
-            memcpy(buffer, &val, 1);
+            memcpy(buffer, &val, sizeof(val));
             return 1;
         }
 
@@ -215,7 +215,7 @@ namespace ctypes
             if (bufsize < 2)
                 return -1;
             int16_t val = static_cast<int16_t>(value.ToNumber().Int32Value());
-            memcpy(buffer, &val, 2);
+            memcpy(buffer, &val, sizeof(val));
             return 2;
         }
 
@@ -224,7 +224,7 @@ namespace ctypes
             if (bufsize < 2)
                 return -1;
             uint16_t val = static_cast<uint16_t>(value.ToNumber().Uint32Value());
-            memcpy(buffer, &val, 2);
+            memcpy(buffer, &val, sizeof(val));
             return 2;
         }
 
@@ -233,7 +233,7 @@ namespace ctypes
             if (bufsize < 4)
                 return -1;
             int32_t val = value.ToNumber().Int32Value();
-            memcpy(buffer, &val, 4);
+            memcpy(buffer, &val, sizeof(val));
             return 4;
         }
 
@@ -242,7 +242,7 @@ namespace ctypes
             if (bufsize < 4)
                 return -1;
             uint32_t val = value.ToNumber().Uint32Value();
-            memcpy(buffer, &val, 4);
+            memcpy(buffer, &val, sizeof(val));
             return 4;
         }
 
@@ -260,8 +260,8 @@ namespace ctypes
             {
                 val = value.ToNumber().Int64Value();
             }
-            memcpy(buffer, &val, 8);
-            return 8;
+            memcpy(buffer, &val, sizeof(val));
+            return sizeof(val);
         }
 
         case CType::CTYPES_UINT64:
@@ -278,8 +278,8 @@ namespace ctypes
             {
                 val = static_cast<uint64_t>(value.ToNumber().Int64Value());
             }
-            memcpy(buffer, &val, 8);
-            return 8;
+            memcpy(buffer, &val, sizeof(val));
+            return sizeof(val);
         }
 
         case CType::CTYPES_FLOAT:
@@ -287,8 +287,8 @@ namespace ctypes
             if (bufsize < 4)
                 return -1;
             float val = static_cast<float>(value.ToNumber().FloatValue());
-            memcpy(buffer, &val, 4);
-            return 4;
+            memcpy(buffer, &val, sizeof(val));
+            return sizeof(val);
         }
 
         case CType::CTYPES_DOUBLE:
@@ -296,8 +296,8 @@ namespace ctypes
             if (bufsize < 8)
                 return -1;
             double val = value.ToNumber().DoubleValue();
-            memcpy(buffer, &val, 8);
-            return 8;
+            memcpy(buffer, &val, sizeof(val));
+            return sizeof(val);
         }
 
         case CType::CTYPES_BOOL:
@@ -305,8 +305,8 @@ namespace ctypes
             if (bufsize < 1)
                 return -1;
             uint8_t val = value.ToBoolean().Value() ? 1 : 0;
-            memcpy(buffer, &val, 1);
-            return 1;
+            memcpy(buffer, &val, sizeof(val));
+            return sizeof(val);
         }
 
         case CType::CTYPES_POINTER:
@@ -503,77 +503,77 @@ namespace ctypes
         case CType::CTYPES_INT8:
         {
             int8_t val;
-            memcpy(&val, buffer, 1);
+            memcpy(&val, buffer, sizeof(val));
             return Napi::Number::New(env, val);
         }
 
         case CType::CTYPES_UINT8:
         {
             uint8_t val;
-            memcpy(&val, buffer, 1);
+            memcpy(&val, buffer, sizeof(val));
             return Napi::Number::New(env, val);
         }
 
         case CType::CTYPES_INT16:
         {
             int16_t val;
-            memcpy(&val, buffer, 2);
+            memcpy(&val, buffer, sizeof(val));
             return Napi::Number::New(env, val);
         }
 
         case CType::CTYPES_UINT16:
         {
             uint16_t val;
-            memcpy(&val, buffer, 2);
+            memcpy(&val, buffer, sizeof(val));
             return Napi::Number::New(env, val);
         }
 
         case CType::CTYPES_INT32:
         {
             int32_t val;
-            memcpy(&val, buffer, 4);
+            memcpy(&val, buffer, sizeof(val));
             return Napi::Number::New(env, val);
         }
 
         case CType::CTYPES_UINT32:
         {
             uint32_t val;
-            memcpy(&val, buffer, 4);
+            memcpy(&val, buffer, sizeof(val));
             return Napi::Number::New(env, val);
         }
 
         case CType::CTYPES_INT64:
         {
             int64_t val;
-            memcpy(&val, buffer, 8);
+            memcpy(&val, buffer, sizeof(val));
             return Napi::BigInt::New(env, val);
         }
 
         case CType::CTYPES_UINT64:
         {
             uint64_t val;
-            memcpy(&val, buffer, 8);
+            memcpy(&val, buffer, sizeof(val));
             return Napi::BigInt::New(env, val);
         }
 
         case CType::CTYPES_FLOAT:
         {
             float val;
-            memcpy(&val, buffer, 4);
+            memcpy(&val, buffer, sizeof(val));
             return Napi::Number::New(env, val);
         }
 
         case CType::CTYPES_DOUBLE:
         {
             double val;
-            memcpy(&val, buffer, 8);
+            memcpy(&val, buffer, sizeof(val));
             return Napi::Number::New(env, val);
         }
 
         case CType::CTYPES_BOOL:
         {
             uint8_t val;
-            memcpy(&val, buffer, 1);
+            memcpy(&val, buffer, sizeof(val));
             return Napi::Boolean::New(env, val != 0);
         }
 

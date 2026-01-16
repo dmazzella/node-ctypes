@@ -889,7 +889,7 @@ namespace ctypes
                 napi_value nv = val;
                 int32_t v;
                 napi_get_value_int32(env, nv, &v);
-                memcpy(slot, &v, 4);
+                memcpy(slot, &v, sizeof(v));
                 break;
             }
 
@@ -898,7 +898,7 @@ namespace ctypes
                 napi_value nv = val;
                 uint32_t v;
                 napi_get_value_uint32(env, nv, &v);
-                memcpy(slot, &v, 4);
+                memcpy(slot, &v, sizeof(v));
                 break;
             }
 
@@ -918,7 +918,7 @@ namespace ctypes
                     napi_value nv = val;
                     napi_get_value_int64(env, nv, &v);
                 }
-                memcpy(slot, &v, 8);
+                memcpy(slot, &v, sizeof(v));
                 break;
             }
 
@@ -927,7 +927,7 @@ namespace ctypes
                 napi_value nv = val;
                 double v;
                 napi_get_value_double(env, nv, &v);
-                memcpy(slot, &v, 8);
+                memcpy(slot, &v, sizeof(v));
                 break;
             }
 
@@ -937,7 +937,7 @@ namespace ctypes
                 double dv;
                 napi_get_value_double(env, nv, &dv);
                 float v = static_cast<float>(dv);
-                memcpy(slot, &v, 4);
+                memcpy(slot, &v, sizeof(v));
                 break;
             }
 
@@ -964,7 +964,7 @@ namespace ctypes
                     napi_get_value_int64(env, nv, &v);
                     ptr = reinterpret_cast<void *>(static_cast<uintptr_t>(v));
                 }
-                memcpy(slot, &ptr, sizeof(void *));
+                memcpy(slot, &ptr, sizeof(ptr));
                 break;
             }
 
@@ -984,22 +984,19 @@ namespace ctypes
                     string_buffer_.resize(offset + len + 1);
 
                     // Seconda chiamata: copia stringa
-                    napi_get_value_string_utf8(env, nval,
-                                               string_buffer_.data() + offset, len + 1, &len);
-
+                    napi_get_value_string_utf8(env, nval, string_buffer_.data() + offset, len + 1, &len);
                     const char *str_ptr = string_buffer_.data() + offset;
-                    memcpy(slot, &str_ptr, sizeof(char *));
+                    memcpy(slot, &str_ptr, sizeof(str_ptr));
                 }
                 else if (val.IsBuffer())
                 {
-                    const char *ptr = reinterpret_cast<const char *>(
-                        val.As<Napi::Buffer<uint8_t>>().Data());
-                    memcpy(slot, &ptr, sizeof(char *));
+                    const char *ptr = reinterpret_cast<const char *>(val.As<Napi::Buffer<uint8_t>>().Data());
+                    memcpy(slot, &ptr, sizeof(ptr));
                 }
                 else
                 {
                     const char *null_ptr = nullptr;
-                    memcpy(slot, &null_ptr, sizeof(char *));
+                    memcpy(slot, &null_ptr, sizeof(null_ptr));
                 }
                 break;
             }
@@ -1033,18 +1030,18 @@ namespace ctypes
 
                     const wchar_t *str_ptr = reinterpret_cast<const wchar_t *>(
                         string_buffer_.data() + offset);
-                    memcpy(slot, &str_ptr, sizeof(wchar_t *));
+                    memcpy(slot, &str_ptr, sizeof(str_ptr));
                 }
                 else if (val.IsBuffer())
                 {
                     const wchar_t *ptr = reinterpret_cast<const wchar_t *>(
                         val.As<Napi::Buffer<uint8_t>>().Data());
-                    memcpy(slot, &ptr, sizeof(wchar_t *));
+                    memcpy(slot, &ptr, sizeof(ptr));
                 }
                 else
                 {
                     const wchar_t *null_ptr = nullptr;
-                    memcpy(slot, &null_ptr, sizeof(wchar_t *));
+                    memcpy(slot, &null_ptr, sizeof(null_ptr));
                 }
                 break;
             }
@@ -1061,7 +1058,8 @@ namespace ctypes
                 {
                     v = static_cast<long>(val.As<Napi::Number>().Int64Value());
                 }
-                memcpy(slot, &v, sizeof(long));
+
+                memcpy(slot, &v, sizeof(v));
                 break;
             }
 
@@ -1077,42 +1075,42 @@ namespace ctypes
                 {
                     v = static_cast<unsigned long>(val.As<Napi::Number>().Int64Value());
                 }
-                memcpy(slot, &v, sizeof(unsigned long));
+                memcpy(slot, &v, sizeof(v));
                 break;
             }
 
             case CType::CTYPES_BOOL:
             {
                 uint8_t v = val.ToBoolean().Value() ? 1 : 0;
-                memcpy(slot, &v, 1);
+                memcpy(slot, &v, sizeof(v));
                 break;
             }
 
             case CType::CTYPES_INT8:
             {
                 int8_t v = static_cast<int8_t>(val.As<Napi::Number>().Int32Value());
-                memcpy(slot, &v, 1);
+                memcpy(slot, &v, sizeof(v));
                 break;
             }
 
             case CType::CTYPES_UINT8:
             {
                 uint8_t v = static_cast<uint8_t>(val.As<Napi::Number>().Uint32Value());
-                memcpy(slot, &v, 1);
+                memcpy(slot, &v, sizeof(v));
                 break;
             }
 
             case CType::CTYPES_INT16:
             {
                 int16_t v = static_cast<int16_t>(val.As<Napi::Number>().Int32Value());
-                memcpy(slot, &v, 2);
+                memcpy(slot, &v, sizeof(v));
                 break;
             }
 
             case CType::CTYPES_UINT16:
             {
                 uint16_t v = static_cast<uint16_t>(val.As<Napi::Number>().Uint32Value());
-                memcpy(slot, &v, 2);
+                memcpy(slot, &v, sizeof(v));
                 break;
             }
 
