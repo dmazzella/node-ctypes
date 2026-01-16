@@ -79,9 +79,8 @@ namespace ctypes
         if (!addr)
         {
             DWORD err = GetLastError();
-            char buf[256];
-            FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM, NULL, err, 0, buf, sizeof(buf), NULL);
-            error = buf;
+            error = fmt::format("LoadLibraryExA failed: 0x{:08x} {}", static_cast<uint32_t>(err), GetErrorMessage(static_cast<uint32_t>(err)));
+            return nullptr;
         }
         return addr;
 #else
