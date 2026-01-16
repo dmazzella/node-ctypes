@@ -11,8 +11,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
-        node-version: [22, 24]
+        os: [windows-latest, ubuntu-latest, macos-latest, ubuntu-24.04-arm, macos-13]
+        node-version: [24]
 
     steps:
     - name: Checkout code
@@ -35,3 +35,42 @@ jobs:
         cd tests
         npm install
         npm test
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v6
+      with:
+        name: ctypes-${{ matrix.os }}-node${{ matrix.node-version }}
+        path: build/Release/ctypes.node
+
+  package:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v7
+      with:
+        path: artifacts
+
+    - name: Assemble multi-platform package
+      run: |
+        mkdir -p package/lib/binding
+        # Copia i binari
+        cp artifacts/ctypes-windows-latest-node24/ctypes.node package/lib/binding/win32-x64-ctypes.node
+        cp artifacts/ctypes-ubuntu-latest-node24/ctypes.node package/lib/binding/linux-x64-ctypes.node
+        cp artifacts/ctypes-macos-latest-node24/ctypes.node package/lib/binding/darwin-arm64-ctypes.node
+        cp artifacts/ctypes-ubuntu-24.04-arm-node24/ctypes.node package/lib/binding/linux-arm64-ctypes.node
+        cp artifacts/ctypes-macos-13-node24/ctypes.node package/lib/binding/darwin-x64-ctypes.node
+        # Copia i file sorgente
+        cp -r lib/* package/lib/
+        cp package.json package/
+        cp README.md package/
+        cp LICENSE package/
+
+    - name: Upload packaged artifact
+      uses: actions/upload-artifact@v6
+      with:
+        name: node-ctypes-multiplatform-package
+        path: package/
