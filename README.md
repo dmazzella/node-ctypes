@@ -741,6 +741,13 @@ npm run bench:koffi        # Benchmark vs koffi
 npm run bench:ffi-napi     # Benchmark vs ffi-napi
 ```
 
+## Examples
+
+For practical GUI application examples using the Windows API:
+
+- **Simple GUI Demo**: [examples/windows/simple.js](examples/windows/simple.js) - Message boxes and basic Windows API GUI elements
+- **Windows Controls Showcase Demo**: [examples/windows/windows_controls.js](examples/windows/windows_controls.js) - Comprehensive demo with a wide set of common Win32 controls
+
 ## License
 
 MIT
