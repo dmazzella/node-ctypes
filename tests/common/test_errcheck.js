@@ -108,7 +108,7 @@ describe("errcheck (Python ctypes compatible)", function () {
           if (result === -1) {
             const errno = ctypes.get_errno();
             const err = new Error(
-              `open("${args[0]}") failed with errno ${errno}`
+              `open("${args[0]}") failed with errno ${errno}`,
             );
             err.errno = errno;
             throw err;
@@ -127,10 +127,10 @@ describe("errcheck (Python ctypes compatible)", function () {
               err.errno !== undefined &&
               err.message.includes("errno")
             );
-          }
+          },
         );
       });
-    }
+    },
   );
 
   describe(
@@ -159,12 +159,12 @@ describe("errcheck (Python ctypes compatible)", function () {
           },
           (err) => {
             return err instanceof Error && err.winerror !== undefined;
-          }
+          },
         );
 
         kernel32.close();
       });
-    }
+    },
   );
 
   describe("errcheck with pointer returns", function () {
@@ -281,7 +281,7 @@ describe("errcheck (Python ctypes compatible)", function () {
 
         assert.strictEqual(callCount, 1);
       });
-    }
+    },
   );
 
   describe(
@@ -311,7 +311,7 @@ describe("errcheck (Python ctypes compatible)", function () {
 
         assert.strictEqual(callCount, 1);
       });
-    }
+    },
   );
 
   describe("Python ctypes compatibility", function () {
@@ -346,7 +346,7 @@ describe("errcheck (Python ctypes compatible)", function () {
         },
         (err) => {
           return err.errno === 42;
-        }
+        },
       );
     });
   });

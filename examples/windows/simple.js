@@ -113,7 +113,7 @@ let windowProcCallback = null;
 
 function WindowProc(hwnd, msg, wParam, lParam) {
   console.log(
-    `WindowProc called: msg=${msg}, wParam=${wParam}, lParam=${lParam}`
+    `WindowProc called: msg=${msg}, wParam=${wParam}, lParam=${lParam}`,
   );
   switch (msg) {
     case WM_COMMAND:
@@ -125,7 +125,7 @@ function WindowProc(hwnd, msg, wParam, lParam) {
           null,
           create_unicode_buffer("Hello from node-ctypes GUI!"),
           create_unicode_buffer("Button Clicked"),
-          0
+          0,
         );
       } else if (controlId === IDCANCEL) {
         console.log("Cancel button clicked");
@@ -207,7 +207,7 @@ async function createGUI() {
       null, // hWndParent
       null, // hMenu
       hInstance, // hInstance
-      null // lpParam
+      null, // lpParam
     );
 
     if (!hwnd) {
@@ -232,7 +232,7 @@ async function createGUI() {
       hwnd, // hWndParent
       IDOK, // hMenu/ID
       hInstance, // hInstance
-      null // lpParam
+      null, // lpParam
     );
 
     if (!hwndButton) {
@@ -255,7 +255,7 @@ async function createGUI() {
       hwnd, // hWndParent
       IDCANCEL, // hMenu/ID
       hInstance, // hInstance
-      null // lpParam
+      null, // lpParam
     );
 
     if (!hwndCancel) {

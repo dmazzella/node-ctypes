@@ -178,7 +178,7 @@ describe("Structs and Unions", function () {
           b: "uint32",
           c: "uint8",
         },
-        { packed: true }
+        { packed: true },
       );
 
       // Unpacked has padding for alignment

@@ -13,18 +13,18 @@ const platform = os.platform();
 const LIBC = isWindows
   ? "msvcrt.dll"
   : platform === "darwin"
-  ? "libc.dylib"
-  : "libc.so.6";
+    ? "libc.dylib"
+    : "libc.so.6";
 const SYSTEM_LIB = isWindows ? "kernel32.dll" : null;
 
 console.log(
-  "╔════════════════════════════════════════════════════════════════╗"
+  "╔════════════════════════════════════════════════════════════════╗",
 );
 console.log(
-  "║           FFI Performance Benchmark: node-ctypes vs koffi      ║"
+  "║           FFI Performance Benchmark: node-ctypes vs koffi      ║",
 );
 console.log(
-  "╚════════════════════════════════════════════════════════════════╝\n"
+  "╚════════════════════════════════════════════════════════════════╝\n",
 );
 
 const results = [];
@@ -47,13 +47,13 @@ function benchmark(name, ctypesTime, koffiTime, iterations) {
     `  node-ctypes: ${ctypesTime.toFixed(2)}ms (${(
       (iterations / ctypesTime) *
       1000
-    ).toFixed(0)} ops/sec)`
+    ).toFixed(0)} ops/sec)`,
   );
   console.log(
     `  koffi:       ${koffiTime.toFixed(2)}ms (${(
       (iterations / koffiTime) *
       1000
-    ).toFixed(0)} ops/sec)`
+    ).toFixed(0)} ops/sec)`,
   );
   console.log(`  Winner: ${faster} (${diff}x faster)\n`);
 }
@@ -73,13 +73,13 @@ const koffi_system = SYSTEM_LIB ? load(SYSTEM_LIB) : null;
 // ============================================================================
 
 console.log(
-  "┌─────────────────────────────────────────────────────────────────┐"
+  "┌─────────────────────────────────────────────────────────────────┐",
 );
 console.log(
-  "│ Benchmark 1: Simple int32 function - abs(-42)                  │"
+  "│ Benchmark 1: Simple int32 function - abs(-42)                  │",
 );
 console.log(
-  "└─────────────────────────────────────────────────────────────────┘"
+  "└─────────────────────────────────────────────────────────────────┘",
 );
 
 {
@@ -114,13 +114,13 @@ console.log(
 // ============================================================================
 
 console.log(
-  "┌─────────────────────────────────────────────────────────────────┐"
+  "┌─────────────────────────────────────────────────────────────────┐",
 );
 console.log(
-  "│ Benchmark 2: String parameter - strlen(str)                    │"
+  "│ Benchmark 2: String parameter - strlen(str)                    │",
 );
 console.log(
-  "└─────────────────────────────────────────────────────────────────┘"
+  "└─────────────────────────────────────────────────────────────────┘",
 );
 
 {
@@ -156,13 +156,13 @@ console.log(
 // ============================================================================
 
 console.log(
-  "┌─────────────────────────────────────────────────────────────────┐"
+  "┌─────────────────────────────────────────────────────────────────┐",
 );
 console.log(
-  "│ Benchmark 3: Floating point - sqrt(double)                     │"
+  "│ Benchmark 3: Floating point - sqrt(double)                     │",
 );
 console.log(
-  "└─────────────────────────────────────────────────────────────────┘"
+  "└─────────────────────────────────────────────────────────────────┘",
 );
 
 {
@@ -197,19 +197,19 @@ console.log(
 // ============================================================================
 
 console.log(
-  "┌─────────────────────────────────────────────────────────────────┐"
+  "┌─────────────────────────────────────────────────────────────────┐",
 );
 if (isWindows) {
   console.log(
-    "│ Benchmark 4: No arguments - GetTickCount()                     │"
+    "│ Benchmark 4: No arguments - GetTickCount()                     │",
   );
 } else {
   console.log(
-    "│ Benchmark 4: No arguments - time(NULL)                         │"
+    "│ Benchmark 4: No arguments - time(NULL)                         │",
   );
 }
 console.log(
-  "└─────────────────────────────────────────────────────────────────┘"
+  "└─────────────────────────────────────────────────────────────────┘",
 );
 
 if (isWindows) {
@@ -269,13 +269,13 @@ if (isWindows) {
 // ============================================================================
 
 console.log(
-  "┌─────────────────────────────────────────────────────────────────┐"
+  "┌─────────────────────────────────────────────────────────────────┐",
 );
 console.log(
-  "│ Benchmark 5: Multiple arguments - memset(ptr, val, size)       │"
+  "│ Benchmark 5: Multiple arguments - memset(ptr, val, size)       │",
 );
 console.log(
-  "└─────────────────────────────────────────────────────────────────┘"
+  "└─────────────────────────────────────────────────────────────────┘",
 );
 
 {
@@ -317,13 +317,13 @@ console.log(
 // ============================================================================
 
 console.log(
-  "┌─────────────────────────────────────────────────────────────────┐"
+  "┌─────────────────────────────────────────────────────────────────┐",
 );
 console.log(
-  "│ Benchmark 6: Variadic function - sprintf(fmt, ...)             │"
+  "│ Benchmark 6: Variadic function - sprintf(fmt, ...)             │",
 );
 console.log(
-  "└─────────────────────────────────────────────────────────────────┘"
+  "└─────────────────────────────────────────────────────────────────┘",
 );
 
 {
@@ -335,7 +335,7 @@ console.log(
 
   // koffi: variadic args must be declared explicitly in signature
   const koffi_sprintf = koffi_libc.func(
-    "int sprintf(char*, const char*, int, const char*)"
+    "int sprintf(char*, const char*, int, const char*)",
   );
 
   const ctypes_buf = ctypes.create_string_buffer(256);
@@ -371,13 +371,13 @@ console.log(
 // ============================================================================
 
 console.log(
-  "┌─────────────────────────────────────────────────────────────────┐"
+  "┌─────────────────────────────────────────────────────────────────┐",
 );
 console.log(
-  "│ Benchmark 7: Struct read/write                                 │"
+  "│ Benchmark 7: Struct read/write                                 │",
 );
 console.log(
-  "└─────────────────────────────────────────────────────────────────┘"
+  "└─────────────────────────────────────────────────────────────────┘",
 );
 
 {
@@ -429,13 +429,13 @@ console.log(
 // ============================================================================
 
 console.log(
-  "┌─────────────────────────────────────────────────────────────────┐"
+  "┌─────────────────────────────────────────────────────────────────┐",
 );
 console.log(
-  "│ Benchmark 8: Buffer allocation (64 bytes)                      │"
+  "│ Benchmark 8: Buffer allocation (64 bytes)                      │",
 );
 console.log(
-  "└─────────────────────────────────────────────────────────────────┘"
+  "└─────────────────────────────────────────────────────────────────┘",
 );
 
 {
@@ -464,18 +464,18 @@ console.log(
     `  node-ctypes:  ${ctypes_time.toFixed(2)}ms (${(
       (iterations / ctypes_time) *
       1000
-    ).toFixed(0)} allocs/sec)`
+    ).toFixed(0)} allocs/sec)`,
   );
   console.log(
     `  Buffer.alloc: ${native_time.toFixed(2)}ms (${(
       (iterations / native_time) *
       1000
-    ).toFixed(0)} allocs/sec)`
+    ).toFixed(0)} allocs/sec)`,
   );
   console.log(
     `  Overhead: ${((ctypes_time / native_time - 1) * 100).toFixed(
-      1
-    )}% vs native\n`
+      1,
+    )}% vs native\n`,
   );
 }
 
@@ -484,13 +484,13 @@ console.log(
 // ============================================================================
 
 console.log(
-  "┌─────────────────────────────────────────────────────────────────┐"
+  "┌─────────────────────────────────────────────────────────────────┐",
 );
 console.log(
-  "│ Benchmark 9: Raw Library.func vs CDLL wrapper                  │"
+  "│ Benchmark 9: Raw Library.func vs CDLL wrapper                  │",
 );
 console.log(
-  "└─────────────────────────────────────────────────────────────────┘"
+  "└─────────────────────────────────────────────────────────────────┘",
 );
 
 {
@@ -525,16 +525,16 @@ console.log(
     `  Raw .call():  ${raw_time.toFixed(2)}ms (${(
       (iterations / raw_time) *
       1000
-    ).toFixed(0)} ops/sec)`
+    ).toFixed(0)} ops/sec)`,
   );
   console.log(
     `  CDLL wrapper: ${wrapped_time.toFixed(2)}ms (${(
       (iterations / wrapped_time) *
       1000
-    ).toFixed(0)} ops/sec)`
+    ).toFixed(0)} ops/sec)`,
   );
   console.log(
-    `  Wrapper overhead: ${((wrapped_time / raw_time - 1) * 100).toFixed(1)}%\n`
+    `  Wrapper overhead: ${((wrapped_time / raw_time - 1) * 100).toFixed(1)}%\n`,
   );
 
   rawLib.close();
@@ -546,13 +546,13 @@ console.log(
 // ============================================================================
 
 console.log(
-  "╔════════════════════════════════════════════════════════════════╗"
+  "╔════════════════════════════════════════════════════════════════╗",
 );
 console.log(
-  "║                          SUMMARY                               ║"
+  "║                          SUMMARY                               ║",
 );
 console.log(
-  "╠════════════════════════════════════════════════════════════════╣"
+  "╠════════════════════════════════════════════════════════════════╣",
 );
 
 let ctypesWins = 0;
@@ -565,27 +565,27 @@ for (const r of results) {
       ? (1 / r.ratio).toFixed(2) + "x faster"
       : r.ratio.toFixed(2) + "x slower";
   console.log(
-    `║ ${status} ${r.name.padEnd(25)} ${diff.padStart(15)} vs koffi   ║`
+    `║ ${status} ${r.name.padEnd(25)} ${diff.padStart(15)} vs koffi   ║`,
   );
   if (r.ratio < 1) ctypesWins++;
   else koffiWins++;
 }
 
 console.log(
-  "╠════════════════════════════════════════════════════════════════╣"
+  "╠════════════════════════════════════════════════════════════════╣",
 );
 
 const avgRatio = results.reduce((sum, r) => sum + r.ratio, 0) / results.length;
 console.log(
   `║ Average ratio: ${avgRatio.toFixed(2)}x ${
     avgRatio < 1 ? "(node-ctypes faster)" : "(koffi faster)"
-  }`.padEnd(65) + "║"
+  }`.padEnd(65) + "║",
 );
 console.log(
-  `║ Wins: node-ctypes ${ctypesWins}, koffi ${koffiWins}`.padEnd(65) + "║"
+  `║ Wins: node-ctypes ${ctypesWins}, koffi ${koffiWins}`.padEnd(65) + "║",
 );
 console.log(
-  "╚════════════════════════════════════════════════════════════════╝"
+  "╚════════════════════════════════════════════════════════════════╝",
 );
 
 // Cleanup

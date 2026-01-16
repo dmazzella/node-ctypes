@@ -456,7 +456,7 @@ function createScaledFont() {
     0,
     1,
     0,
-    create_unicode_buffer("Segoe UI")
+    create_unicode_buffer("Segoe UI"),
   );
   return hFont;
 }
@@ -472,7 +472,7 @@ function WindowProc(hwnd, msg, wParam, lParam) {
     "WindowProc called:",
     "msg=" + msg,
     "wParam=" + wParam,
-    "lParam=" + lParam
+    "lParam=" + lParam,
   );
   switch (msg) {
     case WM_SIZE:
@@ -510,8 +510,8 @@ function WindowProc(hwnd, msg, wParam, lParam) {
             0,
             Math.min(
               __scrollY + delta,
-              Math.max(0, __contentHeight - __clientHeight)
-            )
+              Math.max(0, __contentHeight - __clientHeight),
+            ),
           );
           const scrollBy = newY - __scrollY;
           if (scrollBy !== 0) {
@@ -537,7 +537,7 @@ function WindowProc(hwnd, msg, wParam, lParam) {
         const scrollPixels = Math.round((delta / 120) * 50);
         const newY = Math.max(
           0,
-          Math.min(__contentHeight - __clientHeight, __scrollY - scrollPixels)
+          Math.min(__contentHeight - __clientHeight, __scrollY - scrollPixels),
         );
         const scrollBy = newY - __scrollY;
         if (scrollBy !== 0) {
@@ -559,7 +559,7 @@ function WindowProc(hwnd, msg, wParam, lParam) {
           "WM_COMMAND: controlId=",
           controlId,
           "notificationCode=",
-          notification
+          notification,
         );
         switch (controlId) {
           case ID_BUTTON1:
@@ -605,7 +605,7 @@ function WindowProc(hwnd, msg, wParam, lParam) {
                 GetDlgItem(hwndMain, ID_CHECKBOX),
                 BM_GETCHECK,
                 0,
-                0
+                0,
               );
               log("Checkbox raw state:", state);
             }
@@ -622,7 +622,7 @@ function WindowProc(hwnd, msg, wParam, lParam) {
                 GetDlgItem(hwndMain, ID_COMBOBOX),
                 CB_GETCURSEL,
                 0,
-                0
+                0,
               );
               log("Combobox selection index:", Number(sel));
             }
@@ -685,7 +685,7 @@ function WindowProc(hwnd, msg, wParam, lParam) {
                 GetDlgItem(hwndMain, ID_LISTBOX),
                 LB_GETCURSEL,
                 0,
-                0
+                0,
               );
               log("Listbox selection index:", Number(selIndex));
             }
@@ -761,7 +761,7 @@ function WindowProc(hwnd, msg, wParam, lParam) {
                 "WM_NOTIFY: primary UDM_GETPOS32 returned:",
                 raw,
                 " interpreted:",
-                pos
+                pos,
               );
             } catch (inner) {
               log("WM_NOTIFY: UDM_GETPOS32 failed", inner);
@@ -790,7 +790,7 @@ function WindowProc(hwnd, msg, wParam, lParam) {
                 if (hwndSpinEdit)
                   SetWindowTextW(
                     hwndSpinEdit,
-                    create_unicode_buffer(String(pos))
+                    create_unicode_buffer(String(pos)),
                   );
               } catch (e) {}
               try {
@@ -912,7 +912,7 @@ async function createControlsDemo() {
     null,
     null,
     hInstance,
-    null
+    null,
   );
   if (!hwnd) throw new Error("CreateWindowExW failed");
   hwndMain = hwnd;
@@ -935,7 +935,7 @@ async function createControlsDemo() {
     hwnd,
     3000,
     hInstance,
-    null
+    null,
   );
 
   // Buttons
@@ -952,7 +952,7 @@ async function createControlsDemo() {
     hwnd,
     ID_BUTTON1,
     hInstance,
-    null
+    null,
   );
   const b2 = create_unicode_buffer("Default");
   hwndButton2 = CreateWindowExW(
@@ -967,7 +967,7 @@ async function createControlsDemo() {
     hwnd,
     ID_BUTTON2,
     hInstance,
-    null
+    null,
   );
   const toggle = create_unicode_buffer("Hide");
   hwndToggle = CreateWindowExW(
@@ -982,7 +982,7 @@ async function createControlsDemo() {
     hwnd,
     ID_TOGGLE_WINDOW,
     hInstance,
-    null
+    null,
   );
   const counterBtn = create_unicode_buffer("Count: 0");
   hwndCounter = CreateWindowExW(
@@ -997,7 +997,7 @@ async function createControlsDemo() {
     hwnd,
     ID_COUNTER,
     hInstance,
-    null
+    null,
   );
 
   // Text input group
@@ -1015,7 +1015,7 @@ async function createControlsDemo() {
     hwnd,
     3001,
     hInstance,
-    null
+    null,
   );
   hwndTextInput = CreateWindowExW(
     0,
@@ -1029,7 +1029,7 @@ async function createControlsDemo() {
     hwnd,
     ID_TEXT_INPUT,
     hInstance,
-    null
+    null,
   );
 
   // Options (checkbox + radios)
@@ -1047,7 +1047,7 @@ async function createControlsDemo() {
     hwnd,
     3002,
     hInstance,
-    null
+    null,
   );
   hwndCheckbox = CreateWindowExW(
     0,
@@ -1061,7 +1061,7 @@ async function createControlsDemo() {
     hwnd,
     ID_CHECKBOX,
     hInstance,
-    null
+    null,
   );
   hwndRadio1 = CreateWindowExW(
     0,
@@ -1075,7 +1075,7 @@ async function createControlsDemo() {
     hwnd,
     ID_RADIO1,
     hInstance,
-    null
+    null,
   );
   hwndRadio2 = CreateWindowExW(
     0,
@@ -1089,7 +1089,7 @@ async function createControlsDemo() {
     hwnd,
     ID_RADIO2,
     hInstance,
-    null
+    null,
   );
 
   // Combobox and listbox on the right
@@ -1108,7 +1108,7 @@ async function createControlsDemo() {
     hwnd,
     3003,
     hInstance,
-    null
+    null,
   );
   hwndCombobox = CreateWindowExW(
     0,
@@ -1122,26 +1122,26 @@ async function createControlsDemo() {
     hwnd,
     ID_COMBOBOX,
     hInstance,
-    null
+    null,
   );
   // populate combobox
   SendMessageW(
     hwndCombobox,
     CB_ADDSTRING,
     0,
-    create_unicode_buffer("First option")
+    create_unicode_buffer("First option"),
   );
   SendMessageW(
     hwndCombobox,
     CB_ADDSTRING,
     0,
-    create_unicode_buffer("Second option")
+    create_unicode_buffer("Second option"),
   );
   SendMessageW(
     hwndCombobox,
     CB_ADDSTRING,
     0,
-    create_unicode_buffer("Third option")
+    create_unicode_buffer("Third option"),
   );
   SendMessageW(hwndCombobox, CB_SETCURSEL, 0, 0);
 
@@ -1158,7 +1158,7 @@ async function createControlsDemo() {
     hwnd,
     3004,
     hInstance,
-    null
+    null,
   );
   hwndListBox = CreateWindowExW(
     0,
@@ -1172,7 +1172,7 @@ async function createControlsDemo() {
     hwnd,
     ID_LISTBOX,
     hInstance,
-    null
+    null,
   );
   SendMessageW(hwndListBox, LB_ADDSTRING, 0, create_unicode_buffer("Item A"));
   SendMessageW(hwndListBox, LB_ADDSTRING, 0, create_unicode_buffer("Item B"));
@@ -1192,7 +1192,7 @@ async function createControlsDemo() {
     hwnd,
     3005,
     hInstance,
-    null
+    null,
   );
   // create a smooth progress bar
   hwndProgressBar = CreateWindowExW(
@@ -1207,7 +1207,7 @@ async function createControlsDemo() {
     hwnd,
     ID_PROGRESSBAR,
     hInstance,
-    null
+    null,
   );
   // set a clear 0..100 range and initial position using PBM_SETRANGE32
   try {
@@ -1231,7 +1231,7 @@ async function createControlsDemo() {
     hwnd,
     3006,
     hInstance,
-    null
+    null,
   );
   hwndTrack = CreateWindowExW(
     0,
@@ -1245,7 +1245,7 @@ async function createControlsDemo() {
     hwnd,
     ID_TRACKBAR,
     hInstance,
-    null
+    null,
   );
   // set trackbar range 0..100 and start at 0
   try {
@@ -1272,7 +1272,7 @@ async function createControlsDemo() {
     hwnd,
     3007,
     hInstance,
-    null
+    null,
   );
   // small edit to display the spin value
   const spinEdit = create_unicode_buffer("");
@@ -1288,7 +1288,7 @@ async function createControlsDemo() {
     hwnd,
     ID_SPIN_EDIT,
     hInstance,
-    null
+    null,
   );
   // create up-down control (msctls_updown32) to the right of edit
   // create up-down control with buddy behavior and arrow keys
@@ -1306,7 +1306,7 @@ async function createControlsDemo() {
     hwnd,
     ID_SPIN,
     hInstance,
-    null
+    null,
   );
   try {
     // UDM_SETRANGE32: wParam = nMin, lParam = nMax
@@ -1332,7 +1332,7 @@ async function createControlsDemo() {
     hwnd,
     ID_TOOLTIP,
     hInstance,
-    null
+    null,
   );
   try {
     // set max tip width
@@ -1451,11 +1451,11 @@ async function createControlsDemo() {
     addTooltipForControl(hwndTrack, "Trackbar — controls progress bar value");
     addTooltipForControl(
       hwndSpinEdit,
-      "Spin control — numeric value with up/down"
+      "Spin control — numeric value with up/down",
     );
     addTooltipForControl(
       hwndTextInput,
-      "Text input — type here to trigger EN_CHANGE events"
+      "Text input — type here to trigger EN_CHANGE events",
     );
   } catch (e) {}
 

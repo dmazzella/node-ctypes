@@ -67,7 +67,7 @@ describe("Functions and Callbacks", function () {
       for (let i = 0; i < 10; i++) {
         assert.strictEqual(
           ctypes.readValue(dst, "uint8", i),
-          ctypes.readValue(src, "uint8", i)
+          ctypes.readValue(src, "uint8", i),
         );
       }
     });
@@ -142,7 +142,7 @@ describe("Functions and Callbacks", function () {
     });
   });
 
-  describe("Callbacks", { skip: process.platform !== "win32" } , function () {
+  describe("Callbacks", { skip: process.platform !== "win32" }, function () {
     it("should create and use callback with qsort", function () {
       const qsort = libc.func("qsort", "void", [
         "pointer",
@@ -159,7 +159,7 @@ describe("Functions and Callbacks", function () {
           return valA - valB;
         },
         "int32",
-        ["pointer", "pointer"]
+        ["pointer", "pointer"],
       );
 
       // Create array to sort
@@ -193,39 +193,43 @@ describe("Functions and Callbacks", function () {
     });
   });
 
-  describe("Variadic Functions", { skip: process.platform !== "win32" } , function () {
-    it("should handle functions with variable arguments", function () {
-      // Define sprintf with only fixed parameters
-      // node-ctypes auto-detects variadic arguments!
-      const sprintf = libc.func("sprintf", "int32", ["pointer", "string"]);
+  describe(
+    "Variadic Functions",
+    { skip: process.platform !== "win32" },
+    function () {
+      it("should handle functions with variable arguments", function () {
+        // Define sprintf with only fixed parameters
+        // node-ctypes auto-detects variadic arguments!
+        const sprintf = libc.func("sprintf", "int32", ["pointer", "string"]);
 
-      const buf = ctypes.create_string_buffer(256);
+        const buf = ctypes.create_string_buffer(256);
 
-      // Test 1: String formatting
-      let written = sprintf(buf, "Hello %s!", "World");
-      assert(written > 0, "sprintf should return positive byte count");
-      const str1 = buf.toString("utf8", 0, buf.indexOf(0));
-      assert.strictEqual(str1, "Hello World!");
+        // Test 1: String formatting
+        let written = sprintf(buf, "Hello %s!", "World");
+        assert(written > 0, "sprintf should return positive byte count");
+        const str1 = buf.toString("utf8", 0, buf.indexOf(0));
+        assert.strictEqual(str1, "Hello World!");
 
-      // Test 2: Mixed int and string
-      written = sprintf(buf, "Number: %d, String: %s", 42, "test");
-      assert(written > 0);
-      const str2 = buf.toString("utf8", 0, buf.indexOf(0));
-      assert.strictEqual(str2, "Number: 42, String: test");
+        // Test 2: Mixed int and string
+        written = sprintf(buf, "Number: %d, String: %s", 42, "test");
+        assert(written > 0);
+        const str2 = buf.toString("utf8", 0, buf.indexOf(0));
+        assert.strictEqual(str2, "Number: 42, String: test");
 
-      // Test 3: Multiple numbers
-      written = sprintf(buf, "%d + %d = %d", 10, 20, 30);
-      assert(written > 0);
-      const str3 = buf.toString("utf8", 0, buf.indexOf(0));
-      assert.strictEqual(str3, "10 + 20 = 30");
+        // Test 3: Multiple numbers
+        written = sprintf(buf, "%d + %d = %d", 10, 20, 30);
+        assert(written > 0);
+        const str3 = buf.toString("utf8", 0, buf.indexOf(0));
+        assert.strictEqual(str3, "10 + 20 = 30");
 
-      // Test 4: Float formatting
-      written = sprintf(buf, "Pi is approximately %.2f", 3.14159);
-      assert(written > 0);
-      const str4 = buf.toString("utf8", 0, buf.indexOf(0));
-      assert.strictEqual(str4, "Pi is approximately 3.14");
-    });
-  });
+        // Test 4: Float formatting
+        written = sprintf(buf, "Pi is approximately %.2f", 3.14159);
+        assert(written > 0);
+        const str4 = buf.toString("utf8", 0, buf.indexOf(0));
+        assert.strictEqual(str4, "Pi is approximately 3.14");
+      });
+    },
+  );
 
   describe("Pointer Returns", function () {
     it("should handle functions returning pointers", function () {

@@ -71,7 +71,7 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
       const GetCurrentProcessId = kernel32.func(
         "GetCurrentProcessId",
         "uint32",
-        []
+        [],
       );
 
       const pid = GetCurrentProcessId();
@@ -85,7 +85,7 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
       const GetCurrentThreadId = kernel32.func(
         "GetCurrentThreadId",
         "uint32",
-        []
+        [],
       );
 
       const tid = GetCurrentThreadId();
@@ -162,7 +162,7 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
         0n,
         4096,
         MEM_COMMIT | MEM_RESERVE,
-        PAGE_READWRITE
+        PAGE_READWRITE,
       );
       assert(ptr !== 0n, "VirtualAlloc should succeed");
 
@@ -176,7 +176,7 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
       const GetEnvironmentVariableW = kernel32.func(
         "GetEnvironmentVariableW",
         "uint32",
-        ["wstring", "pointer", "uint32"]
+        ["wstring", "pointer", "uint32"],
       );
 
       const buf = create_unicode_buffer(1024);
@@ -256,7 +256,7 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
 
       assert(
         errcheckCalled,
-        "errcheck should have been called for failure case"
+        "errcheck should have been called for failure case",
       );
     });
   });

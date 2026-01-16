@@ -80,7 +80,7 @@ describe("Basic Types", function () {
       ctypes.writeValue(buf, "uint64", 18446744073709551615n);
       assert.strictEqual(
         ctypes.readValue(buf, "uint64"),
-        18446744073709551615n
+        18446744073709551615n,
       );
     });
   });

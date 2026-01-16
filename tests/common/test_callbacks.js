@@ -41,7 +41,7 @@ describe("Callbacks", function () {
           return aVal - bVal;
         },
         "int32",
-        ["pointer", "pointer"]
+        ["pointer", "pointer"],
       );
 
       // Get qsort function
@@ -86,7 +86,7 @@ describe("Callbacks", function () {
           return bVal - aVal; // Reverse order
         },
         "int32",
-        ["pointer", "pointer"]
+        ["pointer", "pointer"],
       );
 
       // Get qsort function
@@ -124,7 +124,7 @@ describe("Callbacks", function () {
           return 0;
         },
         "int32",
-        ["pointer", "pointer"]
+        ["pointer", "pointer"],
       );
 
       const qsort = libc.func("qsort", "void", [
