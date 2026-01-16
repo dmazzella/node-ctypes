@@ -16,14 +16,11 @@ import {
   writeValue,
 } from "node-ctypes";
 
-describe("Windows API", function () {
+describe("Windows API", { skip: process.platform !== "win32" }, function () {
   let kernel32;
   let user32;
 
   before(function () {
-    if (process.platform !== "win32") {
-      this.skip();
-    }
     kernel32 = new WinDLL("kernel32.dll");
     user32 = new WinDLL("user32.dll");
   });

@@ -142,12 +142,8 @@ describe("Functions and Callbacks", function () {
     });
   });
 
-  describe("Callbacks", function () {
+  describe("Callbacks", { skip: process.platform !== "win32" } , function () {
     it("should create and use callback with qsort", function () {
-      if (process.platform !== "win32") {
-        this.skip(); // qsort signature differs on Unix
-      }
-
       const qsort = libc.func("qsort", "void", [
         "pointer",
         "size_t",
@@ -197,12 +193,8 @@ describe("Functions and Callbacks", function () {
     });
   });
 
-  describe("Variadic Functions", function () {
+  describe("Variadic Functions", { skip: process.platform !== "win32" } , function () {
     it("should handle functions with variable arguments", function () {
-      if (process.platform !== "win32") {
-        this.skip(); // Different sprintf behavior on Unix
-      }
-
       // Define sprintf with only fixed parameters
       // node-ctypes auto-detects variadic arguments!
       const sprintf = libc.func("sprintf", "int32", ["pointer", "string"]);
