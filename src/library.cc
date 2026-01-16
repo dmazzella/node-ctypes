@@ -5,7 +5,7 @@
 namespace ctypes
 {
 
-    std::string GetErrorMessage(const DWORD errorCode)
+    std::string GetErrorMessage(const uint32_t errorCode)
     {
         spdlog::trace(__FUNCTION__);
         std::string result;
@@ -24,7 +24,7 @@ namespace ctypes
 
         LPWSTR msgBufW = nullptr;
         DWORD dwFlags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_MAX_WIDTH_MASK;
-        if (FormatMessageW(dwFlags, NULL, errorCode, langId, (LPWSTR)&msgBufW, 0, NULL) && msgBufW)
+        if (FormatMessageW(dwFlags, NULL, static_cast<DWORD>(errorCode), langId, (LPWSTR)&msgBufW, 0, NULL) && msgBufW)
         {
             int utf8Length = WideCharToMultiByte(CP_UTF8, 0, msgBufW, -1, nullptr, 0, nullptr, nullptr);
             if (utf8Length > 0)
@@ -54,7 +54,7 @@ namespace ctypes
         if (!handle)
         {
             DWORD err = GetLastError();
-            error = fmt::format("LoadLibraryExA failed: 0x{:08x} {}", static_cast<uint32_t>(err), GetErrorMessage(err));
+            error = fmt::format("LoadLibraryExA failed: 0x{:08x} {}", static_cast<uint32_t>(err), GetErrorMessage(static_cast<uint32_t>(err)));
             return nullptr;
         }
         return static_cast<void *>(handle);
