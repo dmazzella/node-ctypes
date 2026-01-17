@@ -10,8 +10,6 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 add_definitions(-DNAPI_VERSION=9)
 add_definitions(-DNAPI_CPP_EXCEPTIONS)
 
-include(FetchContent)
-
 # ============================================================================
 # Determina architettura
 # ============================================================================
@@ -45,57 +43,11 @@ endif()
 message(STATUS "Target architecture: ${FFI_ARCH}")
 
 # ============================================================================
-# Trova/Scarica libffi
+# Build libffi from source (static)
 # ============================================================================
 
-set(FFI_FOUND FALSE)
-
-if(WIN32)
-    set(LIBFFI_BIN_DIR ${CMAKE_SOURCE_DIR}/deps/libffi_${FFI_ARCH}-windows-static)
-    
-    if(EXISTS ${LIBFFI_BIN_DIR})
-        message(STATUS "Using libffi from: ${LIBFFI_BIN_DIR}")
-        
-        set(FFI_FOUND TRUE)
-        set(FFI_INCLUDE_DIRS ${LIBFFI_BIN_DIR}/include)
-        set(FFI_LIBRARIES ${LIBFFI_BIN_DIR}/lib/ffi.lib)
-        
-        message(STATUS "libffi library: ${FFI_LIBRARIES}")
-        message(STATUS "libffi includes: ${FFI_INCLUDE_DIRS}")
-        if(EXISTS ${LIBFFI_BIN_DIR}/bin/ffi-8.dll)
-            set(FFI_DLL_FILE ${LIBFFI_BIN_DIR}/bin/ffi-8.dll)
-            message(STATUS "libffi DLL: ${FFI_DLL_FILE}")
-        endif()
-    endif()
-else()
-    # Su Linux/macOS, usa pkg-config
-    find_package(PkgConfig QUIET)
-    if(PkgConfig_FOUND)
-        pkg_check_modules(FFI QUIET libffi)
-        if(FFI_FOUND)
-            message(STATUS "Found libffi via pkg-config")
-        endif()
-    endif()
-    
-    # Fallback: cerca manualmente
-    if(NOT FFI_FOUND)
-        find_path(FFI_INCLUDE_DIR ffi.h
-            PATHS /usr/include /usr/local/include /opt/homebrew/include
-        )
-        find_library(FFI_LIBRARY NAMES ffi
-            PATHS /usr/lib /usr/local/lib /opt/homebrew/lib
-        )
-        if(FFI_INCLUDE_DIR AND FFI_LIBRARY)
-            set(FFI_FOUND TRUE)
-            set(FFI_INCLUDE_DIRS ${FFI_INCLUDE_DIR})
-            set(FFI_LIBRARIES ${FFI_LIBRARY})
-        endif()
-    endif()
-endif()
-
-if(NOT FFI_FOUND)
-    message(FATAL_ERROR "libffi not found!")
-endif()
+message(STATUS "Building libffi from source...")
+add_subdirectory(${CMAKE_SOURCE_DIR}/deps/libffi_cmake)
 
 # ============================================================================
 # node-ctypes module
@@ -128,8 +80,7 @@ endif()
 # third-party
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/third-party)
 
-# libffi
-target_include_directories(${PROJECT_NAME} PRIVATE ${FFI_INCLUDE_DIRS})
+# libffi (includes exported via target_include_directories PUBLIC)
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
 # Link
@@ -137,20 +88,8 @@ if(CMAKE_JS_LIB)
     target_link_libraries(${PROJECT_NAME} PRIVATE ${CMAKE_JS_LIB})
 endif()
 
-target_link_libraries(${PROJECT_NAME} PRIVATE ${FFI_LIBRARIES})
-
-# Windows specifiche
-if(WIN32)    
-    # Copia DLL nella directory di output
-    if(FFI_DLL_FILE)
-        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${FFI_DLL_FILE}"
-                "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
-            COMMENT "Copying libffi DLL..."
-        )
-    endif()
-endif()
+target_link_libraries(${PROJECT_NAME} PRIVATE ffi_static)
+target_compile_definitions(${PROJECT_NAME} PRIVATE FFI_STATIC_BUILD)
 
 if(MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE /utf-8)
@@ -168,5 +107,5 @@ message(STATUS "")
 message(STATUS "=== node-ctypes ===")
 message(STATUS "  Platform: ${CMAKE_SYSTEM_NAME}")
 message(STATUS "  Architecture: ${FFI_ARCH}")
-message(STATUS "  libffi: ${FFI_LIBRARIES}")
+message(STATUS "  libffi: static (from source)")
 message(STATUS "===================")
