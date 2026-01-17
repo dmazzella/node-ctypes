@@ -1,5 +1,10 @@
 # node-ctypes
 
+[![npm version](https://img.shields.io/npm/v/node-ctypes.svg)](https://www.npmjs.com/package/node-ctypes)
+[![npm downloads](https://img.shields.io/npm/dm/node-ctypes.svg)](https://www.npmjs.com/package/node-ctypes)
+[![Build](https://github.com/dmazzella/node-ctypes/actions/workflows/build.yml/badge.svg)](https://github.com/dmazzella/node-ctypes/actions/workflows/build.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 **Python ctypes for Node.js** - A high-performance FFI (Foreign Function Interface) library with full Python ctypes compatibility, built on [libffi](https://github.com/libffi/libffi) and [N-API](https://nodejs.org/api/n-api.html).
 
 ## Why node-ctypes?
@@ -24,7 +29,20 @@
 
 ## Installation
 
-### Prerequisites
+### From npm (recommended)
+
+```bash
+npm install node-ctypes
+```
+
+Prebuilt binaries are available for:
+- Windows x64, ARM64
+- Linux x64, ARM64
+- macOS ARM64
+
+### From source
+
+#### Prerequisites
 
 - Node.js >= 16
 - CMake >= 3.15
@@ -44,7 +62,7 @@ brew install cmake
 - Install Visual Studio Build Tools
 - Install CMake
 
-### Install
+#### Build
 ```bash
 npm install
 npm run build
