@@ -266,7 +266,6 @@ function generateFficonfig(version) {
 /* #undef FFI_NO_STRUCTS */
 
 /* Special exec table needed on macOS */
-/* #undef FFI_EXEC_TRAMPOLINE_TABLE */
 #if defined(FFI_PLATFORM_MACOS)
 #  define FFI_EXEC_TRAMPOLINE_TABLE 1
 #endif
@@ -393,9 +392,8 @@ function generateFfiH(version) {
   // Replace @HAVE_LONG_DOUBLE@ - always 1 for our platforms
   output = output.replace(/@HAVE_LONG_DOUBLE@/g, "1");
 
-  // Replace @FFI_EXEC_TRAMPOLINE_TABLE@ - 1 for macOS, 0 otherwise
-  const execTrampolineTable = process.platform === 'darwin' ? "1" : "0";
-  output = output.replace(/@FFI_EXEC_TRAMPOLINE_TABLE@/g, execTrampolineTable);
+  // Replace @FFI_EXEC_TRAMPOLINE_TABLE@ - expression for conditional
+  output = output.replace(/@FFI_EXEC_TRAMPOLINE_TABLE@/g, "defined(FFI_EXEC_TRAMPOLINE_TABLE) && FFI_EXEC_TRAMPOLINE_TABLE");
 
   // Replace version placeholders
   output = output.replace(/@FFI_VERSION_STRING@/g, version.string);

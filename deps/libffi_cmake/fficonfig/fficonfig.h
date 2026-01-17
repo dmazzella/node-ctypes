@@ -220,7 +220,6 @@
 /* #undef FFI_NO_STRUCTS */
 
 /* Special exec table needed on macOS */
-/* #undef FFI_EXEC_TRAMPOLINE_TABLE */
 #if defined(FFI_PLATFORM_MACOS)
 #  define FFI_EXEC_TRAMPOLINE_TABLE 1
 #endif
