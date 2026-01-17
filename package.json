@@ -24,9 +24,7 @@
     "generate-ffi-headers": "node deps/libffi_cmake/generate-headers.js"
   },
   "devDependencies": {
-    "cmake-js": "^7.4.0"
-  },
-  "dependencies": {
+    "cmake-js": "^7.4.0",
     "node-addon-api": "^8.5.0"
   },
   "engines": {
