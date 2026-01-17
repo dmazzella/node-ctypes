@@ -29,22 +29,20 @@
 - Node.js >= 16
 - CMake >= 3.15
 - C++ compiler (GCC, Clang, or MSVC)
-- libffi development files
 
 #### Ubuntu/Debian
 ```bash
-sudo apt install build-essential cmake libffi-dev
+sudo apt install build-essential cmake
 ```
 
 #### macOS
 ```bash
-brew install cmake libffi
+brew install cmake
 ```
 
 #### Windows
 - Install Visual Studio Build Tools
 - Install CMake
-- libffi can be built from source or obtained via vcpkg
 
 ### Install
 ```bash
@@ -457,13 +455,6 @@ console.log(string_at(str));  // "Hello, World!"
 
 Benchmarked on Windows with Node.js v24.11.0:
 
-**vs ffi-napi** (geometric mean: **36.92x faster**):
-- Simple int32 function: **50.32x faster**
-- String parameter: **49.32x faster**
-- Floating point: **48.97x faster**
-- Multiple arguments: **153.47x faster**
-- Struct read/write: **5.22x faster**
-
 **vs koffi** (comprehensive 10-benchmark comparison, geometric mean: **3.27x slower**):
 - Simple int32 function: 1.74x slower
 - String parameter: 1.95x slower  
@@ -738,7 +729,6 @@ cd tests
 npm install 
 npm run test               # All tests
 npm run bench:koffi        # Benchmark vs koffi
-npm run bench:ffi-napi     # Benchmark vs ffi-napi
 ```
 
 ## Examples
