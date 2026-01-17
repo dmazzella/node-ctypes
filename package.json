@@ -2,8 +2,16 @@
   "name": "node-ctypes",
   "version": "0.1.2",
   "description": "Python ctypes-like FFI for Node.js using libffi",
-  "author": "",
+  "author": "Damiano Mazzella",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dmazzella/node-ctypes"
+  },
+  "bugs": {
+    "url": "https://github.com/dmazzella/node-ctypes/issues"
+  },
+  "homepage": "https://github.com/dmazzella/node-ctypes#readme",
   "keywords": [
     "ffi",
     "ctypes",
