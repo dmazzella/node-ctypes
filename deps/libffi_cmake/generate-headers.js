@@ -265,8 +265,11 @@ function generateFficonfig(version) {
 /* No struct restrictions */
 /* #undef FFI_NO_STRUCTS */
 
-/* No special exec table needed */
+/* Special exec table needed on macOS */
 /* #undef FFI_EXEC_TRAMPOLINE_TABLE */
+#if defined(FFI_PLATFORM_MACOS)
+#  define FFI_EXEC_TRAMPOLINE_TABLE 1
+#endif
 
 /* No mmap exec workarounds needed */
 /* #undef FFI_MMAP_EXEC_WRIT */
@@ -340,6 +343,9 @@ function generateFfiH(version) {
 #    ifndef X86_64
 #      define X86_64
 #    endif
+#  if defined(__APPLE__) && defined(__MACH__)
+#    define X86_DARWIN
+#  endif
 #  endif
 #elif defined(__aarch64__) || defined(_M_ARM64)
 #  ifndef AARCH64
@@ -387,8 +393,9 @@ function generateFfiH(version) {
   // Replace @HAVE_LONG_DOUBLE@ - always 1 for our platforms
   output = output.replace(/@HAVE_LONG_DOUBLE@/g, "1");
 
-  // Replace @FFI_EXEC_TRAMPOLINE_TABLE@ - 0 for our platforms
-  output = output.replace(/@FFI_EXEC_TRAMPOLINE_TABLE@/g, "0");
+  // Replace @FFI_EXEC_TRAMPOLINE_TABLE@ - 1 for macOS, 0 otherwise
+  const execTrampolineTable = process.platform === 'darwin' ? "1" : "0";
+  output = output.replace(/@FFI_EXEC_TRAMPOLINE_TABLE@/g, execTrampolineTable);
 
   // Replace version placeholders
   output = output.replace(/@FFI_VERSION_STRING@/g, version.string);

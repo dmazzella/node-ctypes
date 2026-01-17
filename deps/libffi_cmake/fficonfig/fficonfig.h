@@ -219,8 +219,11 @@
 /* No struct restrictions */
 /* #undef FFI_NO_STRUCTS */
 
-/* No special exec table needed */
+/* Special exec table needed on macOS */
 /* #undef FFI_EXEC_TRAMPOLINE_TABLE */
+#if defined(FFI_PLATFORM_MACOS)
+#  define FFI_EXEC_TRAMPOLINE_TABLE 1
+#endif
 
 /* No mmap exec workarounds needed */
 /* #undef FFI_MMAP_EXEC_WRIT */
