@@ -29,7 +29,7 @@
     "build:debug": "cmake-js compile --target ctypes --debug",
     "rebuild": "cmake-js rebuild --target ctypes",
     "clean": "cmake-js clean",
-    "generate-ffi-headers": "node deps/libffi_cmake/generate-headers.js"
+    "generate-ffi-headers": "node third-party/libffi_cmake/generate-headers.js"
   },
   "devDependencies": {
     "cmake-js": "^7.4.0",

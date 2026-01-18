@@ -47,7 +47,7 @@ message(STATUS "Target architecture: ${FFI_ARCH}")
 # ============================================================================
 
 message(STATUS "Building libffi from source...")
-add_subdirectory(${CMAKE_SOURCE_DIR}/deps/libffi_cmake)
+add_subdirectory(${CMAKE_SOURCE_DIR}/third-party/libffi_cmake)
 
 # ============================================================================
 # node-ctypes module

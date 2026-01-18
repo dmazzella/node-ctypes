@@ -6,18 +6,17 @@
 # The actual libffi sources are in ../libffi (unmodified upstream).
 #
 # Structure:
-#   deps/libffi/        - Upstream libffi sources (unmodified)
-#   deps/libffi_cmake/  - CMake build configuration (this directory)
-#     CMakeLists.txt    - Build script
-#     fficonfig/        - Platform-agnostic configuration headers
-#       fficonfig.h     - Replaces autotools-generated config
-#       ffi.h           - Unified public header
+#   third-party/libffi/        - Upstream libffi sources (git submodule)
+#   third-party/libffi_cmake/  - CMake build configuration (this directory)
+#     CMakeLists.txt           - Build script
+#     fficonfig/               - Platform-agnostic configuration headers
+#       fficonfig.h            - Replaces autotools-generated config
+#       ffi.h                  - Unified public header
 #
 # To update libffi:
-#   1. Delete deps/libffi
-#   2. Clone/extract new libffi version to deps/libffi
-#   3. Run: npm run generate-ffi-headers
-#   4. Run: npm run rebuild
+#   1. cd third-party/libffi && git fetch && git checkout vX.Y.Z
+#   2. Run: npm run generate-ffi-headers
+#   3. Run: npm run rebuild
 #
 # Supported platforms:
 # - Windows x64 (MSVC)
