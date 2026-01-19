@@ -1,6 +1,6 @@
 {
   "name": "node-ctypes",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Python ctypes-like FFI for Node.js using libffi",
   "author": "Damiano Mazzella",
   "license": "MIT",
