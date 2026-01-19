@@ -1,7 +1,17 @@
 // Windows Controls Showcase Demo
 // A compact demo that creates a window with a wide set of common Win32 controls
 
-import { WinDLL, struct, create_unicode_buffer } from "node-ctypes";
+import {
+  WinDLL,
+  struct,
+  create_unicode_buffer,
+  c_short,
+  c_int,
+  c_uint,
+  c_long,
+  c_void,
+  c_void_p,
+} from "node-ctypes";
 
 // Constants
 const WS_OVERLAPPEDWINDOW = 0x00cf0000;
@@ -106,166 +116,158 @@ const comctl32 = new WinDLL("comctl32.dll");
 const gdi32 = new WinDLL("gdi32.dll");
 
 // Functions
-const RegisterClassExW = user32.func("RegisterClassExW", "short", ["pointer"]);
-const CreateWindowExW = user32.func("CreateWindowExW", "pointer", [
-  "uint",
-  "pointer",
-  "pointer",
-  "uint",
-  "int",
-  "int",
-  "int",
-  "int",
-  "pointer",
-  "pointer",
-  "pointer",
-  "pointer",
+const RegisterClassExW = user32.func("RegisterClassExW", c_short, [c_void_p]);
+const CreateWindowExW = user32.func("CreateWindowExW", c_void_p, [
+  c_uint,
+  c_void_p,
+  c_void_p,
+  c_uint,
+  c_int,
+  c_int,
+  c_int,
+  c_int,
+  c_void_p,
+  c_void_p,
+  c_void_p,
+  c_void_p,
 ]);
-const ShowWindow = user32.func("ShowWindow", "int", ["pointer", "int"]);
-const UpdateWindow = user32.func("UpdateWindow", "int", ["pointer"]);
-const InvalidateRect = user32.func("InvalidateRect", "int", [
-  "pointer",
-  "pointer",
-  "int",
+const ShowWindow = user32.func("ShowWindow", c_int, [c_void_p, c_int]);
+const UpdateWindow = user32.func("UpdateWindow", c_int, [c_void_p]);
+const InvalidateRect = user32.func("InvalidateRect", c_int, [
+  c_void_p,
+  c_void_p,
+  c_int,
 ]);
-const RedrawWindow = user32.func("RedrawWindow", "int", [
-  "pointer",
-  "pointer",
-  "pointer",
-  "uint",
+const RedrawWindow = user32.func("RedrawWindow", c_int, [
+  c_void_p,
+  c_void_p,
+  c_void_p,
+  c_uint,
 ]);
-const GetMessageW = user32.func("GetMessageW", "int", [
-  "pointer",
-  "pointer",
-  "uint",
-  "uint",
+const GetMessageW = user32.func("GetMessageW", c_int, [
+  c_void_p,
+  c_void_p,
+  c_uint,
+  c_uint,
 ]);
-const TranslateMessage = user32.func("TranslateMessage", "int", ["pointer"]);
-const DispatchMessageW = user32.func("DispatchMessageW", "pointer", [
-  "pointer",
+const TranslateMessage = user32.func("TranslateMessage", c_int, [c_void_p]);
+const DispatchMessageW = user32.func("DispatchMessageW", c_void_p, [c_void_p]);
+const DefWindowProcW = user32.func("DefWindowProcW", c_void_p, [
+  c_void_p,
+  c_uint,
+  c_void_p,
+  c_void_p,
 ]);
-const DefWindowProcW = user32.func("DefWindowProcW", "pointer", [
-  "pointer",
-  "uint",
-  "pointer",
-  "pointer",
+const PostQuitMessage = user32.func("PostQuitMessage", c_void, [c_int]);
+const LoadCursorW = user32.func("LoadCursorW", c_void_p, [c_void_p, c_uint]);
+const GetModuleHandleW = kernel32.func("GetModuleHandleW", c_void_p, [
+  c_void_p,
 ]);
-const PostQuitMessage = user32.func("PostQuitMessage", "void", ["int"]);
-const LoadCursorW = user32.func("LoadCursorW", "pointer", ["pointer", "uint"]);
-const GetModuleHandleW = kernel32.func("GetModuleHandleW", "pointer", [
-  "pointer",
+const SetWindowTextW = user32.func("SetWindowTextW", c_int, [
+  c_void_p,
+  c_void_p,
 ]);
-const SetWindowTextW = user32.func("SetWindowTextW", "int", [
-  "pointer",
-  "pointer",
+const GetDlgItem = user32.func("GetDlgItem", c_void_p, [c_void_p, c_int]);
+const GetWindowTextW = user32.func("GetWindowTextW", c_int, [
+  c_void_p,
+  c_void_p,
+  c_int,
 ]);
-const GetDlgItem = user32.func("GetDlgItem", "pointer", ["pointer", "int"]);
-const GetWindowTextW = user32.func("GetWindowTextW", "int", [
-  "pointer",
-  "pointer",
-  "int",
+const GetClientRect = user32.func("GetClientRect", c_int, [c_void_p, c_void_p]);
+const GetWindowRect = user32.func("GetWindowRect", c_int, [c_void_p, c_void_p]);
+const MapWindowPoints = user32.func("MapWindowPoints", c_int, [
+  c_void_p,
+  c_void_p,
+  c_void_p,
+  c_uint,
 ]);
-const GetClientRect = user32.func("GetClientRect", "int", [
-  "pointer",
-  "pointer",
+const SetScrollInfo = user32.func("SetScrollInfo", c_int, [
+  c_void_p,
+  c_int,
+  c_void_p,
+  c_int,
 ]);
-const GetWindowRect = user32.func("GetWindowRect", "int", [
-  "pointer",
-  "pointer",
+const ScrollWindow = user32.func("ScrollWindow", c_int, [
+  c_void_p,
+  c_int,
+  c_int,
+  c_void_p,
+  c_void_p,
 ]);
-const MapWindowPoints = user32.func("MapWindowPoints", "int", [
-  "pointer",
-  "pointer",
-  "pointer",
-  "uint",
+const MoveWindow = user32.func("MoveWindow", c_int, [
+  c_void_p,
+  c_int,
+  c_int,
+  c_int,
+  c_int,
+  c_int,
 ]);
-const SetScrollInfo = user32.func("SetScrollInfo", "int", [
-  "pointer",
-  "int",
-  "pointer",
-  "int",
+const BeginDeferWindowPos = user32.func("BeginDeferWindowPos", c_void_p, [
+  c_int,
 ]);
-const ScrollWindow = user32.func("ScrollWindow", "int", [
-  "pointer",
-  "int",
-  "int",
-  "pointer",
-  "pointer",
+const DeferWindowPos = user32.func("DeferWindowPos", c_void_p, [
+  c_void_p,
+  c_void_p,
+  c_void_p,
+  c_int,
+  c_int,
+  c_int,
+  c_int,
+  c_uint,
 ]);
-const MoveWindow = user32.func("MoveWindow", "int", [
-  "pointer",
-  "int",
-  "int",
-  "int",
-  "int",
-  "int",
+const EndDeferWindowPos = user32.func("EndDeferWindowPos", c_int, [c_void_p]);
+const SendMessageW = user32.func("SendMessageW", c_long, [
+  c_void_p,
+  c_uint,
+  c_void_p,
+  c_void_p,
 ]);
-const BeginDeferWindowPos = user32.func("BeginDeferWindowPos", "pointer", [
-  "int",
+const PostMessageW = user32.func("PostMessageW", c_int, [
+  c_void_p,
+  c_uint,
+  c_void_p,
+  c_void_p,
 ]);
-const DeferWindowPos = user32.func("DeferWindowPos", "pointer", [
-  "pointer",
-  "pointer",
-  "pointer",
-  "int",
-  "int",
-  "int",
-  "int",
-  "uint",
+const SetTimer = user32.func("SetTimer", c_void_p, [
+  c_void_p,
+  c_uint,
+  c_uint,
+  c_void_p,
 ]);
-const EndDeferWindowPos = user32.func("EndDeferWindowPos", "int", ["pointer"]);
-const SendMessageW = user32.func("SendMessageW", "long", [
-  "pointer",
-  "uint",
-  "pointer",
-  "pointer",
+const KillTimer = user32.func("KillTimer", c_void, [c_void_p, c_uint]);
+const IsIconic = user32.func("IsIconic", c_int, [c_void_p]);
+const IsZoomed = user32.func("IsZoomed", c_int, [c_void_p]);
+const CreateFontW = gdi32.func("CreateFontW", c_void_p, [
+  c_int,
+  c_int,
+  c_int,
+  c_int,
+  c_int,
+  c_int,
+  c_int,
+  c_int,
+  c_int,
+  c_int,
+  c_int,
+  c_int,
+  c_int,
+  c_void_p,
 ]);
-const PostMessageW = user32.func("PostMessageW", "int", [
-  "pointer",
-  "uint",
-  "pointer",
-  "pointer",
-]);
-const SetTimer = user32.func("SetTimer", "pointer", [
-  "pointer",
-  "uint",
-  "uint",
-  "pointer",
-]);
-const KillTimer = user32.func("KillTimer", "void", ["pointer", "uint"]);
-const IsIconic = user32.func("IsIconic", "int", ["pointer"]);
-const IsZoomed = user32.func("IsZoomed", "int", ["pointer"]);
-const CreateFontW = gdi32.func("CreateFontW", "pointer", [
-  "int",
-  "int",
-  "int",
-  "int",
-  "int",
-  "int",
-  "int",
-  "int",
-  "int",
-  "int",
-  "int",
-  "int",
-  "int",
-  "pointer",
-]);
-const DeleteObject = gdi32.func("DeleteObject", "int", ["pointer"]);
+const DeleteObject = gdi32.func("DeleteObject", c_int, [c_void_p]);
 // helper to copy memory from a pointer into a local buffer/struct
 let RtlMoveMemory = null;
 try {
-  RtlMoveMemory = kernel32.func("RtlMoveMemory", "void", [
-    "pointer",
-    "pointer",
-    "uint",
+  RtlMoveMemory = kernel32.func("RtlMoveMemory", c_void, [
+    c_void_p,
+    c_void_p,
+    c_uint,
   ]);
 } catch (e) {
   try {
-    RtlMoveMemory = kernel32.func("CopyMemory", "void", [
-      "pointer",
-      "pointer",
-      "uint",
+    RtlMoveMemory = kernel32.func("CopyMemory", c_void, [
+      c_void_p,
+      c_void_p,
+      c_uint,
     ]);
   } catch (e) {
     RtlMoveMemory = null;
@@ -275,15 +277,15 @@ try {
 // Initialize common controls (comctl32)
 let InitCommonControls = null;
 try {
-  InitCommonControls = comctl32.func("InitCommonControls", "void", []);
+  InitCommonControls = comctl32.func("InitCommonControls", c_void, []);
   InitCommonControls();
 } catch (e) {}
 
 // Prefer InitCommonControlsEx for specific control classes
 let InitCommonControlsEx = null;
 try {
-  InitCommonControlsEx = comctl32.func("InitCommonControlsEx", "int", [
-    "pointer",
+  InitCommonControlsEx = comctl32.func("InitCommonControlsEx", c_int, [
+    c_void_p,
   ]);
 } catch (e) {}
 
@@ -293,8 +295,8 @@ const ICC_UPDOWN_CLASS = 0x00000040;
 const ICC_TRACKBAR_CLASSES = 0x00000001;
 
 const INITCOMMONCONTROLSEX = struct({
-  dwSize: "uint",
-  dwICC: "uint",
+  dwSize: c_uint,
+  dwICC: c_uint,
 });
 
 try {
@@ -347,55 +349,55 @@ const DEBUG_LOG_INTERVAL = 1000;
 
 // Minimal structs
 const WNDCLASSEX = struct({
-  cbSize: "uint",
-  style: "uint",
-  lpfnWndProc: "pointer",
-  cbClsExtra: "int",
-  cbWndExtra: "int",
-  hInstance: "pointer",
-  hIcon: "pointer",
-  hCursor: "pointer",
-  hbrBackground: "pointer",
-  lpszMenuName: "pointer",
-  lpszClassName: "pointer",
-  hIconSm: "pointer",
+  cbSize: c_uint,
+  style: c_uint,
+  lpfnWndProc: c_void_p,
+  cbClsExtra: c_int,
+  cbWndExtra: c_int,
+  hInstance: c_void_p,
+  hIcon: c_void_p,
+  hCursor: c_void_p,
+  hbrBackground: c_void_p,
+  lpszMenuName: c_void_p,
+  lpszClassName: c_void_p,
+  hIconSm: c_void_p,
 });
 
 const MSG = struct({
-  hwnd: "pointer",
-  message: "uint",
-  wParam: "pointer",
-  lParam: "pointer",
-  time: "uint",
-  pt: struct({ x: "long", y: "long" }),
+  hwnd: c_void_p,
+  message: c_uint,
+  wParam: c_void_p,
+  lParam: c_void_p,
+  time: c_uint,
+  pt: struct({ x: c_long, y: c_long }),
 });
 
 const RECT = struct({
-  left: "long",
-  top: "long",
-  right: "long",
-  bottom: "long",
+  left: c_long,
+  top: c_long,
+  right: c_long,
+  bottom: c_long,
 });
 
 const SCROLLINFO = struct({
-  cbSize: "uint",
-  fMask: "uint",
-  nMin: "int",
-  nMax: "int",
-  nPage: "uint",
-  nPos: "int",
-  nTrackPos: "int",
+  cbSize: c_uint,
+  fMask: c_uint,
+  nMin: c_int,
+  nMax: c_int,
+  nPage: c_uint,
+  nPos: c_int,
+  nTrackPos: c_int,
 });
 
 const TOOLINFOW = struct({
-  cbSize: "uint",
-  uFlags: "uint",
-  hwnd: "pointer",
-  uId: "pointer",
+  cbSize: c_uint,
+  uFlags: c_uint,
+  hwnd: c_void_p,
+  uId: c_void_p,
   rect: RECT,
-  hinst: "pointer",
-  lpszText: "pointer",
-  lParam: "pointer",
+  hinst: c_void_p,
+  lpszText: c_void_p,
+  lParam: c_void_p,
 });
 
 // Global state for demo
@@ -728,12 +730,12 @@ function WindowProc(hwnd, msg, wParam, lParam) {
 
         // NMHDR struct: hwndFrom (pointer), idFrom (uint32), code (int32)
         const NMHDR = struct({
-          hwndFrom: "pointer",
-          idFrom: "uint",
-          code: "int",
+          hwndFrom: c_void_p,
+          idFrom: c_uint,
+          code: c_int,
         });
         // NMUPDOWN: NMHDR hdr; int iPos; int iDelta;
-        const NMUPDOWN = struct({ hdr: NMHDR, iPos: "int", iDelta: "int" });
+        const NMUPDOWN = struct({ hdr: NMHDR, iPos: c_int, iDelta: c_int });
 
         if (lparamNum && lparamNum !== 0) {
           try {
@@ -885,11 +887,11 @@ async function createControlsDemo() {
   windowClass.hbrBackground = 16; // COLOR_WINDOW + 1
   windowClass.lpszMenuName = null;
   windowClass.lpszClassName = className;
-  windowProcCallback = user32.callback(WindowProc, "pointer", [
-    "pointer",
-    "uint",
-    "pointer",
-    "pointer",
+  windowProcCallback = user32.callback(WindowProc, c_void_p, [
+    c_void_p,
+    c_uint,
+    c_void_p,
+    c_void_p,
   ]);
   windowClass.lpfnWndProc = windowProcCallback.pointer;
 

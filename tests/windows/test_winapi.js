@@ -14,6 +14,13 @@ import {
   create_unicode_buffer,
   wstring_at,
   writeValue,
+  c_void,
+  c_void_p,
+  c_uint16,
+  c_uint32,
+  c_int32,
+  c_size_t,
+  c_wchar_p,
 } from "node-ctypes";
 
 describe("Windows API", { skip: process.platform !== "win32" }, function () {
@@ -48,8 +55,8 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
 
   describe("GetModuleHandleW", function () {
     it("should get module handle for kernel32", function () {
-      const GetModuleHandleW = kernel32.func("GetModuleHandleW", "pointer", [
-        "wstring",
+      const GetModuleHandleW = kernel32.func("GetModuleHandleW", c_void_p, [
+        c_wchar_p,
       ]);
 
       const handle = GetModuleHandleW("kernel32.dll");
@@ -57,8 +64,8 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
     });
 
     it("should return null for non-existent module", function () {
-      const GetModuleHandleW = kernel32.func("GetModuleHandleW", "pointer", [
-        "wstring",
+      const GetModuleHandleW = kernel32.func("GetModuleHandleW", c_void_p, [
+        c_wchar_p,
       ]);
 
       const handle = GetModuleHandleW("NonExistentModule12345.dll");
@@ -70,7 +77,7 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
     it("should return current process ID", function () {
       const GetCurrentProcessId = kernel32.func(
         "GetCurrentProcessId",
-        "uint32",
+        c_uint32,
         [],
       );
 
@@ -84,7 +91,7 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
     it("should return current thread ID", function () {
       const GetCurrentThreadId = kernel32.func(
         "GetCurrentThreadId",
-        "uint32",
+        c_uint32,
         [],
       );
 
@@ -95,7 +102,7 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
 
   describe("GetTickCount", function () {
     it("should return system uptime in milliseconds", function () {
-      const GetTickCount = kernel32.func("GetTickCount", "uint32", []);
+      const GetTickCount = kernel32.func("GetTickCount", c_uint32, []);
 
       const tick1 = GetTickCount();
       assert(tick1 > 0, "Tick count should be positive");
@@ -114,17 +121,17 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
   describe("SYSTEMTIME Structure", function () {
     it("should get local time using GetLocalTime", function () {
       const SYSTEMTIME = struct({
-        wYear: "uint16",
-        wMonth: "uint16",
-        wDayOfWeek: "uint16",
-        wDay: "uint16",
-        wHour: "uint16",
-        wMinute: "uint16",
-        wSecond: "uint16",
-        wMilliseconds: "uint16",
+        wYear: c_uint16,
+        wMonth: c_uint16,
+        wDayOfWeek: c_uint16,
+        wDay: c_uint16,
+        wHour: c_uint16,
+        wMinute: c_uint16,
+        wSecond: c_uint16,
+        wMilliseconds: c_uint16,
       });
 
-      const GetLocalTime = kernel32.func("GetLocalTime", "void", ["pointer"]);
+      const GetLocalTime = kernel32.func("GetLocalTime", c_void, [c_void_p]);
 
       const st = SYSTEMTIME.create();
       GetLocalTime(st); // Pass struct object directly - _buffer extracted automatically!
@@ -141,16 +148,16 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
 
   describe("Memory Allocation", function () {
     it("should allocate and free memory with VirtualAlloc/VirtualFree", function () {
-      const VirtualAlloc = kernel32.func("VirtualAlloc", "pointer", [
-        "pointer",
-        "size_t",
-        "uint32",
-        "uint32",
+      const VirtualAlloc = kernel32.func("VirtualAlloc", c_void_p, [
+        c_void_p,
+        c_size_t,
+        c_uint32,
+        c_uint32,
       ]);
-      const VirtualFree = kernel32.func("VirtualFree", "int32", [
-        "pointer",
-        "size_t",
-        "uint32",
+      const VirtualFree = kernel32.func("VirtualFree", c_int32, [
+        c_void_p,
+        c_size_t,
+        c_uint32,
       ]);
 
       const MEM_COMMIT = 0x1000;
@@ -175,8 +182,8 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
     it("should handle wide string parameters and returns", function () {
       const GetEnvironmentVariableW = kernel32.func(
         "GetEnvironmentVariableW",
-        "uint32",
-        ["wstring", "pointer", "uint32"],
+        c_uint32,
+        [c_wchar_p, c_void_p, c_uint32],
       );
 
       const buf = create_unicode_buffer(1024);
@@ -192,11 +199,11 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
 
   describe("MessageBoxW", function () {
     it("should define MessageBoxW (without calling it)", function () {
-      const MessageBoxW = user32.func("MessageBoxW", "int32", [
-        "pointer",
-        "wstring",
-        "wstring",
-        "uint32",
+      const MessageBoxW = user32.func("MessageBoxW", c_int32, [
+        c_void_p,
+        c_wchar_p,
+        c_wchar_p,
+        c_uint32,
       ]);
 
       assert(typeof MessageBoxW === "function");
@@ -208,14 +215,14 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
 
   describe("GetComputerNameW", function () {
     it("should get computer name", function () {
-      const GetComputerNameW = kernel32.func("GetComputerNameW", "int32", [
-        "pointer",
-        "pointer",
+      const GetComputerNameW = kernel32.func("GetComputerNameW", c_int32, [
+        c_void_p,
+        c_void_p,
       ]);
 
       const buf = create_unicode_buffer(256);
       const sizeBuf = create_string_buffer(4);
-      writeValue(sizeBuf, "uint32", 256);
+      writeValue(sizeBuf, c_uint32, 256);
 
       const result = GetComputerNameW(buf, sizeBuf);
       assert(result !== 0, "GetComputerNameW should succeed");
@@ -227,8 +234,8 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
 
   describe("errcheck with Windows API", function () {
     it("should use errcheck to validate return values", function () {
-      const GetModuleHandleW = kernel32.func("GetModuleHandleW", "pointer", [
-        "wstring",
+      const GetModuleHandleW = kernel32.func("GetModuleHandleW", c_void_p, [
+        c_wchar_p,
       ]);
 
       let errcheckCalled = false;

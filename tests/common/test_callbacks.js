@@ -31,32 +31,34 @@ describe("Callbacks", function () {
       // Create array of integers using create_string_buffer like the working test
       const arr = ctypes.create_string_buffer(5 * 4);
       const values = [5, 2, 8, 1, 9];
-      values.forEach((v, i) => ctypes.writeValue(arr, "int32", v, i * 4));
+      values.forEach((v, i) =>
+        ctypes.writeValue(arr, ctypes.c_int32, v, i * 4),
+      );
 
       // Create comparison callback
       const compare = libc.callback(
         (a, b) => {
-          const aVal = ctypes.readValue(a, "int32");
-          const bVal = ctypes.readValue(b, "int32");
+          const aVal = ctypes.readValue(a, ctypes.c_int32);
+          const bVal = ctypes.readValue(b, ctypes.c_int32);
           return aVal - bVal;
         },
-        "int32",
-        ["pointer", "pointer"],
+        ctypes.c_int32,
+        [ctypes.c_void_p, ctypes.c_void_p],
       );
 
       // Get qsort function
-      let qsort = libc.func("qsort", "void", [
-        "pointer",
-        "size_t",
-        "size_t",
-        "pointer",
+      let qsort = libc.func("qsort", ctypes.c_void, [
+        ctypes.c_void_p,
+        ctypes.c_size_t,
+        ctypes.c_size_t,
+        ctypes.c_void_p,
       ]);
       if (!qsort || qsort.pointer === 0n) {
-        qsort = libc.func("_qsort", "void", [
-          "pointer",
-          "size_t",
-          "size_t",
-          "pointer",
+        qsort = libc.func("_qsort", ctypes.c_void, [
+          ctypes.c_void_p,
+          ctypes.c_size_t,
+          ctypes.c_size_t,
+          ctypes.c_void_p,
         ]);
       }
 
@@ -66,7 +68,7 @@ describe("Callbacks", function () {
       // Verify sorted order
       const sorted = [];
       for (let i = 0; i < 5; i++) {
-        sorted.push(ctypes.readValue(arr, "int32", i * 4));
+        sorted.push(ctypes.readValue(arr, ctypes.c_int32, i * 4));
       }
 
       assert.deepStrictEqual(sorted, [1, 2, 5, 8, 9]);
@@ -76,25 +78,27 @@ describe("Callbacks", function () {
       // Create array of integers using create_string_buffer
       const arr = ctypes.create_string_buffer(4 * 4);
       const values = [3, 1, 4, 2];
-      values.forEach((v, i) => ctypes.writeValue(arr, "int32", v, i * 4));
+      values.forEach((v, i) =>
+        ctypes.writeValue(arr, ctypes.c_int32, v, i * 4),
+      );
 
       // Create reverse comparison callback
       const compareReverse = libc.callback(
         (a, b) => {
-          const aVal = ctypes.readValue(a, "int32");
-          const bVal = ctypes.readValue(b, "int32");
+          const aVal = ctypes.readValue(a, ctypes.c_int32);
+          const bVal = ctypes.readValue(b, ctypes.c_int32);
           return bVal - aVal; // Reverse order
         },
-        "int32",
-        ["pointer", "pointer"],
+        ctypes.c_int32,
+        [ctypes.c_void_p, ctypes.c_void_p],
       );
 
       // Get qsort function
-      const qsort = libc.func("qsort", "void", [
-        "pointer",
-        "size_t",
-        "size_t",
-        "pointer",
+      const qsort = libc.func("qsort", ctypes.c_void_p, [
+        ctypes.c_void_p,
+        ctypes.c_size_t,
+        ctypes.c_size_t,
+        ctypes.c_void_p,
       ]);
 
       // Sort the array in reverse
@@ -103,7 +107,7 @@ describe("Callbacks", function () {
       // Verify reverse sorted order
       const sorted = [];
       for (let i = 0; i < 4; i++) {
-        sorted.push(ctypes.readValue(arr, "int32", i * 4));
+        sorted.push(ctypes.readValue(arr, ctypes.c_int32, i * 4));
       }
 
       assert.deepStrictEqual(sorted, [4, 3, 2, 1]);
@@ -113,31 +117,33 @@ describe("Callbacks", function () {
       // Test callback with float comparison
       const arr = ctypes.create_string_buffer(3 * 4);
       const values = [3.14, 1.41, 2.71];
-      values.forEach((v, i) => ctypes.writeValue(arr, "float", v, i * 4));
+      values.forEach((v, i) =>
+        ctypes.writeValue(arr, ctypes.c_float, v, i * 4),
+      );
 
       const compareFloat = libc.callback(
         (a, b) => {
-          const aVal = ctypes.readValue(a, "float");
-          const bVal = ctypes.readValue(b, "float");
+          const aVal = ctypes.readValue(a, ctypes.c_float);
+          const bVal = ctypes.readValue(b, ctypes.c_float);
           if (aVal < bVal) return -1;
           if (aVal > bVal) return 1;
           return 0;
         },
-        "int32",
-        ["pointer", "pointer"],
+        ctypes.c_int32,
+        [ctypes.c_void_p, ctypes.c_void_p],
       );
 
-      const qsort = libc.func("qsort", "void", [
-        "pointer",
-        "size_t",
-        "size_t",
-        "pointer",
+      const qsort = libc.func("qsort", ctypes.c_void_p, [
+        ctypes.c_void_p,
+        ctypes.c_size_t,
+        ctypes.c_size_t,
+        ctypes.c_void_p,
       ]);
       qsort(arr, 3, 4, compareFloat.pointer);
 
       const sorted = [];
       for (let i = 0; i < 3; i++) {
-        sorted.push(ctypes.readValue(arr, "float", i * 4));
+        sorted.push(ctypes.readValue(arr, ctypes.c_float, i * 4));
       }
 
       // Should be sorted: [1.41, 2.71, 3.14]
@@ -149,14 +155,14 @@ describe("Callbacks", function () {
 
   describe("Callback Properties", function () {
     it("should have pointer property", function () {
-      const callback = libc.callback(() => 42, "int32", []);
+      const callback = libc.callback(() => 42, ctypes.c_int32, []);
 
       assert(typeof callback.pointer === "bigint");
       assert(callback.pointer > 0n);
     });
 
     it("should have release method", function () {
-      const callback = libc.callback(() => 42, "int32", []);
+      const callback = libc.callback(() => 42, ctypes.c_int32, []);
 
       assert(typeof callback.release === "function");
 

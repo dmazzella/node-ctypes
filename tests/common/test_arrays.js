@@ -10,14 +10,14 @@ import * as ctypes from "node-ctypes";
 describe("Arrays", function () {
   describe("Array Creation", function () {
     it("should create fixed-size arrays", function () {
-      const IntArray5 = ctypes.array("int32", 5);
+      const IntArray5 = ctypes.array(ctypes.c_int32, 5);
 
       assert.strictEqual(IntArray5.getSize(), 20); // 5 * 4 bytes
       assert.strictEqual(IntArray5.getLength(), 5);
     });
 
     it("should initialize arrays with values", function () {
-      const IntArray5 = ctypes.array("int32", 5);
+      const IntArray5 = ctypes.array(ctypes.c_int32, 5);
       const arr = IntArray5.create([1, 2, 3, 4, 5]);
 
       assert.strictEqual(arr[0], 1);
@@ -25,7 +25,7 @@ describe("Arrays", function () {
     });
 
     it("should support partial initialization", function () {
-      const IntArray5 = ctypes.array("int32", 5);
+      const IntArray5 = ctypes.array(ctypes.c_int32, 5);
       const arr = IntArray5.create([1, 2, 3]); // Rest filled with 0
 
       assert.strictEqual(arr[0], 1);
@@ -37,7 +37,7 @@ describe("Arrays", function () {
 
   describe("Array Indexing", function () {
     it("should support Python-like indexing for reading", function () {
-      const IntArray5 = ctypes.array("int32", 5);
+      const IntArray5 = ctypes.array(ctypes.c_int32, 5);
       const arr = IntArray5.create([10, 20, 30, 40, 50]);
 
       assert.strictEqual(arr[0], 10);
@@ -48,7 +48,7 @@ describe("Arrays", function () {
     });
 
     it("should support Python-like indexing for writing", function () {
-      const IntArray5 = ctypes.array("int32", 5);
+      const IntArray5 = ctypes.array(ctypes.c_int32, 5);
       const arr = IntArray5.create([1, 2, 3, 4, 5]);
 
       arr[0] = 100;
@@ -59,7 +59,7 @@ describe("Arrays", function () {
     });
 
     it("should handle float arrays", function () {
-      const FloatArray3 = ctypes.array("float", 3);
+      const FloatArray3 = ctypes.array(ctypes.c_float, 3);
       const arr = FloatArray3.create([1.5, 2.5, 3.5]);
 
       assert(Math.abs(arr[0] - 1.5) < 0.0001);
@@ -73,7 +73,7 @@ describe("Arrays", function () {
 
   describe("Array Iteration", function () {
     it("should support for...of iteration", function () {
-      const IntArray5 = ctypes.array("int32", 5);
+      const IntArray5 = ctypes.array(ctypes.c_int32, 5);
       const arr = IntArray5.create([1, 2, 3, 4, 5]);
 
       const values = [];
@@ -85,7 +85,7 @@ describe("Arrays", function () {
     });
 
     it("should support spread operator", function () {
-      const IntArray3 = ctypes.array("int32", 3);
+      const IntArray3 = ctypes.array(ctypes.c_int32, 3);
       const arr = IntArray3.create([10, 20, 30]);
 
       const values = [...arr];
@@ -95,10 +95,10 @@ describe("Arrays", function () {
 
   describe("Arrays in Structs", function () {
     it("should support array fields in structs", function () {
-      const IntArray10 = ctypes.array("int32", 10);
+      const IntArray10 = ctypes.array(ctypes.c_int32, 10);
 
       const Data = ctypes.struct({
-        count: "int32",
+        count: ctypes.c_int32,
         values: IntArray10,
       });
 
@@ -115,7 +115,7 @@ describe("Arrays", function () {
     });
 
     it("should allow modifying array elements in structs", function () {
-      const IntArray5 = ctypes.array("int32", 5);
+      const IntArray5 = ctypes.array(ctypes.c_int32, 5);
 
       const Data = ctypes.struct({
         values: IntArray5,
@@ -135,7 +135,7 @@ describe("Arrays", function () {
 
   describe("Different Array Types", function () {
     it("should support uint8 arrays", function () {
-      const ByteArray = ctypes.array("uint8", 4);
+      const ByteArray = ctypes.array(ctypes.c_uint8, 4);
       const arr = ByteArray.create([0xff, 0xab, 0xcd, 0xef]);
 
       assert.strictEqual(arr[0], 0xff);
@@ -145,7 +145,7 @@ describe("Arrays", function () {
     });
 
     it("should support double arrays", function () {
-      const DoubleArray = ctypes.array("double", 3);
+      const DoubleArray = ctypes.array(ctypes.c_double, 3);
       const arr = DoubleArray.create([3.14159, 2.71828, 1.61803]);
 
       assert(Math.abs(arr[0] - 3.14159) < 0.00001);
@@ -156,7 +156,7 @@ describe("Arrays", function () {
 
   describe("Array Edge Cases", function () {
     it("should handle empty array creation", function () {
-      const IntArray5 = ctypes.array("int32", 5);
+      const IntArray5 = ctypes.array(ctypes.c_int32, 5);
       const arr = IntArray5.create(); // All zeros
 
       assert.strictEqual(arr[0], 0);
@@ -164,7 +164,7 @@ describe("Arrays", function () {
     });
 
     it("should handle bounds correctly", function () {
-      const IntArray3 = ctypes.array("int32", 3);
+      const IntArray3 = ctypes.array(ctypes.c_int32, 3);
       const arr = IntArray3.create([1, 2, 3]);
 
       // Valid indices
@@ -179,7 +179,7 @@ describe("Arrays", function () {
 
   describe("String as Byte Arrays", function () {
     it("should create arrays from strings", function () {
-      const CharArray = ctypes.array("int8", 100);
+      const CharArray = ctypes.array(ctypes.c_int8, 100);
       const arr = CharArray.create("Hello, World!");
 
       // Should contain ASCII values

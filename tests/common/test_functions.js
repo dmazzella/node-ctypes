@@ -28,7 +28,7 @@ describe("Functions and Callbacks", function () {
 
   describe("Basic Function Calls", function () {
     it("should call abs() function", function () {
-      const abs = libc.func("abs", "int32", ["int32"]);
+      const abs = libc.func("abs", ctypes.c_int32, [ctypes.c_int32]);
 
       assert.strictEqual(abs(-42), 42);
       assert.strictEqual(abs(42), 42);
@@ -46,10 +46,10 @@ describe("Functions and Callbacks", function () {
 
   describe("Functions with Multiple Arguments", function () {
     it("should call memcpy()", function () {
-      const memcpy = libc.func("memcpy", "pointer", [
-        "pointer",
-        "pointer",
-        "size_t",
+      const memcpy = libc.func("memcpy", ctypes.c_void_p, [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_size_t,
       ]);
 
       const src = ctypes.create_string_buffer(10);
@@ -57,7 +57,7 @@ describe("Functions and Callbacks", function () {
 
       // Fill source with pattern
       for (let i = 0; i < 10; i++) {
-        ctypes.writeValue(src, "uint8", i * 10, i);
+        ctypes.writeValue(src, ctypes.c_uint8, i * 10, i);
       }
 
       // Copy
@@ -66,8 +66,8 @@ describe("Functions and Callbacks", function () {
       // Verify
       for (let i = 0; i < 10; i++) {
         assert.strictEqual(
-          ctypes.readValue(dst, "uint8", i),
-          ctypes.readValue(src, "uint8", i),
+          ctypes.readValue(dst, ctypes.c_uint8, i),
+          ctypes.readValue(src, ctypes.c_uint8, i),
         );
       }
     });
@@ -144,28 +144,30 @@ describe("Functions and Callbacks", function () {
 
   describe("Callbacks", { skip: process.platform !== "win32" }, function () {
     it("should create and use callback with qsort", function () {
-      const qsort = libc.func("qsort", "void", [
-        "pointer",
-        "size_t",
-        "size_t",
-        "pointer",
+      const qsort = libc.func("qsort", ctypes.c_void, [
+        ctypes.c_void_p,
+        ctypes.c_size_t,
+        ctypes.c_size_t,
+        ctypes.c_void_p,
       ]);
 
       // Create comparison function
       const compare = ctypes.callback(
         (a, b) => {
-          const valA = ctypes.readValue(a, "int32");
-          const valB = ctypes.readValue(b, "int32");
+          const valA = ctypes.readValue(a, ctypes.c_int32);
+          const valB = ctypes.readValue(b, ctypes.c_int32);
           return valA - valB;
         },
-        "int32",
-        ["pointer", "pointer"],
+        ctypes.c_int32,
+        [ctypes.c_void_p, ctypes.c_void_p],
       );
 
       // Create array to sort
       const arr = ctypes.create_string_buffer(5 * 4);
       const values = [5, 2, 8, 1, 9];
-      values.forEach((v, i) => ctypes.writeValue(arr, "int32", v, i * 4));
+      values.forEach((v, i) =>
+        ctypes.writeValue(arr, ctypes.c_int32, v, i * 4),
+      );
 
       // Sort
       qsort(arr, 5, 4, compare.pointer);
@@ -173,7 +175,7 @@ describe("Functions and Callbacks", function () {
       // Verify sorted
       const sorted = [];
       for (let i = 0; i < 5; i++) {
-        sorted.push(ctypes.readValue(arr, "int32", i * 4));
+        sorted.push(ctypes.readValue(arr, ctypes.c_int32, i * 4));
       }
       assert.deepStrictEqual(sorted, [1, 2, 5, 8, 9]);
 
@@ -182,12 +184,17 @@ describe("Functions and Callbacks", function () {
 
     it("should handle callback with different signatures", function () {
       // Callback that takes two ints and returns int
-      const cb1 = ctypes.callback((a, b) => a + b, "int32", ["int32", "int32"]);
+      const cb1 = ctypes.callback((a, b) => a + b, ctypes.c_int32, [
+        ctypes.c_int32,
+        ctypes.c_int32,
+      ]);
       assert(cb1.pointer !== 0n);
       cb1.release();
 
       // Callback that takes pointer and returns void
-      const cb2 = ctypes.callback((ptr) => {}, "void", ["pointer"]);
+      const cb2 = ctypes.callback((ptr) => {}, ctypes.c_void, [
+        ctypes.c_void_p,
+      ]);
       assert(cb2.pointer !== 0n);
       cb2.release();
     });
@@ -200,7 +207,10 @@ describe("Functions and Callbacks", function () {
       it("should handle functions with variable arguments", function () {
         // Define sprintf with only fixed parameters
         // node-ctypes auto-detects variadic arguments!
-        const sprintf = libc.func("sprintf", "int32", ["pointer", "string"]);
+        const sprintf = libc.func("sprintf", ctypes.c_int32, [
+          ctypes.c_void_p,
+          ctypes.c_char_p,
+        ]);
 
         const buf = ctypes.create_string_buffer(256);
 
@@ -233,8 +243,10 @@ describe("Functions and Callbacks", function () {
 
   describe("Pointer Returns", function () {
     it("should handle functions returning pointers", function () {
-      const malloc = libc.func("malloc", ctypes.c_void_p, [ctypes.c_size_t]);
-      const free = libc.func("free", "void", [ctypes.c_void_p]);
+      const malloc = libc.func("malloc", ctypes.c_void_p, [
+        ctypes.c_size_t,
+      ]);
+      const free = libc.func("free", ctypes.c_void, [ctypes.c_void_p]);
 
       const ptr = malloc(1024);
       assert(ptr !== 0n, "malloc should return non-null pointer");

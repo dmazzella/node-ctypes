@@ -11,8 +11,8 @@ describe("Structs and Unions", function () {
   describe("Basic Struct", function () {
     it("should create and use simple struct", function () {
       const Point = ctypes.struct({
-        x: "int32",
-        y: "int32",
+        x: ctypes.c_int32,
+        y: ctypes.c_int32,
       });
 
       const p = Point.create({ x: 10, y: 20 });
@@ -25,8 +25,8 @@ describe("Structs and Unions", function () {
 
     it("should have correct size and alignment", function () {
       const Point = ctypes.struct({
-        x: "int32",
-        y: "int32",
+        x: ctypes.c_int32,
+        y: ctypes.c_int32,
       });
 
       assert.strictEqual(Point.size, 8);
@@ -36,14 +36,14 @@ describe("Structs and Unions", function () {
   describe("Nested Structs", function () {
     it("should support nested structs with dot notation", function () {
       const Point = ctypes.struct({
-        x: "int32",
-        y: "int32",
+        x: ctypes.c_int32,
+        y: ctypes.c_int32,
       });
 
       const Rectangle = ctypes.struct({
         topLeft: Point,
         bottomRight: Point,
-        color: "uint32",
+        color: ctypes.c_uint32,
       });
 
       const rect = Rectangle.create({
@@ -63,8 +63,8 @@ describe("Structs and Unions", function () {
   describe("Unions", function () {
     it("should create and use unions", function () {
       const IntOrFloat = ctypes.union({
-        i: "int32",
-        f: "float",
+        i: ctypes.c_int32,
+        f: ctypes.c_float,
       });
 
       const u = IntOrFloat.create();
@@ -81,8 +81,8 @@ describe("Structs and Unions", function () {
 
     it("should have size of largest member", function () {
       const IntOrDouble = ctypes.union({
-        i: "int32", // 4 bytes
-        d: "double", // 8 bytes
+        i: ctypes.c_int32, // 4 bytes
+        d: ctypes.c_double, // 8 bytes
       });
 
       assert.strictEqual(IntOrDouble.size, 8);
@@ -92,10 +92,10 @@ describe("Structs and Unions", function () {
   describe("Bit Fields", function () {
     it("should support bit fields", function () {
       const Flags = ctypes.struct({
-        enabled: ctypes.bitfield("uint32", 1),
-        mode: ctypes.bitfield("uint32", 3),
-        priority: ctypes.bitfield("uint32", 4),
-        reserved: ctypes.bitfield("uint32", 24),
+        enabled: ctypes.bitfield(ctypes.c_uint32, 1),
+        mode: ctypes.bitfield(ctypes.c_uint32, 3),
+        priority: ctypes.bitfield(ctypes.c_uint32, 4),
+        reserved: ctypes.bitfield(ctypes.c_uint32, 24),
       });
 
       const f = Flags.create({
@@ -111,7 +111,7 @@ describe("Structs and Unions", function () {
 
     it("should handle bit field overflow correctly", function () {
       const Flags = ctypes.struct({
-        value: ctypes.bitfield("uint32", 3), // Max 7 (0b111)
+        value: ctypes.bitfield(ctypes.c_uint32, 3), // Max 7 (0b111)
       });
 
       const f = Flags.create({ value: 15 }); // 0b1111 - overflow
@@ -122,12 +122,12 @@ describe("Structs and Unions", function () {
   describe("Anonymous Fields", function () {
     it("should support anonymous union fields", function () {
       const Inner = ctypes.union({
-        i: "int32",
-        f: "float",
+        i: ctypes.c_int32,
+        f: ctypes.c_float,
       });
 
       const Outer = ctypes.struct({
-        tag: "uint32",
+        tag: ctypes.c_uint32,
         data: { type: Inner, anonymous: true },
       });
 
@@ -140,14 +140,14 @@ describe("Structs and Unions", function () {
 
     it("should support nested anonymous structures", function () {
       const Coords = ctypes.struct({
-        x: "int32",
-        y: "int32",
+        x: ctypes.c_int32,
+        y: ctypes.c_int32,
       });
 
       const Entity = ctypes.struct({
-        id: "uint32",
+        id: ctypes.c_uint32,
         pos: { type: Coords, anonymous: true },
-        health: "int32",
+        health: ctypes.c_int32,
       });
 
       const ent = Entity.create({
@@ -167,16 +167,16 @@ describe("Structs and Unions", function () {
   describe("Packed Structs", function () {
     it("should support packed structs", function () {
       const Unpacked = ctypes.struct({
-        a: "uint8",
-        b: "uint32",
-        c: "uint8",
+        a: ctypes.c_uint8,
+        b: ctypes.c_uint32,
+        c: ctypes.c_uint8,
       });
 
       const Packed = ctypes.struct(
         {
-          a: "uint8",
-          b: "uint32",
-          c: "uint8",
+          a: ctypes.c_uint8,
+          b: ctypes.c_uint32,
+          c: ctypes.c_uint8,
         },
         { packed: true },
       );
@@ -191,10 +191,10 @@ describe("Structs and Unions", function () {
 
   describe("Struct Arrays", function () {
     it("should support arrays in struct fields", function () {
-      const IntArray10 = ctypes.array("int32", 10);
+      const IntArray10 = ctypes.array(ctypes.c_int32, 10);
 
       const Data = ctypes.struct({
-        count: "int32",
+        count: ctypes.c_int32,
         values: IntArray10,
       });
 
@@ -215,8 +215,8 @@ describe("Structs and Unions", function () {
   describe("toObject() and fromObject()", function () {
     it("should convert struct to/from JavaScript object", function () {
       const Point = ctypes.struct({
-        x: "int32",
-        y: "int32",
+        x: ctypes.c_int32,
+        y: ctypes.c_int32,
       });
 
       const Rectangle = ctypes.struct({
@@ -256,9 +256,9 @@ describe("Structs and Unions", function () {
     });
 
     it("should support anonymous nested fields via static _anonymous_", function () {
-      const Inner = ctypes.struct({ a: "int32", b: "int32" });
+      const Inner = ctypes.struct({ a: ctypes.c_int32, b: ctypes.c_int32 });
       class OuterCls extends ctypes.Structure {
-        static _fields_ = { inner: Inner, tag: "int32" };
+        static _fields_ = { inner: Inner, tag: ctypes.c_int32 };
         static _anonymous_ = ["inner"];
       }
 
@@ -271,8 +271,8 @@ describe("Structs and Unions", function () {
     it("should support Union subclassing", function () {
       class UCls extends ctypes.Union {
         static _fields_ = [
-          ["i", "int32"],
-          ["f", "float"],
+          ["i", ctypes.c_int32],
+          ["f", ctypes.c_float],
         ];
       }
       const u = UCls.create({ f: 2.5 });

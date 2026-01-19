@@ -83,7 +83,7 @@ console.log(
 );
 
 {
-  const ctypes_abs = ctypes_libc.func("abs", "int32", ["int32"]);
+  const ctypes_abs = ctypes_libc.func("abs", ctypes.c_int32, [ctypes.c_int32]);
   const koffi_abs = koffi_libc.func("int abs(int)");
 
   const iterations = 1_000_000;
@@ -124,7 +124,9 @@ console.log(
 );
 
 {
-  const ctypes_strlen = ctypes_libc.func("strlen", "size_t", ["string"]);
+  const ctypes_strlen = ctypes_libc.func("strlen", ctypes.c_size_t, [
+    ctypes.c_char_p,
+  ]);
   const koffi_strlen = koffi_libc.func("size_t strlen(const char*)");
 
   const testString = "Hello, World! This is a test string for benchmarking.";
@@ -166,7 +168,9 @@ console.log(
 );
 
 {
-  const ctypes_sqrt = ctypes_libc.func("sqrt", "double", ["double"]);
+  const ctypes_sqrt = ctypes_libc.func("sqrt", ctypes.c_double, [
+    ctypes.c_double,
+  ]);
   const koffi_sqrt = koffi_libc.func("double sqrt(double)");
 
   const iterations = 500_000;
@@ -213,7 +217,11 @@ console.log(
 );
 
 if (isWindows) {
-  const ctypes_GetTickCount = ctypes_system.func("GetTickCount", "uint32", []);
+  const ctypes_GetTickCount = ctypes_system.func(
+    "GetTickCount",
+    ctypes.c_uint32,
+    [],
+  );
   const koffi_GetTickCount = koffi_system.func("unsigned long GetTickCount()");
 
   const iterations = 1_000_000;
@@ -238,7 +246,9 @@ if (isWindows) {
 
   benchmark("GetTickCount()", ctypes_time, koffi_time, iterations);
 } else {
-  const ctypes_time = ctypes_libc.func("time", "int64", ["pointer"]);
+  const ctypes_time = ctypes_libc.func("time", ctypes.c_int64, [
+    ctypes.c_void_p,
+  ]);
   const koffi_time = koffi_libc.func("long time(void*)");
 
   const iterations = 1_000_000;
@@ -279,10 +289,10 @@ console.log(
 );
 
 {
-  const ctypes_memset = ctypes_libc.func("memset", "pointer", [
-    "pointer",
-    "int32",
-    "size_t",
+  const ctypes_memset = ctypes_libc.func("memset", ctypes.c_void_p, [
+    ctypes.c_void_p,
+    ctypes.c_int32,
+    ctypes.c_size_t,
   ]);
   const koffi_memset = koffi_libc.func("void* memset(void*, int, size_t)");
 
@@ -328,9 +338,9 @@ console.log(
 
 {
   // node-ctypes: variadic args auto-detected
-  const ctypes_sprintf = ctypes_libc.func("sprintf", "int32", [
-    "pointer",
-    "string",
+  const ctypes_sprintf = ctypes_libc.func("sprintf", ctypes.c_int32, [
+    ctypes.c_void_p,
+    ctypes.c_char_p,
   ]);
 
   // koffi: variadic args must be declared explicitly in signature
@@ -383,8 +393,8 @@ console.log(
 {
   // Define struct in node-ctypes
   const Point_ctypes = ctypes.struct({
-    x: "int32",
-    y: "int32",
+    x: ctypes.c_int32,
+    y: ctypes.c_int32,
   });
 
   // Define struct in koffi
@@ -498,7 +508,7 @@ console.log(
   const rawAbs = rawLib.func("abs", "int32", ["int32"]);
 
   const wrappedLib = new ctypes.CDLL(LIBC);
-  const wrappedAbs = wrappedLib.func("abs", "int32", ["int32"]);
+  const wrappedAbs = wrappedLib.func("abs", ctypes.c_int32, [ctypes.c_int32]);
 
   const iterations = 1_000_000;
 

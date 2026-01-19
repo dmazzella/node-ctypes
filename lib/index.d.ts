@@ -66,6 +66,7 @@ export interface Types {
   readonly long: CType;
   readonly ulong: CType;
   // Python-style aliases
+  readonly c_void: CType;
   readonly c_int8: CType;
   readonly c_uint8: CType;
   readonly c_int16: CType;
@@ -489,6 +490,7 @@ export function WinError(code?: number): Error & { winerror: number };
 // =============================================================================
 
 export const types: Types;
+export const c_void: CType;
 export const c_int: CType;
 export const c_uint: CType;
 export const c_int8: CType;

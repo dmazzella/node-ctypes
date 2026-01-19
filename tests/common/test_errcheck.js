@@ -101,7 +101,10 @@ describe("errcheck (Python ctypes compatible)", function () {
     { skip: process.platform === "win32" },
     function () {
       it("should check errno and throw on -1", function () {
-        const open = libc.func("open", "int32", ["string", "int32"]);
+        const open = libc.func("open", ctypes.c_int32, [
+          ctypes.c_char_p,
+          ctypes.c_int32,
+        ]);
 
         // Pattern standard: controlla -1 e lancia con errno
         open.errcheck = function (result, func, args) {
@@ -139,7 +142,9 @@ describe("errcheck (Python ctypes compatible)", function () {
     function () {
       it("should check GetLastError and throw on failure", function () {
         const kernel32 = new ctypes.WinDLL("kernel32.dll");
-        const DeleteFileW = kernel32.func("DeleteFileW", "bool", ["wstring"]);
+        const DeleteFileW = kernel32.func("DeleteFileW", ctypes.c_bool, [
+          ctypes.c_wchar_p,
+        ]);
 
         // Pattern Windows: controlla FALSE e usa GetLastError
         DeleteFileW.errcheck = function (result, func, args) {
@@ -169,7 +174,7 @@ describe("errcheck (Python ctypes compatible)", function () {
 
   describe("errcheck with pointer returns", function () {
     it("should validate pointer returns", function () {
-      const malloc = libc.func("malloc", "pointer", ["size_t"]);
+      const malloc = libc.func("malloc", ctypes.c_void_p, [ctypes.c_size_t]);
 
       // Valida che malloc non ritorni NULL
       malloc.errcheck = function (result, func, args) {
@@ -184,14 +189,14 @@ describe("errcheck (Python ctypes compatible)", function () {
       assert.notStrictEqual(ptr, 0n);
 
       // Cleanup
-      const free = libc.func("free", "void", ["pointer"]);
+      const free = libc.func("free", ctypes.c_void, [ctypes.c_void_p]);
       free(ptr);
     });
   });
 
   describe("errcheck parameters", function () {
     it("should receive correct parameters", function () {
-      const abs = libc.func("abs", "int32", ["int32"]);
+      const abs = libc.func("abs", ctypes.c_int32, [ctypes.c_int32]);
 
       let capturedResult = null;
       let capturedFunc = null;
@@ -215,10 +220,10 @@ describe("errcheck (Python ctypes compatible)", function () {
     });
 
     it("should work with multiple arguments", function () {
-      const memcpy = libc.func("memcpy", "pointer", [
-        "pointer",
-        "pointer",
-        "size_t",
+      const memcpy = libc.func("memcpy", ctypes.c_void_p, [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_size_t,
       ]);
 
       let argCount = 0;
@@ -263,7 +268,10 @@ describe("errcheck (Python ctypes compatible)", function () {
     { skip: process.platform === "win32" },
     function () {
       it("should work with variadic functions", function () {
-        const sprintf = libc.func("sprintf", "int32", ["pointer", "string"]);
+        const sprintf = libc.func("sprintf", ctypes.c_int32, [
+          ctypes.c_void_p,
+          ctypes.c_char_p,
+        ]);
 
         let callCount = 0;
 
@@ -277,7 +285,7 @@ describe("errcheck (Python ctypes compatible)", function () {
         };
 
         const buf = ctypes.create_string_buffer(100);
-        sprintf(buf, "Number: %d", "int32", 42);
+        sprintf(buf, "Number: %d", ctypes.c_int32, 42);
 
         assert.strictEqual(callCount, 1);
       });
@@ -289,10 +297,10 @@ describe("errcheck (Python ctypes compatible)", function () {
     { skip: process.platform !== "win32" },
     function () {
       it("should work with variadic functions", function () {
-        const _snprintf = libc.func("_snprintf", "int32", [
-          "pointer",
-          "size_t",
-          "string",
+        const _snprintf = libc.func("_snprintf", ctypes.c_int32, [
+          ctypes.c_void_p,
+          ctypes.c_size_t,
+          ctypes.c_char_p,
         ]);
 
         let callCount = 0;
@@ -307,7 +315,7 @@ describe("errcheck (Python ctypes compatible)", function () {
         };
 
         const buf = ctypes.create_string_buffer(100);
-        _snprintf(buf, 100, "Number: %d", "int32", 42);
+        _snprintf(buf, 100, "Number: %d", ctypes.c_int32, 42);
 
         assert.strictEqual(callCount, 1);
       });
@@ -324,7 +332,7 @@ describe("errcheck (Python ctypes compatible)", function () {
       //
       // func.errcheck = errcheck
 
-      const testFunc = libc.func("abs", "int32", ["int32"]);
+      const testFunc = libc.func("abs", ctypes.c_int32, [ctypes.c_int32]);
 
       // Stesso pattern in JavaScript
       testFunc.errcheck = function (result, func, args) {

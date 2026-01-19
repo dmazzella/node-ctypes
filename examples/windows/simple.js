@@ -8,6 +8,12 @@ import {
   struct,
   create_unicode_buffer,
   GetLastError,
+  c_int,
+  c_uint,
+  c_long,
+  c_short,
+  c_void,
+  c_void_p
 } from "node-ctypes";
 
 // Windows API constants
@@ -27,35 +33,35 @@ const IDOK = 1;
 
 // Windows structures
 const WNDCLASSEX = struct({
-  cbSize: "uint",
-  style: "uint",
-  lpfnWndProc: "pointer",
-  cbClsExtra: "int",
-  cbWndExtra: "int",
-  hInstance: "pointer",
-  hIcon: "pointer",
-  hCursor: "pointer",
-  hbrBackground: "pointer",
-  lpszMenuName: "pointer",
-  lpszClassName: "pointer",
-  hIconSm: "pointer",
+  cbSize: c_uint,
+  style: c_uint,
+  lpfnWndProc: c_void_p,
+  cbClsExtra: c_int,
+  cbWndExtra: c_int,
+  hInstance: c_void_p,
+  hIcon: c_void_p,
+  hCursor: c_void_p,
+  hbrBackground: c_void_p,
+  lpszMenuName: c_void_p,
+  lpszClassName: c_void_p,
+  hIconSm: c_void_p,
 });
 
 const MSG = struct({
-  hwnd: "pointer",
-  message: "uint",
-  wParam: "pointer", // Use pointer for 64-bit values
-  lParam: "pointer",
-  time: "uint",
-  pt: struct({ x: "long", y: "long" }),
+  hwnd: c_void_p,
+  message: c_uint,
+  wParam: c_void_p, // Use pointer for 64-bit values
+  lParam: c_void_p,
+  time: c_uint,
+  pt: struct({ x: c_long, y: c_long }),
 });
 
-const POINT = struct({ x: "long", y: "long" });
+const POINT = struct({ x: c_long, y: c_long });
 const RECT = struct({
-  left: "long",
-  top: "long",
-  right: "long",
-  bottom: "long",
+  left: c_long,
+  top: c_long,
+  right: c_long,
+  bottom: c_long,
 });
 
 // Load Windows libraries
@@ -63,49 +69,49 @@ const user32 = new WinDLL("user32.dll");
 const kernel32 = new WinDLL("kernel32.dll");
 
 // Get required functions
-const RegisterClassExW = user32.func("RegisterClassExW", "short", ["pointer"]);
-const CreateWindowExW = user32.func("CreateWindowExW", "pointer", [
-  "uint",
-  "pointer",
-  "pointer",
-  "uint",
-  "int",
-  "int",
-  "int",
-  "int",
-  "pointer",
-  "pointer",
-  "pointer",
-  "pointer",
+const RegisterClassExW = user32.func("RegisterClassExW", c_short, [c_void_p]);
+const CreateWindowExW = user32.func("CreateWindowExW", c_void_p, [
+  c_uint,
+  c_void_p,
+  c_void_p,
+  c_uint,
+  c_int,
+  c_int,
+  c_int,
+  c_int,
+  c_void_p,
+  c_void_p,
+  c_void_p,
+  c_void_p,
 ]);
-const ShowWindow = user32.func("ShowWindow", "int", ["pointer", "int"]);
-const UpdateWindow = user32.func("UpdateWindow", "int", ["pointer"]);
-const GetMessageW = user32.func("GetMessageW", "int", [
-  "pointer",
-  "pointer",
-  "uint",
-  "uint",
+const ShowWindow = user32.func("ShowWindow", c_int, [c_void_p, c_int]);
+const UpdateWindow = user32.func("UpdateWindow", c_int, [c_void_p]);
+const GetMessageW = user32.func("GetMessageW", c_int, [
+  c_void_p,
+  c_void_p,
+  c_uint,
+  c_uint,
 ]);
-const TranslateMessage = user32.func("TranslateMessage", "int", ["pointer"]);
-const DispatchMessageW = user32.func("DispatchMessageW", "pointer", [
-  "pointer",
+const TranslateMessage = user32.func("TranslateMessage", c_int, [c_void_p]);
+const DispatchMessageW = user32.func("DispatchMessageW", c_void_p, [
+  c_void_p,
 ]);
-const DefWindowProcW = user32.func("DefWindowProcW", "pointer", [
-  "pointer",
-  "uint",
-  "pointer",
-  "pointer",
+const DefWindowProcW = user32.func("DefWindowProcW", c_void_p, [
+  c_void_p,
+  c_uint,
+  c_void_p,
+  c_void_p,
 ]);
-const PostQuitMessage = user32.func("PostQuitMessage", "void", ["int"]);
-const LoadCursorW = user32.func("LoadCursorW", "pointer", ["pointer", "uint"]);
-const GetModuleHandleW = kernel32.func("GetModuleHandleW", "pointer", [
-  "pointer",
+const PostQuitMessage = user32.func("PostQuitMessage", c_void, [c_int]);
+const LoadCursorW = user32.func("LoadCursorW", c_void_p, [c_void_p, c_uint]);
+const GetModuleHandleW = kernel32.func("GetModuleHandleW", c_void_p, [
+  c_void_p,
 ]);
-const MessageBoxW = user32.func("MessageBoxW", "int", [
-  "pointer",
-  "pointer",
-  "pointer",
-  "uint",
+const MessageBoxW = user32.func("MessageBoxW", c_int, [
+  c_void_p,
+  c_void_p,
+  c_void_p,
+  c_uint,
 ]);
 
 // Window procedure callback
@@ -175,11 +181,11 @@ async function createGUI() {
     windowClass.hIconSm = null;
 
     // Create window procedure callback
-    windowProcCallback = user32.callback(WindowProc, "pointer", [
-      "pointer",
-      "uint",
-      "pointer",
-      "pointer",
+    windowProcCallback = user32.callback(WindowProc, c_void_p, [
+      c_void_p,
+      c_uint,
+      c_void_p,
+      c_void_p,
     ]);
     windowClass.lpfnWndProc = windowProcCallback.pointer;
 
