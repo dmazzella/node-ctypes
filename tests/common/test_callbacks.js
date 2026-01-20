@@ -31,9 +31,7 @@ describe("Callbacks", function () {
       // Create array of integers using create_string_buffer like the working test
       const arr = ctypes.create_string_buffer(5 * 4);
       const values = [5, 2, 8, 1, 9];
-      values.forEach((v, i) =>
-        ctypes.writeValue(arr, ctypes.c_int32, v, i * 4),
-      );
+      values.forEach((v, i) => ctypes.writeValue(arr, ctypes.c_int32, v, i * 4));
 
       // Create comparison callback
       const compare = libc.callback(
@@ -47,19 +45,9 @@ describe("Callbacks", function () {
       );
 
       // Get qsort function
-      let qsort = libc.func("qsort", ctypes.c_void, [
-        ctypes.c_void_p,
-        ctypes.c_size_t,
-        ctypes.c_size_t,
-        ctypes.c_void_p,
-      ]);
+      let qsort = libc.func("qsort", ctypes.c_void, [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_void_p]);
       if (!qsort || qsort.pointer === 0n) {
-        qsort = libc.func("_qsort", ctypes.c_void, [
-          ctypes.c_void_p,
-          ctypes.c_size_t,
-          ctypes.c_size_t,
-          ctypes.c_void_p,
-        ]);
+        qsort = libc.func("_qsort", ctypes.c_void, [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_void_p]);
       }
 
       // Sort the array
@@ -78,9 +66,7 @@ describe("Callbacks", function () {
       // Create array of integers using create_string_buffer
       const arr = ctypes.create_string_buffer(4 * 4);
       const values = [3, 1, 4, 2];
-      values.forEach((v, i) =>
-        ctypes.writeValue(arr, ctypes.c_int32, v, i * 4),
-      );
+      values.forEach((v, i) => ctypes.writeValue(arr, ctypes.c_int32, v, i * 4));
 
       // Create reverse comparison callback
       const compareReverse = libc.callback(
@@ -94,12 +80,7 @@ describe("Callbacks", function () {
       );
 
       // Get qsort function
-      const qsort = libc.func("qsort", ctypes.c_void_p, [
-        ctypes.c_void_p,
-        ctypes.c_size_t,
-        ctypes.c_size_t,
-        ctypes.c_void_p,
-      ]);
+      const qsort = libc.func("qsort", ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_void_p]);
 
       // Sort the array in reverse
       qsort(arr, 4, 4, compareReverse.pointer);
@@ -117,9 +98,7 @@ describe("Callbacks", function () {
       // Test callback with float comparison
       const arr = ctypes.create_string_buffer(3 * 4);
       const values = [3.14, 1.41, 2.71];
-      values.forEach((v, i) =>
-        ctypes.writeValue(arr, ctypes.c_float, v, i * 4),
-      );
+      values.forEach((v, i) => ctypes.writeValue(arr, ctypes.c_float, v, i * 4));
 
       const compareFloat = libc.callback(
         (a, b) => {
@@ -133,12 +112,7 @@ describe("Callbacks", function () {
         [ctypes.c_void_p, ctypes.c_void_p],
       );
 
-      const qsort = libc.func("qsort", ctypes.c_void_p, [
-        ctypes.c_void_p,
-        ctypes.c_size_t,
-        ctypes.c_size_t,
-        ctypes.c_void_p,
-      ]);
+      const qsort = libc.func("qsort", ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_void_p]);
       qsort(arr, 3, 4, compareFloat.pointer);
 
       const sorted = [];

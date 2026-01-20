@@ -108,12 +108,7 @@ export class Version {
 /** Native library handle */
 export class Library {
   constructor(path: string | null);
-  func(
-    name: string,
-    returnType: CTypeString | CType,
-    argTypes?: (CTypeString | CType)[],
-    options?: FunctionOptions,
-  ): FFIFunction;
+  func(name: string, returnType: CTypeString | CType, argTypes?: (CTypeString | CType)[], options?: FunctionOptions): FFIFunction;
   symbol(name: string): bigint;
   close(): void;
   readonly path: string;
@@ -126,11 +121,7 @@ export interface FunctionOptions {
 }
 
 /** Errcheck callback type */
-export type ErrcheckCallback = (
-  result: any,
-  func: CallableFunction,
-  args: any[],
-) => any;
+export type ErrcheckCallback = (result: any, func: CallableFunction, args: any[]) => any;
 
 /** FFI function wrapper */
 export interface FFIFunction {
@@ -143,12 +134,7 @@ export interface FFIFunction {
 /** CDLL - C calling convention library */
 export class CDLL {
   constructor(path: string | null);
-  func(
-    name: string,
-    returnType: CTypeString | CType,
-    argTypes?: (CTypeString | CType)[],
-    options?: FunctionOptions,
-  ): CallableFunction & { errcheck: ErrcheckCallback | null };
+  func(name: string, returnType: CTypeString | CType, argTypes?: (CTypeString | CType)[], options?: FunctionOptions): CallableFunction & { errcheck: ErrcheckCallback | null };
   symbol(name: string): bigint;
   close(): void;
   readonly path: string;
@@ -172,11 +158,7 @@ export interface CallbackWrapper {
 
 /** Native Callback class */
 export class Callback {
-  constructor(
-    fn: Function,
-    returnType: CTypeString | CType,
-    argTypes?: (CTypeString | CType)[],
-  );
+  constructor(fn: Function, returnType: CTypeString | CType, argTypes?: (CTypeString | CType)[]);
   readonly pointer: bigint;
   release(): void;
 }
@@ -220,31 +202,11 @@ export interface StructDef {
 }
 
 // Helper types for improved typed structs
-export type FieldSpec =
-  | CTypeString
-  | CType
-  | StructDef
-  | ArrayTypeDef
-  | BitFieldDef
-  | AnonymousField;
+export type FieldSpec = CTypeString | CType | StructDef | ArrayTypeDef | BitFieldDef | AnonymousField;
 
 type JsFromCType<T> = T extends "int64" | "uint64" | "size_t"
   ? bigint
-  : T extends
-        | "int8"
-        | "uint8"
-        | "int16"
-        | "uint16"
-        | "int32"
-        | "uint32"
-        | "int"
-        | "uint"
-        | "short"
-        | "ushort"
-        | "char"
-        | "uchar"
-        | "float"
-        | "double"
+  : T extends "int8" | "uint8" | "int16" | "uint16" | "int32" | "uint32" | "int" | "uint" | "short" | "ushort" | "char" | "uchar" | "float" | "double"
     ? number
     : T extends "bool"
       ? boolean
@@ -331,10 +293,7 @@ export interface PointerTypeDef {
 /** Native StructType class */
 export class StructType {
   constructor(isUnion?: boolean);
-  addField(
-    name: string,
-    type: CTypeString | CType | StructType | ArrayType,
-  ): this;
+  addField(name: string, type: CTypeString | CType | StructType | ArrayType): this;
   getSize(): number;
   getAlignment(): number;
   create(values?: Record<string, any>): Buffer;
@@ -355,28 +314,17 @@ export class ArrayType {
  * Subclasses should define `static _fields_` as array of [name, type]
  * or an object map { name: type }.
  */
-export class Structure<
-  F extends Record<string, FieldSpec> = Record<string, any>,
-> {
+export class Structure<F extends Record<string, FieldSpec> = Record<string, any>> {
   constructor(...args: any[]);
   static _fields_?: Array<[string, FieldSpec]> | Record<string, FieldSpec>;
   static _pack_?: boolean;
   static _anonymous_?: string[];
-  static create<ThisT extends Structure<F>>(
-    this: new (...args: any[]) => ThisT,
-    values?: Partial<FieldsToInstance<F>> | Buffer,
-  ): ThisT;
-  static toObject<ThisT extends Structure<F>>(
-    this: new (...args: any[]) => ThisT,
-    buf: Buffer | any,
-  ): FieldsToInstance<F>;
+  static create<ThisT extends Structure<F>>(this: new (...args: any[]) => ThisT, values?: Partial<FieldsToInstance<F>> | Buffer): ThisT;
+  static toObject<ThisT extends Structure<F>>(this: new (...args: any[]) => ThisT, buf: Buffer | any): FieldsToInstance<F>;
   _buffer: Buffer;
   _structDef: StructDef;
   get<K extends keyof F & string>(fieldName: K): FieldsToInstance<F>[K];
-  set<K extends keyof F & string>(
-    fieldName: K,
-    value: FieldsToInstance<F>[K],
-  ): void;
+  set<K extends keyof F & string>(fieldName: K, value: FieldsToInstance<F>[K]): void;
   toObject(): FieldsToInstance<F>;
   [field: string]: any; // instance has dynamic properties for fields
 }
@@ -384,9 +332,7 @@ export class Structure<
 /**
  * Python-like Union base class.
  */
-export class Union<
-  F extends Record<string, FieldSpec> = Record<string, any>,
-> extends Structure<F> {}
+export class Union<F extends Record<string, FieldSpec> = Record<string, any>> extends Structure<F> {}
 
 // =============================================================================
 // Functions
@@ -396,85 +342,36 @@ export class Union<
 export function load(path: string | null): Library;
 
 // Callbacks
-export function callback(
-  fn: Function,
-  returnType: CTypeString | CType,
-  argTypes?: (CTypeString | CType)[],
-): CallbackWrapper;
-export function threadSafeCallback(
-  fn: Function,
-  returnType: CTypeString | CType,
-  argTypes?: (CTypeString | CType)[],
-): CallbackWrapper;
+export function callback(fn: Function, returnType: CTypeString | CType, argTypes?: (CTypeString | CType)[]): CallbackWrapper;
+export function threadSafeCallback(fn: Function, returnType: CTypeString | CType, argTypes?: (CTypeString | CType)[]): CallbackWrapper;
 
 // Memory management - Python-compatible
 export function create_string_buffer(init: number | string | Buffer): Buffer;
 export function create_unicode_buffer(init: number | string): Buffer;
-export function string_at(
-  address: Buffer | bigint | number,
-  size?: number,
-): string | null;
-export function wstring_at(
-  address: Buffer | bigint | number,
-  size?: number,
-): string | null;
+export function string_at(address: Buffer | bigint | number, size?: number): string | null;
+export function wstring_at(address: Buffer | bigint | number, size?: number): string | null;
 export function addressof(ptr: Buffer | bigint | number): bigint;
 export function memmove(dst: Buffer, src: Buffer | bigint, count: number): void;
 export function memset(dst: Buffer, value: number, count: number): void;
 
 // Memory - utility (no direct Python equivalent)
-export function readValue(
-  ptr: Buffer | bigint | number,
-  type: CTypeString | CType,
-  offset?: number,
-): any;
-export function writeValue(
-  ptr: Buffer | bigint | number,
-  type: CTypeString | CType,
-  value: any,
-  offset?: number,
-): number;
-export function sizeof(
-  type: CTypeString | CType | StructDef | ArrayTypeDef,
-): number;
+export function readValue(ptr: Buffer | bigint | number, type: CTypeString | CType, offset?: number): any;
+export function writeValue(ptr: Buffer | bigint | number, type: CTypeString | CType, value: any, offset?: number): number;
+export function sizeof(type: CTypeString | CType | StructDef | ArrayTypeDef): number;
 export function ptrToBuffer(address: bigint | number, size: number): Buffer;
 
 // Structures
-export function struct(
-  fields: Record<
-    string,
-    | CTypeString
-    | CType
-    | StructDef
-    | ArrayTypeDef
-    | BitFieldDef
-    | AnonymousField
-  >,
-  options?: StructOptions,
-): StructDef;
-export function union(
-  fields: Record<
-    string,
-    CTypeString | CType | StructDef | ArrayTypeDef | BitFieldDef
-  >,
-): UnionDef;
+export function struct(fields: Record<string, CTypeString | CType | StructDef | ArrayTypeDef | BitFieldDef | AnonymousField>, options?: StructOptions): StructDef;
+export function union(fields: Record<string, CTypeString | CType | StructDef | ArrayTypeDef | BitFieldDef>): UnionDef;
 // Factory helpers that return a typed class extending Structure/Union
-export function defineStruct<F extends Record<string, FieldSpec>>(
-  fields: F,
-  options?: StructOptions,
-): new (...args: any[]) => Structure<F>;
-export function defineUnion<F extends Record<string, FieldSpec>>(
-  fields: F,
-): new (...args: any[]) => Union<F>;
+export function defineStruct<F extends Record<string, FieldSpec>>(fields: F, options?: StructOptions): new (...args: any[]) => Structure<F>;
+export function defineUnion<F extends Record<string, FieldSpec>>(fields: F): new (...args: any[]) => Union<F>;
 export function array(elementType: CTypeString, count: number): ArrayTypeDef;
 export function bitfield(baseType: CTypeString, bits: number): BitFieldDef;
 
 // Pointers
 export function byref(obj: Buffer): Buffer;
-export function cast(
-  ptr: Buffer | bigint,
-  targetType: CTypeString | StructDef,
-): any;
+export function cast(ptr: Buffer | bigint, targetType: CTypeString | StructDef): any;
 export function POINTER(baseType: CTypeString | StructDef): PointerTypeDef;
 
 // Error handling

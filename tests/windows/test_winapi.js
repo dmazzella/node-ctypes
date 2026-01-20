@@ -5,23 +5,7 @@
 
 import assert, { strictEqual, throws } from "node:assert";
 import { describe, it, before, after } from "node:test";
-import {
-  WinDLL,
-  SetLastError,
-  GetLastError,
-  struct,
-  create_string_buffer,
-  create_unicode_buffer,
-  wstring_at,
-  writeValue,
-  c_void,
-  c_void_p,
-  c_uint16,
-  c_uint32,
-  c_int32,
-  c_size_t,
-  c_wchar_p,
-} from "node-ctypes";
+import { WinDLL, SetLastError, GetLastError, struct, create_string_buffer, create_unicode_buffer, wstring_at, writeValue, c_void, c_void_p, c_uint16, c_uint32, c_int32, c_size_t, c_wchar_p } from "node-ctypes";
 
 describe("Windows API", { skip: process.platform !== "win32" }, function () {
   let kernel32;
@@ -55,18 +39,14 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
 
   describe("GetModuleHandleW", function () {
     it("should get module handle for kernel32", function () {
-      const GetModuleHandleW = kernel32.func("GetModuleHandleW", c_void_p, [
-        c_wchar_p,
-      ]);
+      const GetModuleHandleW = kernel32.func("GetModuleHandleW", c_void_p, [c_wchar_p]);
 
       const handle = GetModuleHandleW("kernel32.dll");
       assert(handle !== 0n, "Module handle should not be null");
     });
 
     it("should return null for non-existent module", function () {
-      const GetModuleHandleW = kernel32.func("GetModuleHandleW", c_void_p, [
-        c_wchar_p,
-      ]);
+      const GetModuleHandleW = kernel32.func("GetModuleHandleW", c_void_p, [c_wchar_p]);
 
       const handle = GetModuleHandleW("NonExistentModule12345.dll");
       strictEqual(handle, null, "Should return null for non-existent module");
@@ -75,11 +55,7 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
 
   describe("GetCurrentProcessId", function () {
     it("should return current process ID", function () {
-      const GetCurrentProcessId = kernel32.func(
-        "GetCurrentProcessId",
-        c_uint32,
-        [],
-      );
+      const GetCurrentProcessId = kernel32.func("GetCurrentProcessId", c_uint32, []);
 
       const pid = GetCurrentProcessId();
       assert(pid > 0, "Process ID should be positive");
@@ -89,11 +65,7 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
 
   describe("GetCurrentThreadId", function () {
     it("should return current thread ID", function () {
-      const GetCurrentThreadId = kernel32.func(
-        "GetCurrentThreadId",
-        c_uint32,
-        [],
-      );
+      const GetCurrentThreadId = kernel32.func("GetCurrentThreadId", c_uint32, []);
 
       const tid = GetCurrentThreadId();
       assert(tid > 0, "Thread ID should be positive");
@@ -148,29 +120,15 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
 
   describe("Memory Allocation", function () {
     it("should allocate and free memory with VirtualAlloc/VirtualFree", function () {
-      const VirtualAlloc = kernel32.func("VirtualAlloc", c_void_p, [
-        c_void_p,
-        c_size_t,
-        c_uint32,
-        c_uint32,
-      ]);
-      const VirtualFree = kernel32.func("VirtualFree", c_int32, [
-        c_void_p,
-        c_size_t,
-        c_uint32,
-      ]);
+      const VirtualAlloc = kernel32.func("VirtualAlloc", c_void_p, [c_void_p, c_size_t, c_uint32, c_uint32]);
+      const VirtualFree = kernel32.func("VirtualFree", c_int32, [c_void_p, c_size_t, c_uint32]);
 
       const MEM_COMMIT = 0x1000;
       const MEM_RESERVE = 0x2000;
       const MEM_RELEASE = 0x8000;
       const PAGE_READWRITE = 0x04;
 
-      const ptr = VirtualAlloc(
-        0n,
-        4096,
-        MEM_COMMIT | MEM_RESERVE,
-        PAGE_READWRITE,
-      );
+      const ptr = VirtualAlloc(0n, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
       assert(ptr !== 0n, "VirtualAlloc should succeed");
 
       const result = VirtualFree(ptr, 0, MEM_RELEASE);
@@ -180,11 +138,7 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
 
   describe("Wide Strings", function () {
     it("should handle wide string parameters and returns", function () {
-      const GetEnvironmentVariableW = kernel32.func(
-        "GetEnvironmentVariableW",
-        c_uint32,
-        [c_wchar_p, c_void_p, c_uint32],
-      );
+      const GetEnvironmentVariableW = kernel32.func("GetEnvironmentVariableW", c_uint32, [c_wchar_p, c_void_p, c_uint32]);
 
       const buf = create_unicode_buffer(1024);
       const len = GetEnvironmentVariableW("TEMP", buf, 1024);
@@ -199,12 +153,7 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
 
   describe("MessageBoxW", function () {
     it("should define MessageBoxW (without calling it)", function () {
-      const MessageBoxW = user32.func("MessageBoxW", c_int32, [
-        c_void_p,
-        c_wchar_p,
-        c_wchar_p,
-        c_uint32,
-      ]);
+      const MessageBoxW = user32.func("MessageBoxW", c_int32, [c_void_p, c_wchar_p, c_wchar_p, c_uint32]);
 
       assert(typeof MessageBoxW === "function");
       assert(MessageBoxW.funcName === "MessageBoxW");
@@ -215,10 +164,7 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
 
   describe("GetComputerNameW", function () {
     it("should get computer name", function () {
-      const GetComputerNameW = kernel32.func("GetComputerNameW", c_int32, [
-        c_void_p,
-        c_void_p,
-      ]);
+      const GetComputerNameW = kernel32.func("GetComputerNameW", c_int32, [c_void_p, c_void_p]);
 
       const buf = create_unicode_buffer(256);
       const sizeBuf = create_string_buffer(4);
@@ -234,9 +180,7 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
 
   describe("errcheck with Windows API", function () {
     it("should use errcheck to validate return values", function () {
-      const GetModuleHandleW = kernel32.func("GetModuleHandleW", c_void_p, [
-        c_wchar_p,
-      ]);
+      const GetModuleHandleW = kernel32.func("GetModuleHandleW", c_void_p, [c_wchar_p]);
 
       let errcheckCalled = false;
       GetModuleHandleW.errcheck = function (result, func, args) {
@@ -261,10 +205,7 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
         GetModuleHandleW("NonExistentModule99999.dll");
       }, /GetModuleHandleW failed/);
 
-      assert(
-        errcheckCalled,
-        "errcheck should have been called for failure case",
-      );
+      assert(errcheckCalled, "errcheck should have been called for failure case");
     });
   });
 });

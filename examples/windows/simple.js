@@ -3,18 +3,7 @@
  * Demonstrates creating a basic GUI application using node-ctypes and Windows API
  */
 
-import {
-  WinDLL,
-  struct,
-  create_unicode_buffer,
-  GetLastError,
-  c_int,
-  c_uint,
-  c_long,
-  c_short,
-  c_void,
-  c_void_p
-} from "node-ctypes";
+import { WinDLL, struct, create_unicode_buffer, GetLastError, c_int, c_uint, c_long, c_short, c_void, c_void_p } from "node-ctypes";
 
 // Windows API constants
 const WS_OVERLAPPEDWINDOW = 0x00cf0000;
@@ -70,69 +59,30 @@ const kernel32 = new WinDLL("kernel32.dll");
 
 // Get required functions
 const RegisterClassExW = user32.func("RegisterClassExW", c_short, [c_void_p]);
-const CreateWindowExW = user32.func("CreateWindowExW", c_void_p, [
-  c_uint,
-  c_void_p,
-  c_void_p,
-  c_uint,
-  c_int,
-  c_int,
-  c_int,
-  c_int,
-  c_void_p,
-  c_void_p,
-  c_void_p,
-  c_void_p,
-]);
+const CreateWindowExW = user32.func("CreateWindowExW", c_void_p, [c_uint, c_void_p, c_void_p, c_uint, c_int, c_int, c_int, c_int, c_void_p, c_void_p, c_void_p, c_void_p]);
 const ShowWindow = user32.func("ShowWindow", c_int, [c_void_p, c_int]);
 const UpdateWindow = user32.func("UpdateWindow", c_int, [c_void_p]);
-const GetMessageW = user32.func("GetMessageW", c_int, [
-  c_void_p,
-  c_void_p,
-  c_uint,
-  c_uint,
-]);
+const GetMessageW = user32.func("GetMessageW", c_int, [c_void_p, c_void_p, c_uint, c_uint]);
 const TranslateMessage = user32.func("TranslateMessage", c_int, [c_void_p]);
-const DispatchMessageW = user32.func("DispatchMessageW", c_void_p, [
-  c_void_p,
-]);
-const DefWindowProcW = user32.func("DefWindowProcW", c_void_p, [
-  c_void_p,
-  c_uint,
-  c_void_p,
-  c_void_p,
-]);
+const DispatchMessageW = user32.func("DispatchMessageW", c_void_p, [c_void_p]);
+const DefWindowProcW = user32.func("DefWindowProcW", c_void_p, [c_void_p, c_uint, c_void_p, c_void_p]);
 const PostQuitMessage = user32.func("PostQuitMessage", c_void, [c_int]);
 const LoadCursorW = user32.func("LoadCursorW", c_void_p, [c_void_p, c_uint]);
-const GetModuleHandleW = kernel32.func("GetModuleHandleW", c_void_p, [
-  c_void_p,
-]);
-const MessageBoxW = user32.func("MessageBoxW", c_int, [
-  c_void_p,
-  c_void_p,
-  c_void_p,
-  c_uint,
-]);
+const GetModuleHandleW = kernel32.func("GetModuleHandleW", c_void_p, [c_void_p]);
+const MessageBoxW = user32.func("MessageBoxW", c_int, [c_void_p, c_void_p, c_void_p, c_uint]);
 
 // Window procedure callback
 let windowProcCallback = null;
 
 function WindowProc(hwnd, msg, wParam, lParam) {
-  console.log(
-    `WindowProc called: msg=${msg}, wParam=${wParam}, lParam=${lParam}`,
-  );
+  console.log(`WindowProc called: msg=${msg}, wParam=${wParam}, lParam=${lParam}`);
   switch (msg) {
     case WM_COMMAND:
       const controlId = Number(wParam) & 0xffff; // Extract low 16 bits for control ID
       console.log(`WM_COMMAND: controlId=${controlId}`);
       if (controlId === IDOK) {
         console.log("OK button clicked");
-        MessageBoxW(
-          null,
-          create_unicode_buffer("Hello from node-ctypes GUI!"),
-          create_unicode_buffer("Button Clicked"),
-          0,
-        );
+        MessageBoxW(null, create_unicode_buffer("Hello from node-ctypes GUI!"), create_unicode_buffer("Button Clicked"), 0);
       } else if (controlId === IDCANCEL) {
         console.log("Cancel button clicked");
         PostQuitMessage(0);
@@ -181,12 +131,7 @@ async function createGUI() {
     windowClass.hIconSm = null;
 
     // Create window procedure callback
-    windowProcCallback = user32.callback(WindowProc, c_void_p, [
-      c_void_p,
-      c_uint,
-      c_void_p,
-      c_void_p,
-    ]);
+    windowProcCallback = user32.callback(WindowProc, c_void_p, [c_void_p, c_uint, c_void_p, c_void_p]);
     windowClass.lpfnWndProc = windowProcCallback.pointer;
 
     // Register window class

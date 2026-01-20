@@ -96,81 +96,62 @@ describe("errcheck (Python ctypes compatible)", function () {
     });
   });
 
-  describe(
-    "errcheck with errno (POSIX pattern)",
-    { skip: process.platform === "win32" },
-    function () {
-      it("should check errno and throw on -1", function () {
-        const open = libc.func("open", ctypes.c_int32, [
-          ctypes.c_char_p,
-          ctypes.c_int32,
-        ]);
+  describe("errcheck with errno (POSIX pattern)", { skip: process.platform === "win32" }, function () {
+    it("should check errno and throw on -1", function () {
+      const open = libc.func("open", ctypes.c_int32, [ctypes.c_char_p, ctypes.c_int32]);
 
-        // Pattern standard: controlla -1 e lancia con errno
-        open.errcheck = function (result, func, args) {
-          if (result === -1) {
-            const errno = ctypes.get_errno();
-            const err = new Error(
-              `open("${args[0]}") failed with errno ${errno}`,
-            );
-            err.errno = errno;
-            throw err;
+      // Pattern standard: controlla -1 e lancia con errno
+      open.errcheck = function (result, func, args) {
+        if (result === -1) {
+          const errno = ctypes.get_errno();
+          const err = new Error(`open("${args[0]}") failed with errno ${errno}`);
+          err.errno = errno;
+          throw err;
+        }
+        return result;
+      };
+
+      // File che non esiste dovrebbe lanciare
+      assert.throws(
+        () => {
+          open("/path/that/does/not/exist/test.txt", 0);
+        },
+        (err) => {
+          return err instanceof Error && err.errno !== undefined && err.message.includes("errno");
+        },
+      );
+    });
+  });
+
+  describe("errcheck with WinError (Windows pattern)", { skip: process.platform !== "win32" }, function () {
+    it("should check GetLastError and throw on failure", function () {
+      const kernel32 = new ctypes.WinDLL("kernel32.dll");
+      const DeleteFileW = kernel32.func("DeleteFileW", ctypes.c_bool, [ctypes.c_wchar_p]);
+
+      // Pattern Windows: controlla FALSE e usa GetLastError
+      DeleteFileW.errcheck = function (result, func, args) {
+        if (!result) {
+          const winerror = ctypes.GetLastError();
+          if (winerror !== 0) {
+            throw ctypes.WinError(winerror);
           }
-          return result;
-        };
+        }
+        return result;
+      };
 
-        // File che non esiste dovrebbe lanciare
-        assert.throws(
-          () => {
-            open("/path/that/does/not/exist/test.txt", 0);
-          },
-          (err) => {
-            return (
-              err instanceof Error &&
-              err.errno !== undefined &&
-              err.message.includes("errno")
-            );
-          },
-        );
-      });
-    },
-  );
+      // File che non esiste dovrebbe lanciare
+      assert.throws(
+        () => {
+          DeleteFileW("Z:\\file_that_does_not_exist.txt");
+        },
+        (err) => {
+          return err instanceof Error && err.winerror !== undefined;
+        },
+      );
 
-  describe(
-    "errcheck with WinError (Windows pattern)",
-    { skip: process.platform !== "win32" },
-    function () {
-      it("should check GetLastError and throw on failure", function () {
-        const kernel32 = new ctypes.WinDLL("kernel32.dll");
-        const DeleteFileW = kernel32.func("DeleteFileW", ctypes.c_bool, [
-          ctypes.c_wchar_p,
-        ]);
-
-        // Pattern Windows: controlla FALSE e usa GetLastError
-        DeleteFileW.errcheck = function (result, func, args) {
-          if (!result) {
-            const winerror = ctypes.GetLastError();
-            if (winerror !== 0) {
-              throw ctypes.WinError(winerror);
-            }
-          }
-          return result;
-        };
-
-        // File che non esiste dovrebbe lanciare
-        assert.throws(
-          () => {
-            DeleteFileW("Z:\\file_that_does_not_exist.txt");
-          },
-          (err) => {
-            return err instanceof Error && err.winerror !== undefined;
-          },
-        );
-
-        kernel32.close();
-      });
-    },
-  );
+      kernel32.close();
+    });
+  });
 
   describe("errcheck with pointer returns", function () {
     it("should validate pointer returns", function () {
@@ -220,11 +201,7 @@ describe("errcheck (Python ctypes compatible)", function () {
     });
 
     it("should work with multiple arguments", function () {
-      const memcpy = libc.func("memcpy", ctypes.c_void_p, [
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_size_t,
-      ]);
+      const memcpy = libc.func("memcpy", ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]);
 
       let argCount = 0;
 
@@ -263,64 +240,49 @@ describe("errcheck (Python ctypes compatible)", function () {
     });
   });
 
-  describe(
-    "errcheck with variadic functions (unix)",
-    { skip: process.platform === "win32" },
-    function () {
-      it("should work with variadic functions", function () {
-        const sprintf = libc.func("sprintf", ctypes.c_int32, [
-          ctypes.c_void_p,
-          ctypes.c_char_p,
-        ]);
+  describe("errcheck with variadic functions (unix)", { skip: process.platform === "win32" }, function () {
+    it("should work with variadic functions", function () {
+      const sprintf = libc.func("sprintf", ctypes.c_int32, [ctypes.c_void_p, ctypes.c_char_p]);
 
-        let callCount = 0;
+      let callCount = 0;
 
-        sprintf.errcheck = function (result, func, args) {
-          callCount++;
-          // sprintf ritorna il numero di caratteri scritti
-          if (result < 0) {
-            throw new Error("sprintf failed");
-          }
-          return result;
-        };
+      sprintf.errcheck = function (result, func, args) {
+        callCount++;
+        // sprintf ritorna il numero di caratteri scritti
+        if (result < 0) {
+          throw new Error("sprintf failed");
+        }
+        return result;
+      };
 
-        const buf = ctypes.create_string_buffer(100);
-        sprintf(buf, "Number: %d", ctypes.c_int32, 42);
+      const buf = ctypes.create_string_buffer(100);
+      sprintf(buf, "Number: %d", ctypes.c_int32, 42);
 
-        assert.strictEqual(callCount, 1);
-      });
-    },
-  );
+      assert.strictEqual(callCount, 1);
+    });
+  });
 
-  describe(
-    "errcheck with variadic functions (windows)",
-    { skip: process.platform !== "win32" },
-    function () {
-      it("should work with variadic functions", function () {
-        const _snprintf = libc.func("_snprintf", ctypes.c_int32, [
-          ctypes.c_void_p,
-          ctypes.c_size_t,
-          ctypes.c_char_p,
-        ]);
+  describe("errcheck with variadic functions (windows)", { skip: process.platform !== "win32" }, function () {
+    it("should work with variadic functions", function () {
+      const _snprintf = libc.func("_snprintf", ctypes.c_int32, [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_char_p]);
 
-        let callCount = 0;
+      let callCount = 0;
 
-        _snprintf.errcheck = function (result, func, args) {
-          callCount++;
-          // _snprintf ritorna il numero di caratteri scritti
-          if (result < 0) {
-            throw new Error("_snprintf failed");
-          }
-          return result;
-        };
+      _snprintf.errcheck = function (result, func, args) {
+        callCount++;
+        // _snprintf ritorna il numero di caratteri scritti
+        if (result < 0) {
+          throw new Error("_snprintf failed");
+        }
+        return result;
+      };
 
-        const buf = ctypes.create_string_buffer(100);
-        _snprintf(buf, 100, "Number: %d", ctypes.c_int32, 42);
+      const buf = ctypes.create_string_buffer(100);
+      _snprintf(buf, 100, "Number: %d", ctypes.c_int32, 42);
 
-        assert.strictEqual(callCount, 1);
-      });
-    },
-  );
+      assert.strictEqual(callCount, 1);
+    });
+  });
 
   describe("Python ctypes compatibility", function () {
     it("should match Python ctypes errcheck behavior", function () {

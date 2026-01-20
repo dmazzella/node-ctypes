@@ -46,11 +46,7 @@ describe("Functions and Callbacks", function () {
 
   describe("Functions with Multiple Arguments", function () {
     it("should call memcpy()", function () {
-      const memcpy = libc.func("memcpy", ctypes.c_void_p, [
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_size_t,
-      ]);
+      const memcpy = libc.func("memcpy", ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]);
 
       const src = ctypes.create_string_buffer(10);
       const dst = ctypes.create_string_buffer(10);
@@ -65,10 +61,7 @@ describe("Functions and Callbacks", function () {
 
       // Verify
       for (let i = 0; i < 10; i++) {
-        assert.strictEqual(
-          ctypes.readValue(dst, ctypes.c_uint8, i),
-          ctypes.readValue(src, ctypes.c_uint8, i),
-        );
+        assert.strictEqual(ctypes.readValue(dst, ctypes.c_uint8, i), ctypes.readValue(src, ctypes.c_uint8, i));
       }
     });
   });
@@ -144,12 +137,7 @@ describe("Functions and Callbacks", function () {
 
   describe("Callbacks", { skip: process.platform !== "win32" }, function () {
     it("should create and use callback with qsort", function () {
-      const qsort = libc.func("qsort", ctypes.c_void, [
-        ctypes.c_void_p,
-        ctypes.c_size_t,
-        ctypes.c_size_t,
-        ctypes.c_void_p,
-      ]);
+      const qsort = libc.func("qsort", ctypes.c_void, [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_void_p]);
 
       // Create comparison function
       const compare = ctypes.callback(
@@ -165,9 +153,7 @@ describe("Functions and Callbacks", function () {
       // Create array to sort
       const arr = ctypes.create_string_buffer(5 * 4);
       const values = [5, 2, 8, 1, 9];
-      values.forEach((v, i) =>
-        ctypes.writeValue(arr, ctypes.c_int32, v, i * 4),
-      );
+      values.forEach((v, i) => ctypes.writeValue(arr, ctypes.c_int32, v, i * 4));
 
       // Sort
       qsort(arr, 5, 4, compare.pointer);
@@ -184,68 +170,54 @@ describe("Functions and Callbacks", function () {
 
     it("should handle callback with different signatures", function () {
       // Callback that takes two ints and returns int
-      const cb1 = ctypes.callback((a, b) => a + b, ctypes.c_int32, [
-        ctypes.c_int32,
-        ctypes.c_int32,
-      ]);
+      const cb1 = ctypes.callback((a, b) => a + b, ctypes.c_int32, [ctypes.c_int32, ctypes.c_int32]);
       assert(cb1.pointer !== 0n);
       cb1.release();
 
       // Callback that takes pointer and returns void
-      const cb2 = ctypes.callback((ptr) => {}, ctypes.c_void, [
-        ctypes.c_void_p,
-      ]);
+      const cb2 = ctypes.callback((ptr) => {}, ctypes.c_void, [ctypes.c_void_p]);
       assert(cb2.pointer !== 0n);
       cb2.release();
     });
   });
 
-  describe(
-    "Variadic Functions",
-    { skip: process.platform !== "win32" },
-    function () {
-      it("should handle functions with variable arguments", function () {
-        // Define sprintf with only fixed parameters
-        // node-ctypes auto-detects variadic arguments!
-        const sprintf = libc.func("sprintf", ctypes.c_int32, [
-          ctypes.c_void_p,
-          ctypes.c_char_p,
-        ]);
+  describe("Variadic Functions", { skip: process.platform !== "win32" }, function () {
+    it("should handle functions with variable arguments", function () {
+      // Define sprintf with only fixed parameters
+      // node-ctypes auto-detects variadic arguments!
+      const sprintf = libc.func("sprintf", ctypes.c_int32, [ctypes.c_void_p, ctypes.c_char_p]);
 
-        const buf = ctypes.create_string_buffer(256);
+      const buf = ctypes.create_string_buffer(256);
 
-        // Test 1: String formatting
-        let written = sprintf(buf, "Hello %s!", "World");
-        assert(written > 0, "sprintf should return positive byte count");
-        const str1 = buf.toString("utf8", 0, buf.indexOf(0));
-        assert.strictEqual(str1, "Hello World!");
+      // Test 1: String formatting
+      let written = sprintf(buf, "Hello %s!", "World");
+      assert(written > 0, "sprintf should return positive byte count");
+      const str1 = buf.toString("utf8", 0, buf.indexOf(0));
+      assert.strictEqual(str1, "Hello World!");
 
-        // Test 2: Mixed int and string
-        written = sprintf(buf, "Number: %d, String: %s", 42, "test");
-        assert(written > 0);
-        const str2 = buf.toString("utf8", 0, buf.indexOf(0));
-        assert.strictEqual(str2, "Number: 42, String: test");
+      // Test 2: Mixed int and string
+      written = sprintf(buf, "Number: %d, String: %s", 42, "test");
+      assert(written > 0);
+      const str2 = buf.toString("utf8", 0, buf.indexOf(0));
+      assert.strictEqual(str2, "Number: 42, String: test");
 
-        // Test 3: Multiple numbers
-        written = sprintf(buf, "%d + %d = %d", 10, 20, 30);
-        assert(written > 0);
-        const str3 = buf.toString("utf8", 0, buf.indexOf(0));
-        assert.strictEqual(str3, "10 + 20 = 30");
+      // Test 3: Multiple numbers
+      written = sprintf(buf, "%d + %d = %d", 10, 20, 30);
+      assert(written > 0);
+      const str3 = buf.toString("utf8", 0, buf.indexOf(0));
+      assert.strictEqual(str3, "10 + 20 = 30");
 
-        // Test 4: Float formatting
-        written = sprintf(buf, "Pi is approximately %.2f", 3.14159);
-        assert(written > 0);
-        const str4 = buf.toString("utf8", 0, buf.indexOf(0));
-        assert.strictEqual(str4, "Pi is approximately 3.14");
-      });
-    },
-  );
+      // Test 4: Float formatting
+      written = sprintf(buf, "Pi is approximately %.2f", 3.14159);
+      assert(written > 0);
+      const str4 = buf.toString("utf8", 0, buf.indexOf(0));
+      assert.strictEqual(str4, "Pi is approximately 3.14");
+    });
+  });
 
   describe("Pointer Returns", function () {
     it("should handle functions returning pointers", function () {
-      const malloc = libc.func("malloc", ctypes.c_void_p, [
-        ctypes.c_size_t,
-      ]);
+      const malloc = libc.func("malloc", ctypes.c_void_p, [ctypes.c_size_t]);
       const free = libc.func("free", ctypes.c_void, [ctypes.c_void_p]);
 
       const ptr = malloc(1024);

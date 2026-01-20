@@ -289,10 +289,7 @@ describe("Basic Types", function () {
     it("should work with SimpleCData types", function () {
       const buf = ctypes.create_string_buffer(8);
       ctypes.writeValue(buf, ctypes.c_uint64, 18446744073709551615n);
-      assert.strictEqual(
-        ctypes.readValue(buf, ctypes.c_uint64),
-        18446744073709551615n,
-      );
+      assert.strictEqual(ctypes.readValue(buf, ctypes.c_uint64), 18446744073709551615n);
     });
   });
 });

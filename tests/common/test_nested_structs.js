@@ -1,15 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import {
-  struct,
-  union,
-  array,
-  c_int32,
-  c_uint16,
-  c_uint8,
-  c_int8,
-  sizeof,
-} from "node-ctypes";
+import { struct, union, array, c_int32, c_uint16, c_uint8, c_int8, sizeof } from "node-ctypes";
 
 describe("Complex Nested Structures", function () {
   describe("Multi-level Nesting", function () {
