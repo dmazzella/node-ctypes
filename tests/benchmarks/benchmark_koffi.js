@@ -19,6 +19,11 @@ console.log("╚═════════════════════�
 
 const results = [];
 
+const formatter = new Intl.NumberFormat("en-US", {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+});
+
 function benchmark(name, ctypesTime, koffiTime, iterations) {
   const ratio = ctypesTime / koffiTime;
   const faster = ratio < 1 ? "node-ctypes" : "koffi";
@@ -33,8 +38,19 @@ function benchmark(name, ctypesTime, koffiTime, iterations) {
   });
 
   console.log(`  Iterations: ${iterations.toLocaleString()}`);
-  console.log(`  node-ctypes: ${ctypesTime.toFixed(2)}ms (${((iterations / ctypesTime) * 1000).toFixed(0)} ops/sec)`);
-  console.log(`  koffi:       ${koffiTime.toFixed(2)}ms (${((iterations / koffiTime) * 1000).toFixed(0)} ops/sec)`);
+  console.log(`  node-ctypes: ${ctypesTime.toFixed(2)}ms (${formatter.format((iterations / ctypesTime) * 1000)} ops/sec)`);
+  console.log(`  koffi:       ${koffiTime.toFixed(2)}ms (${formatter.format((iterations / koffiTime) * 1000)} ops/sec)`);
+  console.log(`  Winner: ${faster} (${diff}x faster)\n`);
+}
+
+function benchmark_internal(name, time1, time2, label1, label2, iterations) {
+  const ratio = time1 / time2;
+  const faster = ratio < 1 ? label1 : label2;
+  const diff = ratio < 1 ? (1 / ratio).toFixed(2) : ratio.toFixed(2);
+
+  console.log(`  Iterations: ${iterations.toLocaleString()}`);
+  console.log(`  ${label1}: ${time1.toFixed(2)}ms (${formatter.format((iterations / time1) * 1000)} ops/sec)`);
+  console.log(`  ${label2}: ${time2.toFixed(2)}ms (${formatter.format((iterations / time2) * 1000)} ops/sec)`);
   console.log(`  Winner: ${faster} (${diff}x faster)\n`);
 }
 
@@ -380,9 +396,7 @@ console.log("└─────────────────────�
   }
   const native_time = performance.now() - start;
 
-  console.log(`  Iterations: ${iterations.toLocaleString()}`);
-  console.log(`  node-ctypes:  ${ctypes_time.toFixed(2)}ms (${((iterations / ctypes_time) * 1000).toFixed(0)} allocs/sec)`);
-  console.log(`  Buffer.alloc: ${native_time.toFixed(2)}ms (${((iterations / native_time) * 1000).toFixed(0)} allocs/sec)`);
+  benchmark_internal("Buffer allocation (64 bytes)", ctypes_time, native_time, "node-ctypes", "Buffer.alloc", iterations);
   console.log(`  Overhead: ${((ctypes_time / native_time - 1) * 100).toFixed(1)}% vs native\n`);
 }
 
@@ -421,9 +435,7 @@ console.log("└─────────────────────�
   }
   const wrapped_time = performance.now() - start;
 
-  console.log(`  Iterations: ${iterations.toLocaleString()}`);
-  console.log(`  Raw .call():  ${raw_time.toFixed(2)}ms (${((iterations / raw_time) * 1000).toFixed(0)} ops/sec)`);
-  console.log(`  CDLL wrapper: ${wrapped_time.toFixed(2)}ms (${((iterations / wrapped_time) * 1000).toFixed(0)} ops/sec)`);
+  benchmark_internal("Raw Library.func vs CDLL wrapper", raw_time, wrapped_time, "Raw .call()", "CDLL wrapper", iterations);
   console.log(`  Wrapper overhead: ${((wrapped_time / raw_time - 1) * 100).toFixed(1)}%\n`);
 
   rawLib.close();
