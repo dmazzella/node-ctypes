@@ -261,7 +261,7 @@ console.log("└─────────────────────�
 // ============================================================================
 
 console.log("┌─────────────────────────────────────────────────────────────────┐");
-console.log("│ Benchmark 6: Variadic function - sprintf(fmt, ...)              │");
+console.log("│ Benchmark 6: Variadic function - sprintf(buf, fmt, ...)         │");
 console.log("└─────────────────────────────────────────────────────────────────┘");
 
 {
@@ -269,7 +269,7 @@ console.log("└─────────────────────�
   const ctypes_sprintf = ctypes_libc.func("sprintf", ctypes.c_int32, [ctypes.c_void_p, ctypes.c_char_p]);
 
   // koffi: variadic args must be declared explicitly in signature
-  const koffi_sprintf = koffi_libc.func("int sprintf(char*, const char*, int, const char*)");
+  const koffi_sprintf = koffi_libc.func("int sprintf(char *, const char *, ...)");
 
   const ctypes_buf = ctypes.create_string_buffer(256);
   const koffi_buf = Buffer.alloc(256);
@@ -279,7 +279,7 @@ console.log("└─────────────────────�
   // Warmup
   for (let i = 0; i < 1000; i++) {
     ctypes_sprintf(ctypes_buf, "Number: %d, String: %s", 42, "test");
-    koffi_sprintf(koffi_buf, "Number: %d, String: %s", 42, "test");
+    koffi_sprintf(koffi_buf, "Number: %d, String: %s", "int", 42, "str", "test");
   }
 
   let start = performance.now();
@@ -292,7 +292,7 @@ console.log("└─────────────────────�
   start = performance.now();
   for (let i = 0; i < iterations; i++) {
     // koffi: must match pre-defined signature exactly
-    koffi_sprintf(koffi_buf, "Number: %d, String: %s", i, "test");
+    koffi_sprintf(koffi_buf, "Number: %d, String: %s", "int", i, "str", "test");
   }
   const koffi_time = performance.now() - start;
 
