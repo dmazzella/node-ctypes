@@ -1,63 +1,68 @@
 #!/usr/bin/env node
 /**
  * generate-headers.js
- * 
+ *
  * Generates unified ffi.h and fficonfig.h from libffi sources and templates.
  * Run this script after updating third-party/libffi to regenerate the headers.
- * 
+ *
  * Usage: npm run generate-ffi-headers
- * 
+ *
  * Templates:
  *   - ffi.h.in      → from libffi/include/ffi.h.in (upstream)
  *   - fficonfig.h.in → from this directory (custom)
  */
 
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const LIBFFI_DIR = path.join(__dirname, '..', 'libffi');
+const LIBFFI_DIR = path.join(__dirname, "..", "libffi");
 const TEMPLATE_DIR = __dirname;
-const OUTPUT_DIR = path.join(__dirname, 'fficonfig');
+const OUTPUT_DIR = path.join(__dirname, "fficonfig");
 
 /**
  * Extract version info from configure.ac
  */
 function extractVersion() {
-    const configureAc = fs.readFileSync(path.join(LIBFFI_DIR, 'configure.ac'), 'utf8');
-    
-    const versionStringMatch = configureAc.match(/FFI_VERSION_STRING="([^"]+)"/);
-    const versionNumberMatch = configureAc.match(/FFI_VERSION_NUMBER=(\d+)/);
-    
-    if (!versionStringMatch || !versionNumberMatch) {
-        throw new Error('Could not extract version from configure.ac');
-    }
-    
-    return {
-        string: versionStringMatch[1],
-        number: parseInt(versionNumberMatch[1], 10)
-    };
+  const configureAc = fs.readFileSync(path.join(LIBFFI_DIR, "configure.ac"), "utf8");
+
+  const versionStringMatch = configureAc.match(/FFI_VERSION_STRING="([^"]+)"/);
+  const versionNumberMatch = configureAc.match(/FFI_VERSION_NUMBER=(\d+)/);
+
+  if (!versionStringMatch || !versionNumberMatch) {
+    throw new Error("Could not extract version from configure.ac");
+  }
+
+  return {
+    string: versionStringMatch[1],
+    number: parseInt(versionNumberMatch[1], 10),
+  };
 }
 
 /**
  * Generate fficonfig.h from template
  */
 function generateFficonfig(version) {
-    const template = fs.readFileSync(path.join(TEMPLATE_DIR, 'fficonfig.h.in'), 'utf8');
-    return template.replace(/@VERSION@/g, version.string);
+  let output = fs.readFileSync(path.join(TEMPLATE_DIR, "fficonfig.h.in"), "utf8");
+  output = output.replace(/@VERSION@/g, version.string);
+
+  // Fix FFI_EXEC_TRAMPOLINE_TABLE for x86_64 macOS
+  output = output.replace(/#if defined\(FFI_PLATFORM_MACOS\)\s*#  define FFI_EXEC_TRAMPOLINE_TABLE 1\s*#endif/, "#if defined(FFI_PLATFORM_MACOS) && !defined(X86_64)\n#  define FFI_EXEC_TRAMPOLINE_TABLE 1\n#endif");
+
+  return output;
 }
 
 /**
  * Generate ffi.h from libffi's ffi.h.in template
  */
 function generateFfiH(version) {
-    let template = fs.readFileSync(path.join(LIBFFI_DIR, 'include', 'ffi.h.in'), 'utf8');
-    
-    // Platform detection to insert
-    const platformDetection = `/* ============================================================================
+  let template = fs.readFileSync(path.join(LIBFFI_DIR, "include", "ffi.h.in"), "utf8");
+
+  // Platform detection to insert
+  const platformDetection = `/* ============================================================================
  * Platform/Architecture Detection and Target Definition
  * ============================================================================
  *
@@ -99,8 +104,8 @@ function generateFfiH(version) {
 #  endif
 #endif`;
 
-    // ffitarget include logic
-    const ffitargetInclude = `/* Include the appropriate ffitarget.h based on architecture */
+  // ffitarget include logic
+  const ffitargetInclude = `/* Include the appropriate ffitarget.h based on architecture */
 #if defined(X86_WIN64) || defined(X86_64) || defined(X86_WIN32) || defined(X86)
 #  include "x86/ffitarget.h"
 #elif defined(AARCH64)
@@ -111,89 +116,77 @@ function generateFfiH(version) {
 #  error "Unsupported architecture for libffi"
 #endif`;
 
-    let output = template;
-    
-    // Update version in copyright header
-    output = output.replace(/libffi @VERSION@/g, `libffi ${version.string}`);
-    
-    // Replace @TARGET@ block with platform detection
-    output = output.replace(
-        /\/\* Specify which architecture libffi is configured for\. \*\/\s*#ifndef @TARGET@\s*#define @TARGET@\s*#endif/,
-        platformDetection
-    );
-    
-    // Replace @HAVE_LONG_DOUBLE@ - always 1 for our platforms
-    output = output.replace(/@HAVE_LONG_DOUBLE@/g, '1');
-    
-    // Replace @FFI_EXEC_TRAMPOLINE_TABLE@ - conditional for macOS
-    output = output.replace(
-        /#if @FFI_EXEC_TRAMPOLINE_TABLE@/g,
-        '#if defined(__APPLE__) && defined(__MACH__)'
-    );
-    output = output.replace(/@FFI_EXEC_TRAMPOLINE_TABLE@/g, '0');
-    
-    // Replace version placeholders
-    output = output.replace(/@FFI_VERSION_STRING@/g, version.string);
-    output = output.replace(/@FFI_VERSION_NUMBER@/g, version.number.toString());
-    
-    // Replace #include <ffitarget.h> with our conditional include
-    output = output.replace(
-        /#include <ffitarget\.h>/,
-        ffitargetInclude
-    );
-    
-    // Wrap __attribute__((deprecated)) for MSVC compatibility
-    output = output.replace(
-        /(\s+)__attribute__\(\(deprecated\)\);/g,
-        '\n#if defined(__GNUC__)\n  __attribute__((deprecated))\n#endif\n  ;'
-    );
-    
-    return output;
+  let output = template;
+
+  // Update version in copyright header
+  output = output.replace(/libffi @VERSION@/g, `libffi ${version.string}`);
+
+  // Replace @TARGET@ block with platform detection
+  output = output.replace(/\/\* Specify which architecture libffi is configured for\. \*\/\s*#ifndef @TARGET@\s*#define @TARGET@\s*#endif/, platformDetection);
+
+  // Replace @HAVE_LONG_DOUBLE@ - always 1 for our platforms
+  output = output.replace(/@HAVE_LONG_DOUBLE@/g, "1");
+
+  // Replace @FFI_EXEC_TRAMPOLINE_TABLE@ - conditional for macOS
+  output = output.replace(/#if @FFI_EXEC_TRAMPOLINE_TABLE@/g, "#if defined(__APPLE__) && defined(__MACH__)");
+  output = output.replace(/@FFI_EXEC_TRAMPOLINE_TABLE@/g, "0");
+
+  // Replace version placeholders
+  output = output.replace(/@FFI_VERSION_STRING@/g, version.string);
+  output = output.replace(/@FFI_VERSION_NUMBER@/g, version.number.toString());
+
+  // Replace #include <ffitarget.h> with our conditional include
+  output = output.replace(/#include <ffitarget\.h>/, ffitargetInclude);
+
+  // Wrap __attribute__((deprecated)) for MSVC compatibility
+  output = output.replace(/(\s+)__attribute__\(\(deprecated\)\);/g, "\n#if defined(__GNUC__)\n  __attribute__((deprecated))\n#endif\n  ;");
+
+  return output;
 }
 
 /**
  * Main
  */
 function main() {
-    console.log('Generating libffi headers for node-ctypes...\n');
-    
-    // Check if libffi sources exist
-    if (!fs.existsSync(path.join(LIBFFI_DIR, 'configure.ac'))) {
-        console.error('Error: libffi sources not found at', LIBFFI_DIR);
-        console.error('Please ensure third-party/libffi contains the libffi source code.');
-        console.error('Run: git submodule update --init');
-        process.exit(1);
-    }
-    
-    // Check if template exists
-    if (!fs.existsSync(path.join(TEMPLATE_DIR, 'fficonfig.h.in'))) {
-        console.error('Error: fficonfig.h.in template not found at', TEMPLATE_DIR);
-        process.exit(1);
-    }
-    
-    // Extract version
-    const version = extractVersion();
-    console.log(`libffi version: ${version.string} (${version.number})`);
-    
-    // Ensure output directory exists
-    if (!fs.existsSync(OUTPUT_DIR)) {
-        fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-    }
-    
-    // Generate fficonfig.h
-    const fficonfig = generateFficonfig(version);
-    const fficonfigPath = path.join(OUTPUT_DIR, 'fficonfig.h');
-    fs.writeFileSync(fficonfigPath, fficonfig);
-    console.log(`Generated: ${fficonfigPath}`);
-    
-    // Generate ffi.h
-    const ffiH = generateFfiH(version);
-    const ffiHPath = path.join(OUTPUT_DIR, 'ffi.h');
-    fs.writeFileSync(ffiHPath, ffiH);
-    console.log(`Generated: ${ffiHPath}`);
-    
-    console.log('\nDone! Headers generated successfully.');
-    console.log('Run "npm run rebuild" to rebuild with the new headers.');
+  console.log("Generating libffi headers for node-ctypes...\n");
+
+  // Check if libffi sources exist
+  if (!fs.existsSync(path.join(LIBFFI_DIR, "configure.ac"))) {
+    console.error("Error: libffi sources not found at", LIBFFI_DIR);
+    console.error("Please ensure third-party/libffi contains the libffi source code.");
+    console.error("Run: git submodule update --init");
+    process.exit(1);
+  }
+
+  // Check if template exists
+  if (!fs.existsSync(path.join(TEMPLATE_DIR, "fficonfig.h.in"))) {
+    console.error("Error: fficonfig.h.in template not found at", TEMPLATE_DIR);
+    process.exit(1);
+  }
+
+  // Extract version
+  const version = extractVersion();
+  console.log(`libffi version: ${version.string} (${version.number})`);
+
+  // Ensure output directory exists
+  if (!fs.existsSync(OUTPUT_DIR)) {
+    fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+  }
+
+  // Generate fficonfig.h
+  const fficonfig = generateFficonfig(version);
+  const fficonfigPath = path.join(OUTPUT_DIR, "fficonfig.h");
+  fs.writeFileSync(fficonfigPath, fficonfig);
+  console.log(`Generated: ${fficonfigPath}`);
+
+  // Generate ffi.h
+  const ffiH = generateFfiH(version);
+  const ffiHPath = path.join(OUTPUT_DIR, "ffi.h");
+  fs.writeFileSync(ffiHPath, ffiH);
+  console.log(`Generated: ${ffiHPath}`);
+
+  console.log("\nDone! Headers generated successfully.");
+  console.log('Run "npm run rebuild" to rebuild with the new headers.');
 }
 
 main();
