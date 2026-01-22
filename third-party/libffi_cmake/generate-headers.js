@@ -127,8 +127,8 @@ function generateFfiH(version) {
   // Replace @HAVE_LONG_DOUBLE@ - always 1 for our platforms
   output = output.replace(/@HAVE_LONG_DOUBLE@/g, "1");
 
-  // Replace @FFI_EXEC_TRAMPOLINE_TABLE@ - conditional for macOS
-  output = output.replace(/#if @FFI_EXEC_TRAMPOLINE_TABLE@/g, "#if defined(FFI_PLATFORM_MACOS)");
+  // Replace @FFI_EXEC_TRAMPOLINE_TABLE@ - only on macOS AArch64
+  output = output.replace(/#if @FFI_EXEC_TRAMPOLINE_TABLE@/g, "#if defined(FFI_PLATFORM_MACOS) && defined(FFI_ARCH_AARCH64)");
   output = output.replace(/@FFI_EXEC_TRAMPOLINE_TABLE@/g, "0");
 
   // Replace version placeholders
