@@ -7,8 +7,53 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
 import * as ctypes from "node-ctypes";
+import { platform } from "node:os";
 
 describe("Basic Types", function () {
+  describe("Character Pointer Type (Python-style)", function () {
+    it("should handle char_p / c_char_p", function () {
+      const val = new ctypes.c_char_p("Hello, World!");
+      assert.strictEqual(val.value, "Hello, World!");
+
+      const val2 = new ctypes.c_char_p("");
+      assert.strictEqual(val2.value, "");
+    });
+
+    it("should handle null char_p", function () {
+      const val = new ctypes.c_char_p(null);
+      assert.strictEqual(val.value, null);
+    });
+
+    it("should allow modifying c_char_p value", function () {
+      const val = new ctypes.c_char_p("Initial Value");
+      assert.strictEqual(val.value, "Initial Value");
+      val.value = "Modified Value";
+      assert.strictEqual(val.value, "Modified Value");
+    });
+  });
+
+  describe("Wide Character Pointer Type (Python-style)", function () {
+    it("should handle wchar_p / c_wchar_p", function () {
+      const val = new ctypes.c_wchar_p("Hello, Wide World!");
+      assert.strictEqual(val.value, "Hello, Wide World!");
+
+      const val2 = new ctypes.c_wchar_p("");
+      assert.strictEqual(val2.value, "");
+    });
+
+    it("should handle null wchar_p", function () {
+      const val = new ctypes.c_wchar_p(null);
+      assert.strictEqual(val.value, null);
+    });
+
+    it("should allow modifying c_wchar_p value", function () {
+      const val = new ctypes.c_wchar_p("Initial Wide Value");
+      assert.strictEqual(val.value, "Initial Wide Value");
+      val.value = "Modified Wide Value";
+      assert.strictEqual(val.value, "Modified Wide Value");
+    });
+  });
+
   describe("Integer Types (Python-style)", function () {
     it("should handle int8 / c_int8", function () {
       const val = new ctypes.c_int8(-128);

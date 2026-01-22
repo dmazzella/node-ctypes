@@ -8,10 +8,44 @@ from ctypes import (
     c_int8, c_uint8, c_int16, c_uint16, c_int32, c_uint32,
     c_int64, c_uint64, c_float, c_double, c_bool, c_void_p, c_size_t,
     c_long, c_ulong, c_byte, c_ubyte, c_short, c_ushort, c_int, c_uint,
-    c_longlong, c_ulonglong, sizeof, create_string_buffer, byref, memmove
+    c_longlong, c_ulonglong, sizeof, create_string_buffer, byref, memmove,
+    c_char_p, c_wchar_p
 )
 
 class TestBasicTypes(unittest.TestCase):
+
+    def test_char_p_c_char_p(self):
+        """Test char_p / c_char_p"""
+        val = c_char_p(b"Hello, World!")
+        self.assertEqual(val.value, b"Hello, World!")
+        
+        val = c_char_p(b"")
+        self.assertEqual(val.value, b"")
+
+        val = c_char_p(None)
+        self.assertIsNone(val.value)
+
+        val = c_char_p(b"Test String")
+        self.assertEqual(val.value, b"Test String")
+        val.value = b"New String"
+        self.assertEqual(val.value, b"New String")
+
+    def test_wchar_p_c_wchar_p(self):
+        """Test wchar_p / c_wchar_p"""
+        val = c_wchar_p("Hello, Wide World!")
+        self.assertEqual(val.value, "Hello, Wide World!")
+        
+        val = c_wchar_p("")
+        self.assertEqual(val.value, "")
+
+        val = c_wchar_p(None)
+        self.assertIsNone(val.value)
+
+        val = c_wchar_p("Test Wide String")
+        self.assertEqual(val.value, "Test Wide String")
+        val.value = "New Wide String"
+        self.assertEqual(val.value, "New Wide String")
+
     def test_int8_c_int8(self):
         """Test int8 / c_int8"""
         buf = create_string_buffer(1)
