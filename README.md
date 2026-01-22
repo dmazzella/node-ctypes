@@ -93,9 +93,16 @@ print(p.x, p.y)  # 10 20
 ```javascript
 import { CDLL, c_int, Structure } from 'node-ctypes';
 
+// Traditional syntax (always available)
 const libc = new CDLL("libc.so.6");
 const abs = libc.func("abs", c_int, [c_int]);
 console.log(abs(-42));  // 42
+
+// Python ctypes-like syntax
+const abs_func = libc.abs;
+abs_func.argtypes = [c_int];
+abs_func.restype = c_int;
+console.log(abs_func(-42));  // 42
 
 class Point extends Structure {
     static _fields_ = [
@@ -113,19 +120,25 @@ console.log(p.x, p.y);  // 10 20
 ### Basic FFI - Calling C Functions
 
 ```javascript
-import { CDLL, c_int, c_double, c_char_p } from 'node-ctypes';
+import { CDLL, c_int, c_double, c_char_p, c_size_t } from 'node-ctypes';
 
 // Load libc
 const libc = new CDLL('libc.so.6');  // Linux
 // const libc = new CDLL('msvcrt.dll');  // Windows
 // const libc = new CDLL('libc.dylib');  // macOS
 
-// Call abs() - integer absolute value
+// Traditional syntax
 const abs = libc.func('abs', c_int, [c_int]);
 console.log(abs(-42));  // 42
 
+// Python ctypes-like syntax (equivalent!)
+const abs_func = libc.abs;
+abs_func.argtypes = [c_int];
+abs_func.restype = c_int;
+console.log(abs_func(-42));  // 42
+
 // Call strlen() - string length
-const strlen = libc.func('strlen', 'size_t', [c_char_p]);
+const strlen = libc.func('strlen', c_size_t, [c_char_p]);
 console.log(strlen('Hello'));  // 5n (BigInt)
 
 // Load libm for math functions
@@ -228,10 +241,10 @@ console.log(flags.priority);  // 12
 ### Arrays - Fixed-size and Dynamic
 
 ```javascript
-import { c_int, c_uint8, array } from 'node-ctypes';
+import { c_int32, c_uint8, array } from 'node-ctypes';
 
 // Fixed-size array
-const IntArray = array('int32', 5);
+const IntArray = array(c_int32, 5);
 const arr = IntArray.create([1, 2, 3, 4, 5]);
 
 // Array access
@@ -244,12 +257,12 @@ for (const val of arr) {
 }
 
 // Arrays in structs
-import { Structure, array } from 'node-ctypes';
+import { Structure, array, c_uint8 } from 'node-ctypes';
 
 class Packet extends Structure {
     static _fields_ = [
-        ["header", array("c_uint8", 8)],
-        ["data", array("c_uint8", 256)]
+        ["header", array(c_uint8, 8)],
+        ["data", array(c_uint8, 256)]
     ];
 }
 
@@ -324,7 +337,7 @@ img.pixels[0].color.rgb.g = 128;  // Works correctly!
 ### Callbacks - JavaScript Functions in C
 
 ```javascript
-import { CDLL, callback, c_int, c_void_p, readValue, writeValue, create_string_buffer } from 'node-ctypes';
+import { CDLL, callback, c_int32, c_void, c_void_p, c_size_t, readValue, writeValue, create_string_buffer } from 'node-ctypes';
 
 const libc = new CDLL('msvcrt.dll');  // or libc.so.6 on Linux
 
@@ -332,8 +345,8 @@ const libc = new CDLL('msvcrt.dll');  // or libc.so.6 on Linux
 const compare = callback(
     (a, b) => {
         // a and b are pointers to int32 values
-        const aVal = readValue(a, 'int32');
-        const bVal = readValue(b, 'int32');
+        const aVal = readValue(a, c_int32);
+        const bVal = readValue(b, c_int32);
         return aVal - bVal;
     },
     c_int,              // return type
@@ -341,21 +354,21 @@ const compare = callback(
 );
 
 // Sort an array using qsort
-const qsort = libc.func('qsort', 'void', [
+const qsort = libc.func('qsort', c_void, [
     c_void_p,  // array pointer
-    'size_t',  // number of elements
-    'size_t',  // element size
+    c_size_t,  // number of elements
+    c_size_t,  // element size
     c_void_p   // comparison function
 ]);
 
 const arr = create_string_buffer(5 * 4);
 const values = [5, 2, 8, 1, 9];
-values.forEach((v, i) => writeValue(arr, 'int32', v, i * 4));
+values.forEach((v, i) => writeValue(arr, c_int32, v, i * 4));
 qsort(arr, 5, 4, compare.pointer);
 
 // Array is now sorted: [1, 2, 5, 8, 9]
-console.log(readValue(arr, 'int32', 0));  // 1
-console.log(readValue(arr, 'int32', 4));  // 2
+console.log(readValue(arr, c_int32, 0));  // 1
+console.log(readValue(arr, c_int32, 4));  // 2
 
 // IMPORTANT: Release callback when done
 compare.release();
@@ -399,7 +412,7 @@ console.log(string_at(buffer));  // "Pi ≈ 3.14"
 ### Windows API - Full Support
 
 ```javascript
-import { WinDLL, Structure, c_uint16, c_void_p, c_wchar_p, c_int } from 'node-ctypes';
+import { WinDLL, Structure, c_uint16, c_uint32, c_void_p, c_wchar_p, c_int } from 'node-ctypes';
 
 // WinDLL uses __stdcall convention (default for Windows API)
 const kernel32 = new WinDLL('kernel32.dll');
@@ -419,7 +432,7 @@ class SYSTEMTIME extends Structure {
 }
 
 // Get local time
-const GetLocalTime = kernel32.func('GetLocalTime', 'void', [c_void_p]);
+const GetLocalTime = kernel32.func('GetLocalTime', c_void, [c_void_p]);
 
 const st = new SYSTEMTIME();
 GetLocalTime(st);  // Pass struct directly - automatic _buffer extraction!
@@ -433,7 +446,7 @@ const MessageBoxW = user32.func('MessageBoxW', c_int, [
     c_void_p,   // hWnd
     c_wchar_p,  // lpText
     c_wchar_p,  // lpCaption
-    'uint32'    // uType
+    c_uint32    // uType
 ]);
 
 // Create UTF-16 buffers for wide strings
@@ -549,10 +562,18 @@ This section provides a more complete description of the APIs exported from `lib
 
 Example:
 ```js
-import { CDLL } from './lib/index.js';
+import { CDLL, c_int32 } from './lib/index.js';
 const libc = new CDLL(null);
-const abs = libc.func('abs', 'int32', ['int32']);
+
+// Traditional syntax
+const abs = libc.func('abs', c_int32, [c_int32]);
 console.log(abs(-5));
+
+// Python ctypes-like syntax
+const abs_func = libc.abs;
+abs_func.argtypes = [c_int32];
+abs_func.restype = c_int32;
+console.log(abs_func(-5));
 ```
 
 **Detailed CDLL API**
@@ -560,6 +581,7 @@ console.log(abs(-5));
     - automatically extracts `._buffer` from struct objects passed as arguments;
     - exposes non-enumerable metadata: `funcName`, `address`, `_ffi`; 
     - provides the `errcheck` property as getter/setter to intercept return errors.
+- **Python ctypes-like access**: `libc.functionName` returns a wrapper with `argtypes`/`restype`/`errcheck` properties for Python-compatible syntax.
 - `symbol(name)` → `BigInt` : address of a symbol.
 - `close()` : closes the library and clears the cache.
 - `path` (getter) : library path.
@@ -581,9 +603,9 @@ Note: always call `release()` when a callback is no longer needed.
 
 Example string creation and passing to function:
 ```js
-import { create_string_buffer, CDLL } from './lib/index.js';
+import { create_string_buffer, CDLL, c_int32, c_void_p } from './lib/index.js';
 const libc = new CDLL(null);
-const puts = libc.func('puts', 'int32', ['pointer']);
+const puts = libc.func('puts', c_int32, [c_void_p]);
 const s = create_string_buffer('hello');
 puts(s);
 ```
@@ -685,7 +707,7 @@ Base class for Python-like union definitions. Subclasses should define `static _
 | Feature | Python ctypes | node-ctypes |
 |---------|---------------|-------------|
 | **Load library** | `CDLL("lib.so")` | `new CDLL("lib.so")` |
-| **Define function** | `lib.func.argtypes = [c_int]`<br>`lib.func.restype = c_int` | `lib.func("func", c_int, [c_int])` |
+| **Define function** | `lib.func.argtypes = [c_int]`<br>`lib.func.restype = c_int` | `lib.func("func", c_int, [c_int])`<br>**or**<br>`lib.func.argtypes = [c_int]`<br>`lib.func.restype = c_int` |
 | **Structs** | `class Point(Structure):`<br>&nbsp;&nbsp;`_fields_ = [("x", c_int)]` | `class Point extends Structure`<br>&nbsp;&nbsp;`{ static _fields_ = [["x", c_int]] }` |
 | **Unions** | `class U(Union):`<br>&nbsp;&nbsp;`_fields_ = [("i", c_int)]` | `class U extends Union`<br>&nbsp;&nbsp;`{ static _fields_ = [["i", c_int]] }` |
 | **Arrays** | `c_int * 5` | `array(c_int, 5)` |
@@ -715,8 +737,8 @@ Base class for Python-like union definitions. Subclasses should define `static _
 ⚠️ **Differences from Python ctypes**:
 - Structs use `.toObject()` for property access (eager loading for performance)
 - Callbacks must be manually released with `.release()`
-- Function definition is combined: `func(name, returnType, argTypes)` vs separate argtypes/restype
-- No `POINTER()` type - use `c_void_p` or type name string
+- **Function definition supports both syntaxes**: `func(name, returnType, argTypes)` **or** `func.argtypes = [...]; func.restype = ...`
+- No `POINTER()` type - use `c_void_p`
 
 
 ## Limitations & Known Issues

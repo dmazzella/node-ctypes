@@ -42,6 +42,27 @@ describe("Functions and Callbacks", function () {
       assert.strictEqual(strlen(""), 0n);
       assert.strictEqual(strlen("Hello, World!"), 13n);
     });
+
+    // Python ctypes-like syntax
+    it("should call abs() with Python ctypes-like syntax", function () {
+      const abs = libc.abs;
+      abs.argtypes = [ctypes.c_int32];
+      abs.restype = ctypes.c_int32;
+
+      assert.strictEqual(abs(-42), 42);
+      assert.strictEqual(abs(42), 42);
+      assert.strictEqual(abs(0), 0);
+    });
+
+    it("should call strlen() with Python ctypes-like syntax", function () {
+      const strlen = libc.strlen;
+      strlen.argtypes = [ctypes.c_char_p];
+      strlen.restype = ctypes.c_size_t;
+
+      assert.strictEqual(strlen("hello"), 5n);
+      assert.strictEqual(strlen(""), 0n);
+      assert.strictEqual(strlen("Hello, World!"), 13n);
+    });
   });
 
   describe("Functions with Multiple Arguments", function () {
@@ -94,6 +115,22 @@ describe("Functions and Callbacks", function () {
       };
 
       const result = strlen("hello");
+      assert.strictEqual(result, 10n); // 5 * 2
+    });
+
+    it("should support errcheck with Python ctypes-like syntax", function () {
+      const strlen = libc.strlen;
+      strlen.argtypes = [ctypes.c_char_p];
+      strlen.restype = ctypes.c_size_t;
+
+      let errcheckCalled = false;
+      strlen.errcheck = function (result, func, args) {
+        errcheckCalled = true;
+        return result * 2n; // Double the result
+      };
+
+      const result = strlen("hello");
+      assert.strictEqual(errcheckCalled, true);
       assert.strictEqual(result, 10n); // 5 * 2
     });
 
