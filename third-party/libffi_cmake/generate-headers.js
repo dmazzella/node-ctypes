@@ -50,7 +50,7 @@ function generateFficonfig(version) {
   output = output.replace(/@VERSION@/g, version.string);
 
   // Fix FFI_EXEC_TRAMPOLINE_TABLE for x86_64 macOS
-  output = output.replace(/#if defined\(FFI_PLATFORM_MACOS\)\s*#  define FFI_EXEC_TRAMPOLINE_TABLE 1\s*#endif/, "#if defined(FFI_PLATFORM_MACOS) && defined(FFI_ARCH_AARCH64)\n#  define FFI_EXEC_TRAMPOLINE_TABLE 1\n#endif");
+  output = output.replace(/#if defined\(FFI_PLATFORM_MACOS\)\s*#  define FFI_EXEC_TRAMPOLINE_TABLE 1\s*#endif/, "#if defined(FFI_PLATFORM_MACOS)\n#  define FFI_EXEC_TRAMPOLINE_TABLE 1\n#endif");
 
   return output;
 }
@@ -128,7 +128,7 @@ function generateFfiH(version) {
   output = output.replace(/@HAVE_LONG_DOUBLE@/g, "1");
 
   // Replace @FFI_EXEC_TRAMPOLINE_TABLE@ - conditional for macOS
-  output = output.replace(/#if @FFI_EXEC_TRAMPOLINE_TABLE@/g, "#if defined(FFI_PLATFORM_MACOS) && defined(FFI_ARCH_AARCH64)");
+  output = output.replace(/#if @FFI_EXEC_TRAMPOLINE_TABLE@/g, "#if defined(FFI_PLATFORM_MACOS)");
   output = output.replace(/@FFI_EXEC_TRAMPOLINE_TABLE@/g, "0");
 
   // Replace version placeholders
