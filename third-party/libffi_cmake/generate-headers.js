@@ -50,7 +50,7 @@ function generateFficonfig(version) {
   output = output.replace(/@VERSION@/g, version.string);
 
   // Fix FFI_EXEC_TRAMPOLINE_TABLE for x86_64 macOS
-  output = output.replace(/#if defined\(FFI_PLATFORM_MACOS\)\s*#  define FFI_EXEC_TRAMPOLINE_TABLE 1\s*#endif/, "#if defined(FFI_PLATFORM_MACOS) && !defined(X86_64)\n#  define FFI_EXEC_TRAMPOLINE_TABLE 1\n#endif");
+  output = output.replace(/#if defined\(FFI_PLATFORM_MACOS\)\s*#  define FFI_EXEC_TRAMPOLINE_TABLE 1\s*#endif/, "#if defined(FFI_PLATFORM_MACOS) && defined(FFI_ARCH_AARCH64)\n#  define FFI_EXEC_TRAMPOLINE_TABLE 1\n#endif");
 
   return output;
 }

@@ -223,7 +223,7 @@
 /* #undef FFI_EXEC_TRAMPOLINE_TABLE */
 
 /* Special exec table needed on macOS */
-#if defined(FFI_PLATFORM_MACOS) && !defined(X86_64)
+#if defined(FFI_PLATFORM_MACOS) && defined(FFI_ARCH_AARCH64)
 #  define FFI_EXEC_TRAMPOLINE_TABLE 1
 #endif
 
