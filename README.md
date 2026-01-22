@@ -94,7 +94,10 @@ print(p.x, p.y)  # 10 20
 import { CDLL, c_int, Structure } from 'node-ctypes';
 
 // Traditional syntax (always available)
-const libc = new CDLL("libc.so.6");
+const libc = new CDLL("libc.so.6"); // Linux
+// const libc = new CDLL('msvcrt.dll');  // Windows
+// const libc = new CDLL('libc.dylib');  // macOS
+
 const abs = libc.func("abs", c_int, [c_int]);
 console.log(abs(-42));  // 42
 
@@ -142,7 +145,10 @@ const strlen = libc.func('strlen', c_size_t, [c_char_p]);
 console.log(strlen('Hello'));  // 5n (BigInt)
 
 // Load libm for math functions
-const libm = new CDLL('libm.so.6');
+const libm = new CDLL('libm.so.6'); // Linux
+// const libb = new CDLL('ucrtbase.dll'); // Windows
+// const libm = new CDLL('libm.dylib'); // macOS
+
 const sqrt = libm.func('sqrt', c_double, [c_double]);
 console.log(sqrt(16.0));  // 4.0
 ```
@@ -271,7 +277,7 @@ const pkt = new Packet({
     data: new Array(256).fill(0)
 });
 
-console.log(pkt.header);  // [1, 2, 3, 4, 5, 6, 7, 8]
+console.log(pkt.header.toString());  // [1, 2, 3, 4, 5, 6, 7, 8]
 ```
 
 ### Complex Nested Structures
@@ -332,6 +338,7 @@ console.log(img.pixels[1].color.value);  // -16711936 (0xFF00FF00 as signed)
 
 // Union nested in struct - direct property access!
 img.pixels[0].color.rgb.g = 128;  // Works correctly!
+console.log(img.pixels[0].color.rgb.g);  // 128
 ```
 
 ### Callbacks - JavaScript Functions in C
@@ -349,7 +356,7 @@ const compare = callback(
         const bVal = readValue(b, c_int32);
         return aVal - bVal;
     },
-    c_int,              // return type
+    c_int32,              // return type
     [c_void_p, c_void_p]  // argument types: two pointers
 );
 
@@ -388,16 +395,16 @@ const sprintf = libc.func('sprintf', c_int, [c_void_p, c_char_p]);
 const buffer = Buffer.alloc(256);
 
 // Pass extra arguments - automatically handled as variadic
-sprintf(buffer, create_string_buffer('Hello %s!'), create_string_buffer('World'));
+sprintf(buffer, 'Hello %s!', 'World');
 console.log(string_at(buffer));  // "Hello World!"
 
-sprintf(buffer, create_string_buffer('Number: %d'), 42);
+sprintf(buffer, 'Number: %d', 42);
 console.log(string_at(buffer));  // "Number: 42"
 
-sprintf(buffer, create_string_buffer('%s: %d + %d = %d'), create_string_buffer('Sum'), 10, 20, 30);
+sprintf(buffer, '%s: %d + %d = %d', 'Sum', 10, 20, 30);
 console.log(string_at(buffer));  // "Sum: 10 + 20 = 30"
 
-sprintf(buffer, create_string_buffer('Pi ≈ %.2f'), 3.14159);
+sprintf(buffer, 'Pi ≈ %.2f', 3.14159);
 console.log(string_at(buffer));  // "Pi ≈ 3.14"
 ```
 
@@ -713,8 +720,8 @@ Base class for Python-like union definitions. Subclasses should define `static _
 | **Arrays** | `c_int * 5` | `array(c_int, 5)` |
 | **Bit fields** | `("flags", c_uint, 3)` | `bitfield(c_uint32, 3)` |
 | **Callbacks** | `CFUNCTYPE(c_int, c_int)` | `callback(fn, c_int, [c_int])` |
-| **Strings** | `c_char_p(b"hello")` | `create_string_buffer("hello")` |
-| **Pointers** | `POINTER(c_int)` | `c_void_p` or `"pointer"` |
+| **Strings** | `c_char_p(b"hello")` | `create_string_buffer("hello")`<br>**or**<br>`c_char_p(b"hello")` |
+| **Pointers** | `POINTER(c_int)` | `c_void_p` |
 | **Variadic** | `sprintf(buf, b"%d", 42)` | `sprintf(buf, fmt, 42)` (auto) |
 | **Sizeof** | `sizeof(c_int)` | `sizeof(c_int)` |
 
