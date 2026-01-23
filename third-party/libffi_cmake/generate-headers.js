@@ -49,8 +49,11 @@ function generateFficonfig(version) {
   let output = fs.readFileSync(path.join(TEMPLATE_DIR, "fficonfig.h.in"), "utf8");
   output = output.replace(/@VERSION@/g, version.string);
 
-  // Fix FFI_EXEC_TRAMPOLINE_TABLE for x86_64 macOS
-  output = output.replace(/#if defined\(FFI_PLATFORM_MACOS\)\s*#  define FFI_EXEC_TRAMPOLINE_TABLE 1\s*#endif/, "#if defined(FFI_PLATFORM_MACOS)\n#  define FFI_EXEC_TRAMPOLINE_TABLE 1\n#endif");
+  // Define FFI_MMAP_EXEC_WRIT for macOS x64
+  output = output.replace(
+    "/* No mmap exec workarounds needed */\n/* #undef FFI_MMAP_EXEC_WRIT */\n/* #undef FFI_MMAP_EXEC_EMUTRAMP_PAX */",
+    "/* mmap exec workaround needed on macOS x64 */\n#if defined(FFI_PLATFORM_MACOS) && defined(FFI_ARCH_X86_64)\n#  define FFI_MMAP_EXEC_WRIT 1\n#endif\n\n/* No mmap exec workarounds needed */\n/* #undef FFI_MMAP_EXEC_WRIT */\n/* #undef FFI_MMAP_EXEC_EMUTRAMP_PAX */"
+  );
 
   return output;
 }
@@ -127,9 +130,8 @@ function generateFfiH(version) {
   // Replace @HAVE_LONG_DOUBLE@ - always 1 for our platforms
   output = output.replace(/@HAVE_LONG_DOUBLE@/g, "1");
 
-  // Replace @FFI_EXEC_TRAMPOLINE_TABLE@ - only on macOS AArch64
-  output = output.replace(/#if @FFI_EXEC_TRAMPOLINE_TABLE@/g, "#if defined(FFI_PLATFORM_MACOS) && defined(FFI_ARCH_AARCH64)");
-  output = output.replace(/@FFI_EXEC_TRAMPOLINE_TABLE@/g, "0");
+  // Replace @FFI_EXEC_TRAMPOLINE_TABLE@ - use the macro defined in fficonfig.h
+  output = output.replace(/#if @FFI_EXEC_TRAMPOLINE_TABLE@/g, "#if FFI_EXEC_TRAMPOLINE_TABLE");
 
   // Replace version placeholders
   output = output.replace(/@FFI_VERSION_STRING@/g, version.string);

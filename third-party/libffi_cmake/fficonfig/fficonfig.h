@@ -222,9 +222,14 @@
 /* No special exec table needed */
 /* #undef FFI_EXEC_TRAMPOLINE_TABLE */
 
-/* Special exec table needed on macOS */
-#if defined(FFI_PLATFORM_MACOS)
+/* Special exec table needed on macOS ARM64 */
+#if defined(FFI_PLATFORM_MACOS) && defined(FFI_ARCH_AARCH64)
 #  define FFI_EXEC_TRAMPOLINE_TABLE 1
+#endif
+
+/* mmap exec workaround needed on macOS x64 */
+#if defined(FFI_PLATFORM_MACOS) && defined(FFI_ARCH_X86_64)
+#  define FFI_MMAP_EXEC_WRIT 1
 #endif
 
 /* No mmap exec workarounds needed */

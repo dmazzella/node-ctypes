@@ -402,7 +402,7 @@ FFI_API size_t ffi_get_closure_size (void);
 __declspec(align(8))
 #endif
 typedef struct {
-#if defined(FFI_PLATFORM_MACOS) && defined(FFI_ARCH_AARCH64)
+#if FFI_EXEC_TRAMPOLINE_TABLE
   void *trampoline_table;
   void *trampoline_table_entry;
 #else
@@ -455,7 +455,7 @@ ffi_prep_closure_loc (ffi_closure*,
 # pragma pack 8
 #endif
 typedef struct {
-#if defined(FFI_PLATFORM_MACOS) && defined(FFI_ARCH_AARCH64)
+#if FFI_EXEC_TRAMPOLINE_TABLE
   void *trampoline_table;
   void *trampoline_table_entry;
 #else
@@ -480,7 +480,7 @@ typedef struct {
 } ffi_raw_closure;
 
 typedef struct {
-#if defined(FFI_PLATFORM_MACOS) && defined(FFI_ARCH_AARCH64)
+#if FFI_EXEC_TRAMPOLINE_TABLE
   void *trampoline_table;
   void *trampoline_table_entry;
 #else
