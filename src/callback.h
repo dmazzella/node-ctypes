@@ -65,7 +65,7 @@ namespace ctypes
         // Sincronizzazione per thread esterni
         std::mutex result_mutex;
         std::condition_variable result_cv;
-        uint8_t result_buffer[64];
+        std::vector<uint8_t> result_buffer; // Dynamic buffer to prevent overflow
         std::atomic<bool> result_ready{false};
         std::string last_error; // Ultimo errore catturato
     };

@@ -248,7 +248,14 @@ namespace ctypes
         }
     }
 
-    FFIFunction::~FFIFunction() = default;
+    FFIFunction::~FFIFunction()
+    {
+        // Release errcheck callback to prevent memory leak
+        if (!errcheck_callback_.IsEmpty())
+        {
+            errcheck_callback_.Reset();
+        }
+    }
 
     bool FFIFunction::PrepareFFI(Napi::Env env)
     {
@@ -837,18 +844,38 @@ namespace ctypes
         }
         else
         {
-            // Per funzioni variadiche con molti argomenti, potrebbe essere necessario rialloca
-            if (argc > heap_arg_values_.size())
+            // Pre-allocate with reasonable capacity to reduce reallocations
+            size_t required_size = argc * ARG_SLOT_SIZE;
+            if (heap_arg_storage_.capacity() < required_size)
             {
-                heap_arg_storage_.resize(argc * ARG_SLOT_SIZE);
+                // Reserve more than needed to amortize future allocations
+                heap_arg_storage_.reserve(required_size * 2);
+            }
+            if (heap_arg_storage_.size() < required_size)
+            {
+                heap_arg_storage_.resize(required_size);
+            }
+
+            if (heap_arg_values_.capacity() < argc)
+            {
+                heap_arg_values_.reserve(argc * 2);
+            }
+            if (heap_arg_values_.size() < argc)
+            {
                 heap_arg_values_.resize(argc);
             }
+
             arg_storage = heap_arg_storage_.data();
             arg_values = heap_arg_values_.data();
         }
 
-        // Reset string buffer (mantieni capacità)
+        // Reset string buffer but keep capacity to avoid reallocation
         string_buffer_.clear();
+        // Periodically shrink if too large (over 10MB)
+        if (string_buffer_.capacity() > 10 * 1024 * 1024)
+        {
+            string_buffer_.shrink_to_fit();
+        }
 
         // Converti argomenti (usa tipi inferiti per argomenti extra variadic)
         for (size_t i = 0; i < argc; i++)

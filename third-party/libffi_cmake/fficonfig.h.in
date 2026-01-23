@@ -46,6 +46,26 @@
 #  define FFI_PLATFORM_LINUX 1
 #endif
 
+/* Android (is also __linux__ but needs special handling) */
+#if defined(__ANDROID__)
+#  define FFI_PLATFORM_ANDROID 1
+#endif
+
+/* FreeBSD */
+#if defined(__FreeBSD__)
+#  define FFI_PLATFORM_FREEBSD 1
+#endif
+
+/* NetBSD */
+#if defined(__NetBSD__)
+#  define FFI_PLATFORM_NETBSD 1
+#endif
+
+/* OpenBSD */
+#if defined(__OpenBSD__)
+#  define FFI_PLATFORM_OPENBSD 1
+#endif
+
 /* ============================================================================
  * Architecture Detection
  * ============================================================================
@@ -163,8 +183,10 @@
 #define HAVE_SYS_TYPES_H 1
 #define HAVE_STRINGS_H 1
 
-/* mkostemp */
-#define HAVE_MKOSTEMP 1
+/* mkostemp - NOT available on FreeBSD < 13, OpenBSD, Solaris */
+#if !defined(__FreeBSD__) && !defined(__OpenBSD__) && !defined(__sun)
+#  define HAVE_MKOSTEMP 1
+#endif
 
 #if defined(FFI_PLATFORM_LINUX)
 #  define HAVE_MMAP_DEV_ZERO 1

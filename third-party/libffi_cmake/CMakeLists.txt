@@ -48,7 +48,7 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64|amd64")
     set(FFI_ARCH "x86_64")
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64")
     set(FFI_ARCH "aarch64")
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm|armv5l|armv6l|armv7l|armv7hf")
     set(FFI_ARCH "arm")
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "i[3-6]86|x86")
     set(FFI_ARCH "x86")
@@ -174,14 +174,40 @@ if(WIN32 AND MSVC AND NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
         list(APPEND FFI_SOURCES
             ${LIBFFI_SOURCE_DIR}/src/x86/ffi.c
         )
-        
+
         preprocess_asm_file(
             ${LIBFFI_SOURCE_DIR}/src/x86/sysv_intel.S
             sysv_intel
         )
         list(APPEND FFI_SOURCES ${sysv_intel_ASM})
-        
+
         set(FFI_TARGET "X86_WIN32")
+
+    elseif(FFI_ARCH STREQUAL "arm")
+        # Windows ARM32
+        list(APPEND FFI_SOURCES
+            ${LIBFFI_SOURCE_DIR}/src/arm/ffi.c
+        )
+
+        # ARM32 uses armasm for Windows
+        enable_language(ASM_MARMASM)
+
+        # Check if sysv_msvc_arm32.S exists, otherwise use sysv.S
+        if(EXISTS ${LIBFFI_SOURCE_DIR}/src/arm/sysv_msvc_arm32.S)
+            preprocess_asm_file(
+                ${LIBFFI_SOURCE_DIR}/src/arm/sysv_msvc_arm32.S
+                sysv_msvc_arm32
+            )
+            list(APPEND FFI_SOURCES ${sysv_msvc_arm32_ASM})
+        else()
+            preprocess_asm_file(
+                ${LIBFFI_SOURCE_DIR}/src/arm/sysv.S
+                sysv_arm
+            )
+            list(APPEND FFI_SOURCES ${sysv_arm_ASM})
+        endif()
+
+        set(FFI_TARGET "ARM")
     endif()
 
 else()

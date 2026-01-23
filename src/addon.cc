@@ -193,13 +193,17 @@ namespace ctypes
             return env.Undefined();
         }
 
-        size_t size = static_cast<size_t>(info[0].ToNumber().Int64Value());
+        int64_t size_raw = info[0].ToNumber().Int64Value();
 
-        if (size == 0)
+        // Validate: must be positive and within reasonable bounds
+        if (size_raw <= 0 || size_raw > static_cast<int64_t>(SIZE_MAX / 2))
         {
-            return env.Null();
+            Napi::RangeError::New(env, "Invalid buffer size: must be positive and within reasonable limits")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
         }
 
+        size_t size = static_cast<size_t>(size_raw);
         return Napi::Buffer<uint8_t>::New(env, size);
     }
 
@@ -228,6 +232,12 @@ namespace ctypes
         {
             bool lossless;
             uint64_t addr = info[0].As<Napi::BigInt>().Uint64Value(&lossless);
+            if (!lossless)
+            {
+                Napi::TypeError::New(env, "BigInt conversion to pointer lost precision")
+                    .ThrowAsJavaScriptException();
+                return env.Undefined();
+            }
             ptr = reinterpret_cast<void *>(addr);
         }
         else if (info[0].IsNumber())
@@ -277,12 +287,32 @@ namespace ctypes
         // Parse offset
         if (info.Length() > 2 && info[2].IsNumber())
         {
-            offset = static_cast<size_t>(info[2].ToNumber().Int64Value());
+            int64_t offset_raw = info[2].ToNumber().Int64Value();
+            if (offset_raw < 0)
+            {
+                Napi::RangeError::New(env, "Offset must be non-negative")
+                    .ThrowAsJavaScriptException();
+                return env.Undefined();
+            }
+            offset = static_cast<size_t>(offset_raw);
         }
 
         if (!ptr)
         {
             return env.Null();
+        }
+
+        // Additional validation: check if we can safely add offset
+        if (info[0].IsBuffer())
+        {
+            size_t buffer_size = info[0].As<Napi::Buffer<uint8_t>>().Length();
+            size_t type_size = CTypeSize(ctype);
+            if (offset + type_size > buffer_size)
+            {
+                Napi::RangeError::New(env, "Read would exceed buffer bounds")
+                    .ThrowAsJavaScriptException();
+                return env.Undefined();
+            }
         }
 
         void *read_ptr = static_cast<uint8_t *>(ptr) + offset;
@@ -314,6 +344,12 @@ namespace ctypes
         {
             bool lossless;
             uint64_t addr = info[0].As<Napi::BigInt>().Uint64Value(&lossless);
+            if (!lossless)
+            {
+                Napi::TypeError::New(env, "BigInt conversion to pointer lost precision")
+                    .ThrowAsJavaScriptException();
+                return env.Undefined();
+            }
             ptr = reinterpret_cast<void *>(addr);
         }
         else if (info[0].IsNumber())
@@ -363,7 +399,14 @@ namespace ctypes
         // Parse offset
         if (info.Length() > 3 && info[3].IsNumber())
         {
-            offset = static_cast<size_t>(info[3].ToNumber().Int64Value());
+            int64_t offset_raw = info[3].ToNumber().Int64Value();
+            if (offset_raw < 0)
+            {
+                Napi::RangeError::New(env, "Offset must be non-negative")
+                    .ThrowAsJavaScriptException();
+                return env.Undefined();
+            }
+            offset = static_cast<size_t>(offset_raw);
         }
 
         if (!ptr)
@@ -373,8 +416,21 @@ namespace ctypes
             return env.Undefined();
         }
 
-        void *write_ptr = static_cast<uint8_t *>(ptr) + offset;
         size_t type_size = CTypeSize(ctype);
+
+        // Additional validation for buffer writes
+        if (info[0].IsBuffer())
+        {
+            size_t buffer_size = info[0].As<Napi::Buffer<uint8_t>>().Length();
+            if (offset + type_size > buffer_size)
+            {
+                Napi::RangeError::New(env, "Write would exceed buffer bounds")
+                    .ThrowAsJavaScriptException();
+                return env.Undefined();
+            }
+        }
+
+        void *write_ptr = static_cast<uint8_t *>(ptr) + offset;
 
         int written = JSToC(env, info[2], ctype, write_ptr, type_size);
         if (written < 0)
@@ -492,10 +548,18 @@ namespace ctypes
             return env.Null();
         }
 
-        size_t max_len = SIZE_MAX;
+        // Set reasonable default limit to prevent DoS
+        size_t max_len = 1024 * 1024; // 1MB default limit
         if (info.Length() > 1 && info[1].IsNumber())
         {
-            max_len = static_cast<size_t>(info[1].ToNumber().Int64Value());
+            int64_t len_raw = info[1].ToNumber().Int64Value();
+            if (len_raw < 0 || len_raw > static_cast<int64_t>(SIZE_MAX / 2))
+            {
+                Napi::RangeError::New(env, "Invalid max_len: must be positive and reasonable")
+                    .ThrowAsJavaScriptException();
+                return env.Undefined();
+            }
+            max_len = static_cast<size_t>(len_raw);
         }
 
         size_t len = 0;
@@ -545,15 +609,27 @@ namespace ctypes
             return env.Null();
         }
 
-        size_t size = static_cast<size_t>(info[1].ToNumber().Int64Value());
+        int64_t size_raw = info[1].ToNumber().Int64Value();
+        if (size_raw <= 0 || size_raw > static_cast<int64_t>(SIZE_MAX / 2))
+        {
+            Napi::RangeError::New(env, "Invalid buffer size")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        size_t size = static_cast<size_t>(size_raw);
 
+        // WARNING: This creates a Buffer viewing external memory.
+        // The caller MUST ensure the underlying memory remains valid
+        // for the lifetime of the Buffer. Consider copying data instead
+        // if ownership is unclear.
         return Napi::Buffer<uint8_t>::New(
             env,
             static_cast<uint8_t *>(ptr),
             size,
             [](Napi::Env, void *)
             {
-                // No-op finalizer
+                // No-op finalizer - caller owns the memory
+                // This is intentional but requires careful usage
             });
     }
 
