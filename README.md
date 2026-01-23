@@ -38,7 +38,7 @@ npm install node-ctypes
 Prebuilt binaries are available for:
 - Windows x64, ARM64
 - Linux x64, ARM64
-- macOS ARM64
+- macOS x64, ARM64
 
 ### From source
 
