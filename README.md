@@ -720,7 +720,7 @@ Base class for Python-like union definitions. Subclasses should define `static _
 | **Arrays** | `c_int * 5` | `array(c_int, 5)` |
 | **Bit fields** | `("flags", c_uint, 3)` | `bitfield(c_uint32, 3)` |
 | **Callbacks** | `CFUNCTYPE(c_int, c_int)` | `callback(fn, c_int, [c_int])` |
-| **Strings** | `c_char_p(b"hello")` | `create_string_buffer("hello")`<br>**or**<br>`c_char_p(b"hello")` |
+| **Strings** | `c_char_p(b"hello")` | `create_string_buffer("hello")`<br>**or**<br>`new c_char_p(b"hello")` |
 | **Pointers** | `POINTER(c_int)` | `c_void_p` |
 | **Variadic** | `sprintf(buf, b"%d", 42)` | `sprintf(buf, fmt, 42)` (auto) |
 | **Sizeof** | `sizeof(c_int)` | `sizeof(c_int)` |
