@@ -659,9 +659,11 @@ console.log(p.x, p.y);  // 1 2
 - `get_errno()` / `set_errno(value)` : access to errno (platform-specific implementation).
 - `_initWinError()` internals; public helpers: `GetLastError()`, `SetLastError(code)`, `FormatError(code)`, `WinError(code)`.
 
-**Type aliases**
-The following aliases are exposed (mapped from `native.types`):
+**Type aliases (Python-compatible)**
+The following type classes are exported (identical to Python ctypes):
 `c_int, c_uint, c_int8, c_uint8, c_int16, c_uint16, c_int32, c_uint32, c_int64, c_uint64, c_float, c_double, c_char, c_char_p, c_wchar, c_wchar_p, c_void_p, c_bool, c_size_t, c_long, c_ulong`.
+
+**Note**: Only type classes (e.g., `c_int32`) are supported, not string literals (e.g., `"int32"`). This matches Python ctypes behavior exactly.
 
 **Constants**
 - `POINTER_SIZE` - pointer size (from `native.POINTER_SIZE`).
@@ -742,19 +744,22 @@ Base class for Python-like union definitions. Subclasses should define `static _
 - Windows API (__stdcall via WinDLL)
 
 ⚠️ **Differences from Python ctypes**:
-- Structs use `.toObject()` for property access (eager loading for performance)
 - Callbacks must be manually released with `.release()`
 - **Function definition supports both syntaxes**: `func(name, returnType, argTypes)` **or** `func.argtypes = [...]; func.restype = ...`
-- No `POINTER()` type - use `c_void_p`
 
+✨ **100% Python-compatible**:
+- **Struct property access**: Direct access (`p.x`, `p.y`) works with `class X extends Structure` - identical to Python!
+- **Type system**: Only type classes (`c_int32`, `c_char_p`) are accepted, exactly like Python ctypes
+- **No string literals**: `"int32"`, `"string"` are NOT supported (Python doesn't use them either)
 
 ## Limitations & Known Issues
 
 - ⚠️ Callbacks must be released manually with `.release()` to prevent memory leaks
 - ⚠️ No automatic memory management for returned pointers (manual `free()` required)
-- ⚠️ Struct alignment follows platform defaults (not customizable per-field)
-- ℹ️ Nested union access uses getter caching (slight behavior difference from Python)
-- ℹ️ Struct property access via `.toObject()` instead of direct field access (performance optimization)
+- ℹ️ Struct property access:
+  - **Python-style classes** (`class X extends Structure`): Direct property access (`p.x`, `p.y`) - fully compatible!
+  - **Plain struct definitions** (`struct({...})`): Use `.get()` / `.set()` methods for property access
+- ℹ️ Struct alignment: Platform defaults are used, but `packed: true` option is available for packed structs
 
 ## Examples in Test Suite
 

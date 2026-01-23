@@ -52,7 +52,7 @@ function generateFficonfig(version) {
   // Define FFI_MMAP_EXEC_WRIT for macOS x64
   output = output.replace(
     "/* No mmap exec workarounds needed */\n/* #undef FFI_MMAP_EXEC_WRIT */\n/* #undef FFI_MMAP_EXEC_EMUTRAMP_PAX */",
-    "/* mmap exec workaround needed on macOS x64 */\n#if defined(FFI_PLATFORM_MACOS) && defined(FFI_ARCH_X86_64)\n#  define FFI_MMAP_EXEC_WRIT 1\n#endif\n\n/* No mmap exec workarounds needed */\n/* #undef FFI_MMAP_EXEC_WRIT */\n/* #undef FFI_MMAP_EXEC_EMUTRAMP_PAX */"
+    "/* mmap exec workaround needed on macOS x64 */\n#if defined(FFI_PLATFORM_MACOS) && defined(FFI_ARCH_X86_64)\n#  define FFI_MMAP_EXEC_WRIT 1\n#endif\n\n/* No mmap exec workarounds needed */\n/* #undef FFI_MMAP_EXEC_WRIT */\n/* #undef FFI_MMAP_EXEC_EMUTRAMP_PAX */",
   );
 
   return output;

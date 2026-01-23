@@ -9,89 +9,14 @@
 // Basic Types
 // =============================================================================
 
-/** C type enumeration */
-export type CTypeString =
-  | "void"
-  | "int8"
-  | "uint8"
-  | "int16"
-  | "uint16"
-  | "int32"
-  | "uint32"
-  | "int64"
-  | "uint64"
-  | "float"
-  | "double"
-  | "bool"
-  | "pointer"
-  | "string"
-  | "wstring"
-  | "wchar"
-  | "size_t"
-  | "ssize_t"
-  | "long"
-  | "ulong"
-  | "char"
-  | "uchar"
-  | "short"
-  | "ushort"
-  | "int"
-  | "uint";
-
-/** Native CType object */
+/** Native CType object (internal C++ type representation) */
 export interface CType {
   readonly size: number;
   readonly name: string;
 }
 
-/** Predefined types object */
-export interface Types {
-  readonly void: CType;
-  readonly int8: CType;
-  readonly uint8: CType;
-  readonly int16: CType;
-  readonly uint16: CType;
-  readonly int32: CType;
-  readonly uint32: CType;
-  readonly int64: CType;
-  readonly uint64: CType;
-  readonly float: CType;
-  readonly double: CType;
-  readonly bool: CType;
-  readonly pointer: CType;
-  readonly string: CType;
-  readonly wstring: CType;
-  readonly wchar: CType;
-  readonly size_t: CType;
-  readonly long: CType;
-  readonly ulong: CType;
-  // Python-style aliases
-  readonly c_void: CType;
-  readonly c_int8: CType;
-  readonly c_uint8: CType;
-  readonly c_int16: CType;
-  readonly c_uint16: CType;
-  readonly c_int32: CType;
-  readonly c_uint32: CType;
-  readonly c_int64: CType;
-  readonly c_uint64: CType;
-  readonly c_float: CType;
-  readonly c_double: CType;
-  readonly c_bool: CType;
-  readonly c_char_p: CType;
-  readonly c_wchar_p: CType;
-  readonly c_wchar: CType;
-  readonly c_void_p: CType;
-  readonly c_size_t: CType;
-  readonly c_long: CType;
-  readonly c_ulong: CType;
-  readonly c_int: CType;
-  readonly c_uint: CType;
-  readonly c_char: CType;
-  readonly c_uchar: CType;
-  readonly c_short: CType;
-  readonly c_ushort: CType;
-}
+/** Any accepted type specification (CType object or SimpleCData class) */
+export type AnyType = CType | SimpleCDataConstructor;
 
 // =============================================================================
 // Library & Function
@@ -108,7 +33,7 @@ export class Version {
 /** Native library handle */
 export class Library {
   constructor(path: string | null);
-  func(name: string, returnType: CTypeString | CType, argTypes?: (CTypeString | CType)[], options?: FunctionOptions): FFIFunction;
+  func(name: string, returnType: AnyType, argTypes?: AnyType[], options?: FunctionOptions): FFIFunction;
   symbol(name: string): bigint;
   close(): void;
   readonly path: string;
@@ -134,7 +59,7 @@ export interface FFIFunction {
 /** CDLL - C calling convention library */
 export class CDLL {
   constructor(path: string | null);
-  func(name: string, returnType: CTypeString | CType, argTypes?: (CTypeString | CType)[], options?: FunctionOptions): CallableFunction & { errcheck: ErrcheckCallback | null };
+  func(name: string, returnType: AnyType, argTypes?: AnyType[], options?: FunctionOptions): CallableFunction & { errcheck: ErrcheckCallback | null };
   symbol(name: string): bigint;
   close(): void;
   readonly path: string;
@@ -158,7 +83,7 @@ export interface CallbackWrapper {
 
 /** Native Callback class */
 export class Callback {
-  constructor(fn: Function, returnType: CTypeString | CType, argTypes?: (CTypeString | CType)[]);
+  constructor(fn: Function, returnType: AnyType, argTypes?: AnyType[]);
   readonly pointer: bigint;
   release(): void;
 }
@@ -173,7 +98,7 @@ export class ThreadSafeCallback extends Callback {}
 /** Field definition for struct */
 export interface FieldDef {
   name: string;
-  type: CTypeString | CType | StructDef | ArrayTypeDef | BitFieldDef;
+  type: AnyType | StructDef | ArrayTypeDef | BitFieldDef;
   offset: number;
   size: number;
   alignment: number;
@@ -202,7 +127,7 @@ export interface StructDef {
 }
 
 // Helper types for improved typed structs
-export type FieldSpec = CTypeString | CType | StructDef | ArrayTypeDef | BitFieldDef | AnonymousField;
+export type FieldSpec = AnyType | StructDef | ArrayTypeDef | BitFieldDef | AnonymousField;
 
 type JsFromCType<T> = T extends "int64" | "uint64" | "size_t"
   ? bigint
@@ -234,14 +159,14 @@ export interface UnionDef extends StructDef {
 /** Bit field definition */
 export interface BitFieldDef {
   readonly _isBitField: true;
-  readonly baseType: CTypeString;
+  readonly baseType: AnyType;
   readonly bits: number;
   readonly baseSize: number;
 }
 
 /** Array type definition */
 export interface ArrayTypeDef {
-  readonly elementType: CTypeString;
+  readonly elementType: AnyType;
   readonly length: number;
   readonly _isArrayType: true;
 
@@ -275,7 +200,7 @@ export interface AnonymousField {
 
 /** POINTER type definition */
 export interface PointerTypeDef {
-  readonly _pointerTo: CTypeString | StructDef;
+  readonly _pointerTo: AnyType | StructDef;
   readonly _baseSize: number;
   readonly size: number;
 
@@ -293,7 +218,7 @@ export interface PointerTypeDef {
 /** Native StructType class */
 export class StructType {
   constructor(isUnion?: boolean);
-  addField(name: string, type: CTypeString | CType | StructType | ArrayType): this;
+  addField(name: string, type: AnyType | StructType | ArrayType): this;
   getSize(): number;
   getAlignment(): number;
   create(values?: Record<string, any>): Buffer;
@@ -302,7 +227,7 @@ export class StructType {
 
 /** Native ArrayType class */
 export class ArrayType {
-  constructor(elementType: CTypeString | CType, count: number);
+  constructor(elementType: AnyType, count: number);
   getSize(): number;
   getLength(): number;
   getAlignment(): number;
@@ -320,7 +245,7 @@ export class Structure<F extends Record<string, FieldSpec> = Record<string, any>
   static _pack_?: boolean;
   static _anonymous_?: string[];
   static create<ThisT extends Structure<F>>(this: new (...args: any[]) => ThisT, values?: Partial<FieldsToInstance<F>> | Buffer): ThisT;
-  static toObject<ThisT extends Structure<F>>(this: new (...args: any[]) => ThisT, buf: Buffer | any): FieldsToInstance<F>;
+  static toObject<ThisT extends Structure<F>>(this: new (...args: any[]) => ThisT, bufOrInstance: Buffer | Structure<F>): FieldsToInstance<F>;
   _buffer: Buffer;
   _structDef: StructDef;
   get<K extends keyof F & string>(fieldName: K): FieldsToInstance<F>[K];
@@ -342,8 +267,8 @@ export class Union<F extends Record<string, FieldSpec> = Record<string, any>> ex
 export function load(path: string | null): Library;
 
 // Callbacks
-export function callback(fn: Function, returnType: CTypeString | CType, argTypes?: (CTypeString | CType)[]): CallbackWrapper;
-export function threadSafeCallback(fn: Function, returnType: CTypeString | CType, argTypes?: (CTypeString | CType)[]): CallbackWrapper;
+export function callback(fn: Function, returnType: AnyType, argTypes?: AnyType[]): CallbackWrapper;
+export function threadSafeCallback(fn: Function, returnType: AnyType, argTypes?: AnyType[]): CallbackWrapper;
 
 // Memory management - Python-compatible
 export function create_string_buffer(init: number | string | Buffer): Buffer;
@@ -355,24 +280,24 @@ export function memmove(dst: Buffer, src: Buffer | bigint, count: number): void;
 export function memset(dst: Buffer, value: number, count: number): void;
 
 // Memory - utility (no direct Python equivalent)
-export function readValue(ptr: Buffer | bigint | number, type: CTypeString | CType, offset?: number): any;
-export function writeValue(ptr: Buffer | bigint | number, type: CTypeString | CType, value: any, offset?: number): number;
-export function sizeof(type: CTypeString | CType | StructDef | ArrayTypeDef): number;
+export function readValue(ptr: Buffer | bigint | number, type: AnyType, offset?: number): any;
+export function writeValue(ptr: Buffer | bigint | number, type: AnyType, value: any, offset?: number): number | void;
+export function sizeof(type: AnyType | StructDef | ArrayTypeDef): number;
 export function ptrToBuffer(address: bigint | number, size: number): Buffer;
 
 // Structures
-export function struct(fields: Record<string, CTypeString | CType | StructDef | ArrayTypeDef | BitFieldDef | AnonymousField>, options?: StructOptions): StructDef;
-export function union(fields: Record<string, CTypeString | CType | StructDef | ArrayTypeDef | BitFieldDef>): UnionDef;
+export function struct(fields: Record<string, FieldSpec>, options?: StructOptions): StructDef;
+export function union(fields: Record<string, FieldSpec>): UnionDef;
 // Factory helpers that return a typed class extending Structure/Union
 export function defineStruct<F extends Record<string, FieldSpec>>(fields: F, options?: StructOptions): new (...args: any[]) => Structure<F>;
 export function defineUnion<F extends Record<string, FieldSpec>>(fields: F): new (...args: any[]) => Union<F>;
-export function array(elementType: CTypeString, count: number): ArrayTypeDef;
-export function bitfield(baseType: CTypeString, bits: number): BitFieldDef;
+export function array(elementType: AnyType | typeof Structure | typeof Union, count: number): ArrayTypeDef;
+export function bitfield(baseType: AnyType, bits: number): BitFieldDef;
 
 // Pointers
-export function byref(obj: Buffer): Buffer;
-export function cast(ptr: Buffer | bigint, targetType: CTypeString | StructDef): any;
-export function POINTER(baseType: CTypeString | StructDef): PointerTypeDef;
+export function byref(obj: Buffer | SimpleCDataInstance | { _buffer: Buffer }): Buffer;
+export function cast(ptr: Buffer | bigint, targetType: AnyType | StructDef): Buffer | { [key: string]: any };
+export function POINTER(baseType: AnyType | StructDef): PointerTypeDef;
 
 // Error handling
 export function get_errno(): number;
@@ -383,32 +308,54 @@ export function FormatError(code?: number): string;
 export function WinError(code?: number): Error & { winerror: number };
 
 // =============================================================================
+// SimpleCData - Base class for simple C data types
+// =============================================================================
+
+/** Base class for simple C data types (int, float, pointer, etc.) */
+export interface SimpleCDataConstructor {
+  new (value?: any): SimpleCDataInstance;
+  readonly _size: number;
+  readonly _type: string;
+  readonly _isSimpleCData: true;
+  _reader(buf: Buffer, offset: number): any;
+  _writer(buf: Buffer, offset: number, value: any): void;
+}
+
+/** Instance of SimpleCData */
+export interface SimpleCDataInstance {
+  value: any;
+  _buffer: Buffer;
+  toString(): string;
+  toJSON(): any;
+  valueOf(): any;
+}
+
+// =============================================================================
 // Type Aliases (Python-compatible)
 // =============================================================================
 
-export const types: Types;
-export const c_void: CType;
-export const c_int: CType;
-export const c_uint: CType;
-export const c_int8: CType;
-export const c_uint8: CType;
-export const c_int16: CType;
-export const c_uint16: CType;
-export const c_int32: CType;
-export const c_uint32: CType;
-export const c_int64: CType;
-export const c_uint64: CType;
-export const c_float: CType;
-export const c_double: CType;
-export const c_char: CType;
-export const c_char_p: CType;
-export const c_wchar: CType;
-export const c_wchar_p: CType;
-export const c_void_p: CType;
-export const c_bool: CType;
-export const c_size_t: CType;
-export const c_long: CType;
-export const c_ulong: CType;
+export const c_void: SimpleCDataConstructor;
+export const c_int: SimpleCDataConstructor;
+export const c_uint: SimpleCDataConstructor;
+export const c_int8: SimpleCDataConstructor;
+export const c_uint8: SimpleCDataConstructor;
+export const c_int16: SimpleCDataConstructor;
+export const c_uint16: SimpleCDataConstructor;
+export const c_int32: SimpleCDataConstructor;
+export const c_uint32: SimpleCDataConstructor;
+export const c_int64: SimpleCDataConstructor;
+export const c_uint64: SimpleCDataConstructor;
+export const c_float: SimpleCDataConstructor;
+export const c_double: SimpleCDataConstructor;
+export const c_char: SimpleCDataConstructor;
+export const c_char_p: SimpleCDataConstructor;
+export const c_wchar: SimpleCDataConstructor;
+export const c_wchar_p: SimpleCDataConstructor;
+export const c_void_p: SimpleCDataConstructor;
+export const c_bool: SimpleCDataConstructor;
+export const c_size_t: SimpleCDataConstructor;
+export const c_long: SimpleCDataConstructor;
+export const c_ulong: SimpleCDataConstructor;
 
 // =============================================================================
 // Constants

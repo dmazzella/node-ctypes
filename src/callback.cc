@@ -120,12 +120,12 @@ namespace ctypes
         if (data->return_type != CType::CTYPES_VOID)
         {
             size_t ret_size = CTypeSize(data->return_type);
-            uint8_t buffer[64];
+            std::vector<uint8_t> buffer(ret_size); // Dynamic allocation based on actual size
 
-            int written = JSToC(env, result, data->return_type, buffer, sizeof(buffer));
+            int written = JSToC(env, result, data->return_type, buffer.data(), buffer.size());
             if (written > 0)
             {
-                memcpy(ret, buffer, ret_size);
+                memcpy(ret, buffer.data(), ret_size);
             }
             else
             {
@@ -501,11 +501,11 @@ namespace ctypes
             if (data->return_type != CType::CTYPES_VOID)
             {
                 size_t ret_size = CTypeSize(data->return_type);
-                uint8_t buffer[64];
-                int written = JSToC(env, result, data->return_type, buffer, sizeof(buffer));
+                std::vector<uint8_t> buffer(ret_size); // Dynamic allocation
+                int written = JSToC(env, result, data->return_type, buffer.data(), buffer.size());
                 if (written > 0)
                 {
-                    memcpy(ret, buffer, ret_size);
+                    memcpy(ret, buffer.data(), ret_size);
                 }
                 else
                 {
@@ -516,7 +516,10 @@ namespace ctypes
         else
         {
             // Percorso thread esterno: usa TSFN + sincronizzazione
-            data->result_ready.store(false, std::memory_order_release);
+            {
+                std::lock_guard<std::mutex> lock(data->result_mutex);
+                data->result_ready.store(false, std::memory_order_release);
+            }
 
             // Cattura args per la lambda
             std::vector<std::vector<uint8_t>> args_copy;
@@ -608,7 +611,9 @@ namespace ctypes
                     std::lock_guard<std::mutex> lock(data->result_mutex);
                     if (data->return_type != CType::CTYPES_VOID && !result.IsEmpty())
                     {
-                        JSToC(env, result, data->return_type, data->result_buffer, sizeof(data->result_buffer));
+                        size_t ret_size = CTypeSize(data->return_type);
+                        data->result_buffer.resize(ret_size); // Ensure buffer is large enough
+                        JSToC(env, result, data->return_type, data->result_buffer.data(), data->result_buffer.size());
                     }
                     data->result_ready.store(true, std::memory_order_release);
                 }
@@ -651,7 +656,16 @@ namespace ctypes
             // Copia risultato
             if (data->return_type != CType::CTYPES_VOID)
             {
-                memcpy(ret, data->result_buffer, CTypeSize(data->return_type));
+                std::lock_guard<std::mutex> lock(data->result_mutex);
+                size_t ret_size = CTypeSize(data->return_type);
+                if (data->result_buffer.size() >= ret_size)
+                {
+                    memcpy(ret, data->result_buffer.data(), ret_size);
+                }
+                else
+                {
+                    memset(ret, 0, ret_size);
+                }
             }
         }
     }
