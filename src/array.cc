@@ -38,9 +38,11 @@ namespace ctypes
             case CType::CTYPES_INT32:
             case CType::CTYPES_UINT32:
             case CType::CTYPES_FLOAT:
+                alignment_ = 4;
+                break;
             case CType::CTYPES_LONG:
             case CType::CTYPES_ULONG:
-                alignment_ = 4;
+                alignment_ = sizeof(long); // 4 su Windows (LLP64), 8 su Unix 64-bit (LP64)
                 break;
             case CType::CTYPES_INT64:
             case CType::CTYPES_UINT64:

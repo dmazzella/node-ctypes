@@ -671,29 +671,14 @@ namespace ctypes
         {
             long val;
             memcpy(&val, buffer, sizeof(long));
-            // Su Windows long è 32-bit, su Unix 64-bit potrebbe essere 64-bit
-            if (sizeof(long) <= 4)
-            {
-                return Napi::Number::New(env, static_cast<int32_t>(val));
-            }
-            else
-            {
-                return Napi::BigInt::New(env, static_cast<int64_t>(val));
-            }
+            return Napi::BigInt::New(env, static_cast<int64_t>(val));
         }
 
         case CType::CTYPES_ULONG:
         {
             unsigned long val;
             memcpy(&val, buffer, sizeof(unsigned long));
-            if (sizeof(unsigned long) <= 4)
-            {
-                return Napi::Number::New(env, static_cast<uint32_t>(val));
-            }
-            else
-            {
-                return Napi::BigInt::New(env, static_cast<uint64_t>(val));
-            }
+            return Napi::BigInt::New(env, static_cast<uint64_t>(val));
         }
 
         default:

@@ -425,17 +425,9 @@ namespace ctypes
         }
 
         case CType::CTYPES_LONG:
-            if (sizeof(long) <= 4)
-            {
-                return Napi::Number::New(env, static_cast<int32_t>(return_value_.i64));
-            }
             return Napi::BigInt::New(env, return_value_.i64);
 
         case CType::CTYPES_ULONG:
-            if (sizeof(unsigned long) <= 4)
-            {
-                return Napi::Number::New(env, static_cast<uint32_t>(return_value_.u64));
-            }
             return Napi::BigInt::New(env, return_value_.u64);
 
         case CType::CTYPES_INT8:

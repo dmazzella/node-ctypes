@@ -43,9 +43,10 @@ namespace ctypes
         case CType::CTYPES_INT32:
         case CType::CTYPES_UINT32:
         case CType::CTYPES_FLOAT:
-        case CType::CTYPES_LONG: // 4 su Windows
-        case CType::CTYPES_ULONG:
             return 4;
+        case CType::CTYPES_LONG:
+        case CType::CTYPES_ULONG:
+            return sizeof(long); // 4 su Windows (LLP64), 8 su Unix 64-bit (LP64)
         case CType::CTYPES_INT64:
         case CType::CTYPES_UINT64:
         case CType::CTYPES_DOUBLE:
