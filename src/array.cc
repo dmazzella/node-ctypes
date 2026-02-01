@@ -11,8 +11,6 @@ namespace ctypes
     ArrayInfo::ArrayInfo(CType element_type, size_t count, std::shared_ptr<StructInfo> element_struct)
         : element_type_(element_type), count_(count), element_struct_(element_struct)
     {
-        spdlog::trace(__FUNCTION__);
-
         if (element_struct)
         {
             element_size_ = element_struct->GetSize();
@@ -66,8 +64,6 @@ namespace ctypes
 
     ffi_type *ArrayInfo::GetFFIType()
     {
-        spdlog::trace(__FUNCTION__);
-
         if (ffi_type_)
         {
             return ffi_type_.get();
@@ -107,8 +103,6 @@ namespace ctypes
 
     bool ArrayInfo::JSToArray(Napi::Env env, Napi::Value val, void *buffer, size_t bufsize)
     {
-        spdlog::trace(__FUNCTION__);
-
         if (bufsize < size_)
         {
             Napi::TypeError::New(env, "Buffer too small for array").ThrowAsJavaScriptException();
@@ -183,8 +177,6 @@ namespace ctypes
 
     Napi::Array ArrayInfo::ArrayToJS(Napi::Env env, const void *buffer)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Array arr = Napi::Array::New(env, count_);
 
         for (size_t i = 0; i < count_; i++)
@@ -212,8 +204,6 @@ namespace ctypes
 
     Napi::Function ArrayType::GetClass(Napi::Env env)
     {
-        spdlog::trace(__FUNCTION__);
-
         return DefineClass(
             env,
             "ArrayType",
@@ -228,8 +218,6 @@ namespace ctypes
     ArrayType::ArrayType(const Napi::CallbackInfo &info)
         : Napi::ObjectWrap<ArrayType>(info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         if (info.Length() < 2)
@@ -242,9 +230,10 @@ namespace ctypes
         std::shared_ptr<StructInfo> element_struct;
 
         // Parse element type
-        if (info[0].IsString())
+        if (info[0].IsNumber())
         {
-            element_type = StringToCType(info[0].As<Napi::String>().Utf8Value());
+            int32_t type_int = info[0].As<Napi::Number>().Int32Value();
+            element_type = IntToCType(type_int);
         }
         else if (info[0].IsObject())
         {
@@ -256,10 +245,6 @@ namespace ctypes
                 StructType *st = Napi::ObjectWrap<StructType>::Unwrap(type_obj);
                 element_struct = st->GetStructInfo();
                 element_type = CType::CTYPES_STRUCT;
-            }
-            else if (IsTypeInfo(type_obj))
-            {
-                element_type = Napi::ObjectWrap<TypeInfo>::Unwrap(type_obj)->GetCType();
             }
             else
             {
@@ -281,29 +266,21 @@ namespace ctypes
 
     Napi::Value ArrayType::GetSize(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         return Napi::Number::New(info.Env(), array_info_->GetSize());
     }
 
     Napi::Value ArrayType::GetLength(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         return Napi::Number::New(info.Env(), array_info_->GetCount());
     }
 
     Napi::Value ArrayType::GetAlignment(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         return Napi::Number::New(info.Env(), array_info_->GetAlignment());
     }
 
     Napi::Value ArrayType::Create(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         size_t size = array_info_->GetSize();

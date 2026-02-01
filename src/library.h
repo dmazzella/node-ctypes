@@ -10,7 +10,7 @@ namespace ctypes
     {
         void operator()(void *cookie) const noexcept
         {
-            spdlog::trace(__FUNCTION__);
+            
             if (!cookie)
                 return;
             RemoveDllDirectory(reinterpret_cast<DLL_DIRECTORY_COOKIE>(cookie));

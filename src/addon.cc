@@ -12,8 +12,6 @@ namespace ctypes
     // Helper per creare l'oggetto Version (dichiarato prima dell'uso)
     Napi::Object CreateVersionObject(Napi::Env env)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Object version = Napi::Object::New(env);
         version.Set("major", Napi::Number::New(env, CTYPES_MAJOR_VERSION));
         version.Set("minor", Napi::Number::New(env, CTYPES_MINOR_VERSION));
@@ -23,7 +21,7 @@ namespace ctypes
                         env,
                         [](const Napi::CallbackInfo &info) -> Napi::Value
                         {
-                            return Napi::String::New(info.Env(), fmt::format("{}.{}.{}", CTYPES_MAJOR_VERSION, CTYPES_MINOR_VERSION, CTYPES_PATCH_VERSION));
+                            return Napi::String::New(info.Env(), std::format("{}.{}.{}", CTYPES_MAJOR_VERSION, CTYPES_MINOR_VERSION, CTYPES_PATCH_VERSION));
                         }));
         return version;
     }
@@ -37,8 +35,7 @@ namespace ctypes
         }
         catch (const std::bad_alloc &e)
         {
-            spdlog::error("Memory allocation failed: {}", e.what());
-            Napi::Error::New(env, fmt::format("Memory allocation failed: {}", e.what())).ThrowAsJavaScriptException();
+            Napi::Error::New(env, std::format("Memory allocation failed: {}", e.what())).ThrowAsJavaScriptException();
             if constexpr (std::is_void_v<decltype(func())>)
             {
                 return;
@@ -50,8 +47,7 @@ namespace ctypes
         }
         catch (const std::runtime_error &e)
         {
-            spdlog::error("Runtime error: {}", e.what());
-            Napi::Error::New(env, fmt::format("Runtime error: {}", e.what())).ThrowAsJavaScriptException();
+            Napi::Error::New(env, std::format("Runtime error: {}", e.what())).ThrowAsJavaScriptException();
             if constexpr (std::is_void_v<decltype(func())>)
             {
                 return;
@@ -63,8 +59,7 @@ namespace ctypes
         }
         catch (const std::exception &e)
         {
-            spdlog::error("Exception: {}", e.what());
-            Napi::Error::New(env, fmt::format("Exception: {}", e.what())).ThrowAsJavaScriptException();
+            Napi::Error::New(env, std::format("Exception: {}", e.what())).ThrowAsJavaScriptException();
             if constexpr (std::is_void_v<decltype(func())>)
             {
                 return;
@@ -76,7 +71,6 @@ namespace ctypes
         }
         catch (...)
         {
-            spdlog::error("Unknown exception occurred");
             Napi::Error::New(env, "Unknown exception occurred").ThrowAsJavaScriptException();
             if constexpr (std::is_void_v<decltype(func())>)
             {
@@ -92,8 +86,6 @@ namespace ctypes
     template <typename WrapperType>
     std::unique_ptr<Napi::FunctionReference> SafeInitializeWrapper(Napi::Env env, const std::string &wrapperName)
     {
-        spdlog::trace("{}: {}", __FUNCTION__, wrapperName);
-
         return SafeInvoke(
             env,
             [&]() -> std::unique_ptr<Napi::FunctionReference>
@@ -103,7 +95,7 @@ namespace ctypes
                 *result = Napi::Persistent(func);
                 if (!result)
                 {
-                    throw std::runtime_error(fmt::format("Failed to initialize {} wrapper constructor", wrapperName));
+                    throw std::runtime_error(std::format("Failed to initialize {} wrapper constructor", wrapperName));
                 }
                 return result;
             });
@@ -111,10 +103,7 @@ namespace ctypes
 
     CTypesAddon::CTypesAddon(Napi::Env env, Napi::Object exports)
     {
-        spdlog::trace(__FUNCTION__);
-
         // Inizializza tutti i constructor come membri di istanza
-        TypeInfoConstructor = SafeInitializeWrapper<TypeInfo>(env, "CType");
         LibraryConstructor = SafeInitializeWrapper<Library>(env, "Library");
         FFIFunctionConstructor = SafeInitializeWrapper<FFIFunction>(env, "FFIFunction");
         CallbackConstructor = SafeInitializeWrapper<Callback>(env, "Callback");
@@ -130,7 +119,6 @@ namespace ctypes
                 InstanceValue("Version", CreateVersionObject(env), napi_enumerable),
 
                 // Classi wrapper
-                InstanceValue("CType", TypeInfoConstructor->Value(), napi_enumerable),
                 InstanceValue("Library", LibraryConstructor->Value(), napi_enumerable),
                 InstanceValue("FFIFunction", FFIFunctionConstructor->Value(), napi_enumerable),
                 InstanceValue("Callback", CallbackConstructor->Value(), napi_enumerable),
@@ -148,8 +136,8 @@ namespace ctypes
                 InstanceMethod("readCString", &CTypesAddon::ReadCString),
                 InstanceMethod("ptrToBuffer", &CTypesAddon::PtrToBuffer),
 
-                // Tipi predefiniti
-                InstanceValue("types", CreatePredefinedTypes(env, *TypeInfoConstructor), napi_enumerable),
+                // CType enum - single source of truth per i tipi
+                InstanceValue("CType", CreateCType(env), napi_enumerable),
 
                 // Costanti
                 InstanceValue("POINTER_SIZE", Napi::Number::New(env, sizeof(void *)), napi_enumerable),
@@ -160,15 +148,12 @@ namespace ctypes
 
     CTypesAddon::~CTypesAddon()
     {
-        spdlog::trace(__FUNCTION__);
     }
 
     // ========== Helper functions ==========
 
     Napi::Value CTypesAddon::LoadLibrary(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         if (!LibraryConstructor)
@@ -182,8 +167,6 @@ namespace ctypes
 
     Napi::Value CTypesAddon::Alloc(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         if (info.Length() < 1 || !info[0].IsNumber())
@@ -209,8 +192,6 @@ namespace ctypes
 
     Napi::Value CTypesAddon::ReadValue(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         if (info.Length() < 2)
@@ -252,31 +233,18 @@ namespace ctypes
             return env.Undefined();
         }
 
-        // Parse type
+        // Parse type - solo numeri (CType enum values)
+        if (!info[1].IsNumber())
+        {
+            Napi::TypeError::New(env, "Type must be a CType enum value (number)")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
         CType ctype;
         try
         {
-            if (info[1].IsString())
-            {
-                ctype = StringToCType(info[1].As<Napi::String>().Utf8Value());
-            }
-            else if (info[1].IsObject())
-            {
-                Napi::Object obj = info[1].As<Napi::Object>();
-                if (TypeInfoConstructor && obj.InstanceOf(TypeInfoConstructor->Value()))
-                {
-                    TypeInfo *ti = Napi::ObjectWrap<TypeInfo>::Unwrap(obj);
-                    ctype = ti->GetCType();
-                }
-                else
-                {
-                    throw std::runtime_error("Invalid type object");
-                }
-            }
-            else
-            {
-                throw std::runtime_error("Type must be string or CType");
-            }
+            ctype = IntToCType(info[1].As<Napi::Number>().Int32Value());
         }
         catch (const std::exception &e)
         {
@@ -321,8 +289,6 @@ namespace ctypes
 
     Napi::Value CTypesAddon::WriteValue(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         if (info.Length() < 3)
@@ -364,31 +330,18 @@ namespace ctypes
             return env.Undefined();
         }
 
-        // Parse type
+        // Parse type - solo numeri (CType enum values)
+        if (!info[1].IsNumber())
+        {
+            Napi::TypeError::New(env, "Type must be a CType enum value (number)")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
         CType ctype;
         try
         {
-            if (info[1].IsString())
-            {
-                ctype = StringToCType(info[1].As<Napi::String>().Utf8Value());
-            }
-            else if (info[1].IsObject())
-            {
-                Napi::Object obj = info[1].As<Napi::Object>();
-                if (TypeInfoConstructor && obj.InstanceOf(TypeInfoConstructor->Value()))
-                {
-                    TypeInfo *ti = Napi::ObjectWrap<TypeInfo>::Unwrap(obj);
-                    ctype = ti->GetCType();
-                }
-                else
-                {
-                    throw std::runtime_error("Invalid type object");
-                }
-            }
-            else
-            {
-                throw std::runtime_error("Type must be string or CType");
-            }
+            ctype = IntToCType(info[1].As<Napi::Number>().Int32Value());
         }
         catch (const std::exception &e)
         {
@@ -445,13 +398,11 @@ namespace ctypes
 
     Napi::Value CTypesAddon::SizeOf(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
-        if (info.Length() < 1)
+        if (info.Length() < 1 || !info[0].IsNumber())
         {
-            Napi::TypeError::New(env, "Type required")
+            Napi::TypeError::New(env, "CType enum value (number) required")
                 .ThrowAsJavaScriptException();
             return env.Undefined();
         }
@@ -459,27 +410,7 @@ namespace ctypes
         CType ctype;
         try
         {
-            if (info[0].IsString())
-            {
-                ctype = StringToCType(info[0].As<Napi::String>().Utf8Value());
-            }
-            else if (info[0].IsObject())
-            {
-                Napi::Object obj = info[0].As<Napi::Object>();
-                if (TypeInfoConstructor && obj.InstanceOf(TypeInfoConstructor->Value()))
-                {
-                    TypeInfo *ti = Napi::ObjectWrap<TypeInfo>::Unwrap(obj);
-                    ctype = ti->GetCType();
-                }
-                else
-                {
-                    throw std::runtime_error("Invalid type object");
-                }
-            }
-            else
-            {
-                throw std::runtime_error("Type must be string or CType");
-            }
+            ctype = IntToCType(info[0].As<Napi::Number>().Int32Value());
         }
         catch (const std::exception &e)
         {
@@ -492,8 +423,6 @@ namespace ctypes
 
     Napi::Value CTypesAddon::CreateCString(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         if (info.Length() < 1 || !info[0].IsString())
@@ -513,8 +442,6 @@ namespace ctypes
 
     Napi::Value CTypesAddon::ReadCString(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         if (info.Length() < 1)
@@ -573,8 +500,6 @@ namespace ctypes
 
     Napi::Value CTypesAddon::PtrToBuffer(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         if (info.Length() < 2)

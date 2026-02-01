@@ -410,7 +410,7 @@ console.log("└─────────────────────�
 
 {
   const rawLib = new ctypes.Library(LIBC);
-  const rawAbs = rawLib.func("abs", "int32", ["int32"]);
+  const rawAbs = rawLib.func("abs", ctypes.CType.INT32, [ctypes.CType.INT32]);
 
   const wrappedLib = new ctypes.CDLL(LIBC);
   const wrappedAbs = wrappedLib.func("abs", ctypes.c_int32, [ctypes.c_int32]);

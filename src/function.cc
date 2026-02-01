@@ -5,8 +5,6 @@ namespace ctypes
 
     CallConv StringToCallConv(const std::string &name)
     {
-        spdlog::trace(__FUNCTION__);
-
         if (name == "cdecl" || name == "default")
             return CallConv::CTYPES_CDECL;
         if (name == "stdcall")
@@ -20,8 +18,6 @@ namespace ctypes
 
     ffi_abi CallConvToFFI(CallConv conv)
     {
-        spdlog::trace(__FUNCTION__);
-
         switch (conv)
         {
 #if defined(_WIN32) && defined(__i386__)
@@ -41,8 +37,6 @@ namespace ctypes
 
     Napi::Function FFIFunction::GetClass(Napi::Env env)
     {
-        spdlog::trace(__FUNCTION__);
-
         return DefineClass(
             env,
             "FFIFunction",
@@ -64,8 +58,6 @@ namespace ctypes
           use_inline_storage_(true),
           next_cache_slot_(0)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         if (info.Length() < 3)
@@ -104,9 +96,9 @@ namespace ctypes
         // 3. Return type
         try
         {
-            if (info[2].IsString())
+            if (info[2].IsNumber())
             {
-                return_type_ = StringToCType(info[2].As<Napi::String>().Utf8Value());
+                return_type_ = IntToCType(info[2].As<Napi::Number>().Int32Value());
             }
             else if (info[2].IsObject())
             {
@@ -123,10 +115,6 @@ namespace ctypes
                     return_type_ = CType::CTYPES_ARRAY;
                     return_array_info_ = Napi::ObjectWrap<ArrayType>::Unwrap(obj)->GetArrayInfo();
                 }
-                else if (IsTypeInfo(obj))
-                {
-                    return_type_ = Napi::ObjectWrap<TypeInfo>::Unwrap(obj)->GetCType();
-                }
                 else
                 {
                     throw std::runtime_error("Invalid return type object");
@@ -134,7 +122,7 @@ namespace ctypes
             }
             else
             {
-                throw std::runtime_error("Return type must be string or CType");
+                throw std::runtime_error("Return type must be CType enum value (number) or CType object");
             }
         }
         catch (const std::exception &e)
@@ -158,9 +146,9 @@ namespace ctypes
 
                 try
                 {
-                    if (elem.IsString())
+                    if (elem.IsNumber())
                     {
-                        arg_types_.push_back(StringToCType(elem.As<Napi::String>().Utf8Value()));
+                        arg_types_.push_back(IntToCType(elem.As<Napi::Number>().Int32Value()));
                         arg_struct_infos_[i] = nullptr;
                         arg_array_infos_[i] = nullptr;
                     }
@@ -181,13 +169,6 @@ namespace ctypes
                             arg_struct_infos_[i] = nullptr;
                             arg_array_infos_[i] = Napi::ObjectWrap<ArrayType>::Unwrap(obj)->GetArrayInfo();
                         }
-                        else if (IsTypeInfo(obj))
-                        {
-                            arg_types_.push_back(
-                                Napi::ObjectWrap<TypeInfo>::Unwrap(obj)->GetCType());
-                            arg_struct_infos_[i] = nullptr;
-                            arg_array_infos_[i] = nullptr;
-                        }
                         else
                         {
                             throw std::runtime_error("Invalid type object");
@@ -195,7 +176,7 @@ namespace ctypes
                     }
                     else
                     {
-                        throw std::runtime_error("Type must be string or CType");
+                        throw std::runtime_error("Type must be CType enum value (number) or CType object");
                     }
                 }
                 catch (const std::exception &e)
@@ -259,8 +240,6 @@ namespace ctypes
 
     bool FFIFunction::PrepareFFI(Napi::Env env)
     {
-        spdlog::trace(__FUNCTION__);
-
         // Return type FFI
         if (return_type_ == CType::CTYPES_STRUCT && return_struct_info_)
         {
@@ -318,8 +297,6 @@ namespace ctypes
 
     inline Napi::Value FFIFunction::ConvertReturnValue(Napi::Env env)
     {
-        spdlog::trace(__FUNCTION__);
-
         switch (return_type_)
         {
         case CType::CTYPES_VOID:
@@ -476,8 +453,6 @@ namespace ctypes
 
     Napi::Value FFIFunction::Call(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         if (!cif_prepared_) [[unlikely]]
@@ -1261,8 +1236,6 @@ namespace ctypes
 
     Napi::Value FFIFunction::SetErrcheck(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         if (info.Length() < 1)
@@ -1292,8 +1265,6 @@ namespace ctypes
 
     Napi::Value FFIFunction::ApplyErrcheck(Napi::Env env, Napi::Value result, const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         // Se non c'è errcheck, restituisci il risultato direttamente
         if (errcheck_callback_.IsEmpty())
         {
@@ -1327,15 +1298,11 @@ namespace ctypes
 
     Napi::Value FFIFunction::GetName(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         return Napi::String::New(info.Env(), name_);
     }
 
     Napi::Value FFIFunction::GetAddress(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         return Napi::BigInt::New(info.Env(), reinterpret_cast<uint64_t>(fn_ptr_));
     }
 

@@ -9,14 +9,42 @@
 // Basic Types
 // =============================================================================
 
-/** Native CType object (internal C++ type representation) */
-export interface CType {
-  readonly size: number;
-  readonly name: string;
+/**
+ * CType - Object containing numeric type identifiers
+ * Single source of truth for type values
+ */
+export interface CTypeValues {
+  readonly VOID: number;
+  readonly INT8: number;
+  readonly UINT8: number;
+  readonly INT16: number;
+  readonly UINT16: number;
+  readonly INT32: number;
+  readonly UINT32: number;
+  readonly INT64: number;
+  readonly UINT64: number;
+  readonly FLOAT: number;
+  readonly DOUBLE: number;
+  readonly POINTER: number;
+  readonly STRING: number;
+  readonly WSTRING: number;
+  readonly WCHAR: number;
+  readonly BOOL: number;
+  readonly SIZE_T: number;
+  readonly SSIZE_T: number;
+  readonly LONG: number;
+  readonly ULONG: number;
+  readonly STRUCT: number;
+  readonly UNION: number;
+  readonly ARRAY: number;
+  readonly COUNT: number;
 }
 
-/** Any accepted type specification (CType object or SimpleCData class) */
-export type AnyType = CType | SimpleCDataConstructor;
+/** CType object with numeric type identifiers */
+export const CType: CTypeValues;
+
+/** Any accepted type specification (SimpleCData class, CType value, or struct/union) */
+export type AnyType = SimpleCDataConstructor | number | StructDef | UnionDef;
 
 // =============================================================================
 // Library & Function
@@ -315,7 +343,7 @@ export function WinError(code?: number): Error & { winerror: number };
 export interface SimpleCDataConstructor {
   new (value?: any): SimpleCDataInstance;
   readonly _size: number;
-  readonly _type: string;
+  readonly _type: number;  // CType numeric value from native module
   readonly _isSimpleCData: true;
   _reader(buf: Buffer, offset: number): any;
   _writer(buf: Buffer, offset: number, value: any): void;

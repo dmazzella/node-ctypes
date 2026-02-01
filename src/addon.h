@@ -9,7 +9,6 @@ namespace ctypes
     {
     public:
         // Constructors per le classi wrapper
-        std::unique_ptr<Napi::FunctionReference> TypeInfoConstructor;
         std::unique_ptr<Napi::FunctionReference> LibraryConstructor;
         std::unique_ptr<Napi::FunctionReference> FFIFunctionConstructor;
         std::unique_ptr<Napi::FunctionReference> CallbackConstructor;

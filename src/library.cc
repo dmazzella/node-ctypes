@@ -7,7 +7,6 @@ namespace ctypes
 
     std::string GetErrorMessage(const uint32_t errorCode)
     {
-        spdlog::trace(__FUNCTION__);
         std::string result;
 
 #ifdef _WIN32
@@ -38,7 +37,7 @@ namespace ctypes
             LocalFree(msgBufW);
         }
 #else
-        result = fmt::format("Error 0x{:08x}", static_cast<uint32_t>(errorCode));
+        result = std::format("Error 0x{:08x}", static_cast<uint32_t>(errorCode));
 #endif
 
         return result;
@@ -47,14 +46,12 @@ namespace ctypes
     // Platform-specific implementations
     void *LoadSharedLibrary(const std::string &path, std::string &error)
     {
-        spdlog::trace(__FUNCTION__);
-
 #ifdef _WIN32
         HMODULE handle = LoadLibraryExA(path.c_str(), NULL, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_USER_DIRS);
         if (!handle)
         {
             DWORD err = GetLastError();
-            error = fmt::format("LoadLibraryExA failed: 0x{:08x} {}", static_cast<uint32_t>(err), GetErrorMessage(static_cast<uint32_t>(err)));
+            error = std::format("LoadLibraryExA failed: 0x{:08x} {}", static_cast<uint32_t>(err), GetErrorMessage(static_cast<uint32_t>(err)));
             return nullptr;
         }
         return static_cast<void *>(handle);
@@ -71,15 +68,13 @@ namespace ctypes
 
     void *GetSymbolAddress(void *handle, const std::string &name, std::string &error)
     {
-        spdlog::trace(__FUNCTION__);
-
 #ifdef _WIN32
         void *addr = reinterpret_cast<void *>(
             GetProcAddress(static_cast<HMODULE>(handle), name.c_str()));
         if (!addr)
         {
             DWORD err = GetLastError();
-            error = fmt::format("LoadLibraryExA failed: 0x{:08x} {}", static_cast<uint32_t>(err), GetErrorMessage(static_cast<uint32_t>(err)));
+            error = std::format("LoadLibraryExA failed: 0x{:08x} {}", static_cast<uint32_t>(err), GetErrorMessage(static_cast<uint32_t>(err)));
             return nullptr;
         }
         return addr;
@@ -98,8 +93,6 @@ namespace ctypes
 
     bool CloseSharedLibrary(void *handle)
     {
-        spdlog::trace(__FUNCTION__);
-
         if (!handle)
             return true;
 #ifdef _WIN32
@@ -112,8 +105,6 @@ namespace ctypes
     // Library class implementation
     Napi::Function Library::GetClass(Napi::Env env)
     {
-        spdlog::trace(__FUNCTION__);
-
         return DefineClass(
             env,
             "Library",
@@ -130,8 +121,6 @@ namespace ctypes
     Library::Library(const Napi::CallbackInfo &info)
         : Napi::ObjectWrap<Library>(info), handle_(nullptr), is_loaded_(false)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         if (info.Length() < 1)
@@ -196,30 +185,21 @@ namespace ctypes
                             {
                                 DWORD err = GetLastError();
                                 std::string errMsg = GetErrorMessage(err);
-                                spdlog::error("AddDllDirectory failed for {}: error {}: {}", parent_dir.string(), err, errMsg);
+                                throw std::runtime_error("AddDllDirectory failed: " + errMsg);
                             }
                             else
                             {
-                                spdlog::trace("AddDllDirectory successful for {}", parent_dir.string());
                                 m_dll_directory_cookie.reset(reinterpret_cast<void *>(cookie));
                             }
                         }
-                        else
-                        {
-                            DWORD err = GetLastError();
-                            std::string errMsg = GetErrorMessage(err);
-                            spdlog::error("SetDefaultDllDirectories failed: error {}: {}", err, errMsg);
-                        }
-                    }
-                    else
-                    {
-                        spdlog::warn("Parent directory '{}' does not exist or is empty", parent_dir.string());
                     }
                 }
             }
             catch (const std::exception &ex)
             {
-                spdlog::warn("Exception inspecting library path '{}': {}", path_, ex.what());
+                Napi::Error::New(env, std::format("Failed to set DLL directory: {}", ex.what()))
+                    .ThrowAsJavaScriptException();
+                return;
             }
             handle_ = LoadSharedLibrary(path_, error);
 #else
@@ -243,8 +223,6 @@ namespace ctypes
 
     Library::~Library()
     {
-        spdlog::trace(__FUNCTION__);
-
         if (is_loaded_ && handle_ && !path_.empty())
         {
             CloseSharedLibrary(handle_);
@@ -253,8 +231,6 @@ namespace ctypes
 
     Napi::Value Library::GetFunction(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         if (!is_loaded_)
@@ -330,8 +306,6 @@ namespace ctypes
 
     Napi::Value Library::GetSymbol(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         if (!is_loaded_)
@@ -367,8 +341,6 @@ namespace ctypes
 
     Napi::Value Library::Close(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         if (is_loaded_ && handle_ && !path_.empty())
@@ -383,8 +355,6 @@ namespace ctypes
 
     Napi::Value Library::GetCallback(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         // callback(returnType, [argTypes], jsFunction)
@@ -420,15 +390,11 @@ namespace ctypes
 
     Napi::Value Library::GetPath(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         return Napi::String::New(info.Env(), path_);
     }
 
     Napi::Value Library::GetIsLoaded(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         return Napi::Boolean::New(info.Env(), is_loaded_);
     }
 

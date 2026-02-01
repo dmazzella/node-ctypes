@@ -7,6 +7,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <filesystem>
+#include <format>
 #include <iomanip>
 #include <list>
 #include <map>
@@ -41,17 +42,6 @@
 #include <BaseTsd.h>
 typedef SSIZE_T ssize_t;
 #endif
-
-#pragma warning(push)
-#pragma warning(disable : 4996)
-#include <spdlog/tweakme.h>
-#include <spdlog/spdlog.h>
-#include <spdlog/sinks/null_sink.h>
-#include <spdlog/sinks/rotating_file_sink.h>
-#include <spdlog/fmt/bin_to_hex.h>
-#pragma warning(pop)
-
-#include <dotenv/dotenv.h>
 
 #include <ffi.h>
 

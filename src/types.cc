@@ -2,75 +2,55 @@
 
 namespace ctypes
 {
-
-    // Mappa stringa -> CType
-    static const std::unordered_map<std::string, CType> type_map = {
-        {"void", CType::CTYPES_VOID},
-        {"int8", CType::CTYPES_INT8},
-        {"int8_t", CType::CTYPES_INT8},
-        {"char", CType::CTYPES_INT8},
-        {"uint8", CType::CTYPES_UINT8},
-        {"uint8_t", CType::CTYPES_UINT8},
-        {"uchar", CType::CTYPES_UINT8},
-        {"unsigned char", CType::CTYPES_UINT8},
-        {"int16", CType::CTYPES_INT16},
-        {"int16_t", CType::CTYPES_INT16},
-        {"short", CType::CTYPES_INT16},
-        {"uint16", CType::CTYPES_UINT16},
-        {"uint16_t", CType::CTYPES_UINT16},
-        {"ushort", CType::CTYPES_UINT16},
-        {"unsigned short", CType::CTYPES_UINT16},
-        {"int32", CType::CTYPES_INT32},
-        {"int32_t", CType::CTYPES_INT32},
-        {"int", CType::CTYPES_INT32},
-        {"uint32", CType::CTYPES_UINT32},
-        {"uint32_t", CType::CTYPES_UINT32},
-        {"uint", CType::CTYPES_UINT32},
-        {"unsigned int", CType::CTYPES_UINT32},
-        {"int64", CType::CTYPES_INT64},
-        {"int64_t", CType::CTYPES_INT64},
-        {"long long", CType::CTYPES_INT64},
-        {"uint64", CType::CTYPES_UINT64},
-        {"uint64_t", CType::CTYPES_UINT64},
-        {"unsigned long long", CType::CTYPES_UINT64},
-        {"float", CType::CTYPES_FLOAT},
-        {"double", CType::CTYPES_DOUBLE},
-        {"pointer", CType::CTYPES_POINTER},
-        {"void*", CType::CTYPES_POINTER},
-        {"ptr", CType::CTYPES_POINTER},
-        {"string", CType::CTYPES_STRING},
-        {"char*", CType::CTYPES_STRING},
-        {"cstring", CType::CTYPES_STRING},
-        {"wstring", CType::CTYPES_WSTRING},
-        {"wchar_t*", CType::CTYPES_WSTRING},
-        {"wchar", CType::CTYPES_WCHAR},
-        {"wchar_t", CType::CTYPES_WCHAR},
-        {"bool", CType::CTYPES_BOOL},
-        {"_Bool", CType::CTYPES_BOOL},
-        {"size_t", CType::CTYPES_SIZE_T},
-        {"ssize_t", CType::CTYPES_SSIZE_T},
-        {"long", CType::CTYPES_LONG},
-        {"c_long", CType::CTYPES_LONG},
-        {"ulong", CType::CTYPES_ULONG},
-        {"unsigned long", CType::CTYPES_ULONG},
-        {"c_ulong", CType::CTYPES_ULONG}};
-
-    CType StringToCType(const std::string &name)
+    // Converte int32 -> CType con validazione
+    CType IntToCType(int32_t value)
     {
-        spdlog::trace(__FUNCTION__);
-
-        auto it = type_map.find(name);
-        if (it != type_map.end())
+        if (!IsValidCType(value))
         {
-            return it->second;
+            throw std::runtime_error("Invalid CType value: " + std::to_string(value));
         }
-        throw std::runtime_error("Unknown type: " + name);
+        return static_cast<CType>(value);
+    }
+
+    // Nomi dei tipi per CType -> stringa (usato solo per debug/display)
+    static const char *CTypeNames[] = {
+        "void",    // CTYPES_VOID = 0
+        "int8",    // CTYPES_INT8 = 1
+        "uint8",   // CTYPES_UINT8 = 2
+        "int16",   // CTYPES_INT16 = 3
+        "uint16",  // CTYPES_UINT16 = 4
+        "int32",   // CTYPES_INT32 = 5
+        "uint32",  // CTYPES_UINT32 = 6
+        "int64",   // CTYPES_INT64 = 7
+        "uint64",  // CTYPES_UINT64 = 8
+        "float",   // CTYPES_FLOAT = 9
+        "double",  // CTYPES_DOUBLE = 10
+        "pointer", // CTYPES_POINTER = 11
+        "string",  // CTYPES_STRING = 12
+        "wstring", // CTYPES_WSTRING = 13
+        "wchar",   // CTYPES_WCHAR = 14
+        "bool",    // CTYPES_BOOL = 15
+        "size_t",  // CTYPES_SIZE_T = 16
+        "ssize_t", // CTYPES_SSIZE_T = 17
+        "long",    // CTYPES_LONG = 18
+        "ulong",   // CTYPES_ULONG = 19
+        "struct",  // CTYPES_STRUCT = 20
+        "union",   // CTYPES_UNION = 21
+        "array"    // CTYPES_ARRAY = 22
+    };
+
+    const char *CTypeToName(CType type)
+    {
+        int32_t idx = static_cast<int32_t>(type);
+        if (idx >= 0 && idx < static_cast<int32_t>(CType::CTYPES_COUNT))
+        {
+            return CTypeNames[idx];
+        }
+        return "unknown";
     }
 
     ffi_type *CTypeToFFI(CType type)
     {
-        spdlog::trace(__FUNCTION__);
-
         switch (type)
         {
         case CType::CTYPES_VOID:
@@ -134,8 +114,6 @@ namespace ctypes
 
     size_t CTypeSize(CType type)
     {
-        spdlog::trace(__FUNCTION__);
-
         switch (type)
         {
         case CType::CTYPES_VOID:
@@ -185,8 +163,6 @@ namespace ctypes
 
     int JSToC(Napi::Env env, Napi::Value value, CType type, void *buffer, size_t bufsize)
     {
-        spdlog::trace(__FUNCTION__);
-
         switch (type)
         {
         case CType::CTYPES_VOID:
@@ -493,8 +469,6 @@ namespace ctypes
 
     Napi::Value CToJS(Napi::Env env, const void *buffer, CType type)
     {
-        spdlog::trace(__FUNCTION__);
-
         switch (type)
         {
         case CType::CTYPES_VOID:
@@ -686,126 +660,42 @@ namespace ctypes
         }
     }
 
-    // TypeInfo class implementation
-    Napi::Function TypeInfo::GetClass(Napi::Env env)
+    // Crea oggetto CType esportato a JS (enum con tutti i valori)
+    Napi::Object CreateCType(Napi::Env env)
     {
-        spdlog::trace(__FUNCTION__);
+        Napi::Object obj = Napi::Object::New(env);
 
-        return DefineClass(
-            env,
-            "CType",
-            {
-                InstanceMethod("size", &TypeInfo::GetSize),
-                InstanceMethod("name", &TypeInfo::GetName),
-                InstanceAccessor("sizeof", &TypeInfo::GetSize, nullptr),
-            });
-    }
+        // Tipi primitivi
+        obj.Set("VOID", static_cast<int32_t>(CType::CTYPES_VOID));
+        obj.Set("INT8", static_cast<int32_t>(CType::CTYPES_INT8));
+        obj.Set("UINT8", static_cast<int32_t>(CType::CTYPES_UINT8));
+        obj.Set("INT16", static_cast<int32_t>(CType::CTYPES_INT16));
+        obj.Set("UINT16", static_cast<int32_t>(CType::CTYPES_UINT16));
+        obj.Set("INT32", static_cast<int32_t>(CType::CTYPES_INT32));
+        obj.Set("UINT32", static_cast<int32_t>(CType::CTYPES_UINT32));
+        obj.Set("INT64", static_cast<int32_t>(CType::CTYPES_INT64));
+        obj.Set("UINT64", static_cast<int32_t>(CType::CTYPES_UINT64));
+        obj.Set("FLOAT", static_cast<int32_t>(CType::CTYPES_FLOAT));
+        obj.Set("DOUBLE", static_cast<int32_t>(CType::CTYPES_DOUBLE));
+        obj.Set("POINTER", static_cast<int32_t>(CType::CTYPES_POINTER));
+        obj.Set("STRING", static_cast<int32_t>(CType::CTYPES_STRING));
+        obj.Set("WSTRING", static_cast<int32_t>(CType::CTYPES_WSTRING));
+        obj.Set("WCHAR", static_cast<int32_t>(CType::CTYPES_WCHAR));
+        obj.Set("BOOL", static_cast<int32_t>(CType::CTYPES_BOOL));
+        obj.Set("SIZE_T", static_cast<int32_t>(CType::CTYPES_SIZE_T));
+        obj.Set("SSIZE_T", static_cast<int32_t>(CType::CTYPES_SSIZE_T));
+        obj.Set("LONG", static_cast<int32_t>(CType::CTYPES_LONG));
+        obj.Set("ULONG", static_cast<int32_t>(CType::CTYPES_ULONG));
 
-    TypeInfo::TypeInfo(const Napi::CallbackInfo &info)
-        : Napi::ObjectWrap<TypeInfo>(info)
-    {
-        spdlog::trace(__FUNCTION__);
+        // Tipi composti
+        obj.Set("STRUCT", static_cast<int32_t>(CType::CTYPES_STRUCT));
+        obj.Set("UNION", static_cast<int32_t>(CType::CTYPES_UNION));
+        obj.Set("ARRAY", static_cast<int32_t>(CType::CTYPES_ARRAY));
 
-        Napi::Env env = info.Env();
+        // Sentinel per validazione
+        obj.Set("COUNT", static_cast<int32_t>(CType::CTYPES_COUNT));
 
-        if (info.Length() < 1 || !info[0].IsString())
-        {
-            Napi::TypeError::New(env, "Type name string expected")
-                .ThrowAsJavaScriptException();
-            return;
-        }
-
-        name_ = info[0].As<Napi::String>().Utf8Value();
-
-        try
-        {
-            ctype_ = StringToCType(name_);
-            ffi_type_ = CTypeToFFI(ctype_);
-            size_ = CTypeSize(ctype_);
-        }
-        catch (const std::exception &e)
-        {
-            Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
-        }
-    }
-
-    Napi::Value TypeInfo::GetSize(const Napi::CallbackInfo &info)
-    {
-        spdlog::trace(__FUNCTION__);
-
-        return Napi::Number::New(info.Env(), static_cast<double>(size_));
-    }
-
-    Napi::Value TypeInfo::GetName(const Napi::CallbackInfo &info)
-    {
-        spdlog::trace(__FUNCTION__);
-
-        return Napi::String::New(info.Env(), name_);
-    }
-
-    // Crea i tipi predefiniti
-    Napi::Object CreatePredefinedTypes(Napi::Env env, Napi::FunctionReference &typeInfoConstructor)
-    {
-        spdlog::trace(__FUNCTION__);
-
-        Napi::Object types = Napi::Object::New(env);
-
-        auto createType = [&](const char *name)
-        {
-            Napi::Value arg = Napi::String::New(env, name);
-            return typeInfoConstructor.New({arg});
-        };
-
-        // Tipi base
-        types.Set("void", createType("void"));
-        types.Set("int8", createType("int8"));
-        types.Set("uint8", createType("uint8"));
-        types.Set("int16", createType("int16"));
-        types.Set("uint16", createType("uint16"));
-        types.Set("int32", createType("int32"));
-        types.Set("uint32", createType("uint32"));
-        types.Set("int64", createType("int64"));
-        types.Set("uint64", createType("uint64"));
-        types.Set("float", createType("float"));
-        types.Set("double", createType("double"));
-        types.Set("bool", createType("bool"));
-        types.Set("pointer", createType("pointer"));
-        types.Set("string", createType("string"));
-        types.Set("wstring", createType("wstring"));
-        types.Set("wchar", createType("wchar"));
-        types.Set("size_t", createType("size_t"));
-        types.Set("long", createType("long"));
-        types.Set("ulong", createType("ulong"));
-
-        // Alias stile ctypes Python
-        types.Set("c_int8", createType("int8"));
-        types.Set("c_uint8", createType("uint8"));
-        types.Set("c_int16", createType("int16"));
-        types.Set("c_uint16", createType("uint16"));
-        types.Set("c_int32", createType("int32"));
-        types.Set("c_uint32", createType("uint32"));
-        types.Set("c_int64", createType("int64"));
-        types.Set("c_uint64", createType("uint64"));
-        types.Set("c_float", createType("float"));
-        types.Set("c_double", createType("double"));
-        types.Set("c_bool", createType("bool"));
-        types.Set("c_char_p", createType("string"));
-        types.Set("c_wchar_p", createType("wstring"));
-        types.Set("c_wchar", createType("wchar"));
-        types.Set("c_void_p", createType("pointer"));
-        types.Set("c_size_t", createType("size_t"));
-        types.Set("c_long", createType("long"));
-        types.Set("c_ulong", createType("ulong"));
-
-        // Alias comuni
-        types.Set("c_int", createType("int32"));
-        types.Set("c_uint", createType("uint32"));
-        types.Set("c_char", createType("int8"));
-        types.Set("c_uchar", createType("uint8"));
-        types.Set("c_short", createType("int16"));
-        types.Set("c_ushort", createType("uint16"));
-
-        return types;
+        return obj;
     }
 
 } // namespace ctypes

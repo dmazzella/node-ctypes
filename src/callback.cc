@@ -9,8 +9,6 @@ namespace ctypes
     // Handler per Callback (main thread only)
     static void CallbackHandler(ffi_cif *cif, void *ret, void **args, void *user_data)
     {
-        spdlog::trace(__FUNCTION__);
-
         CallbackData *data = static_cast<CallbackData *>(user_data);
 
         if (data->released.load(std::memory_order_acquire))
@@ -136,8 +134,6 @@ namespace ctypes
 
     Napi::Function Callback::GetClass(Napi::Env env)
     {
-        spdlog::trace(__FUNCTION__);
-
         return DefineClass(
             env,
             "Callback",
@@ -152,8 +148,6 @@ namespace ctypes
     Callback::Callback(const Napi::CallbackInfo &info)
         : Napi::ObjectWrap<Callback>(info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         if (info.Length() < 3)
@@ -176,17 +170,13 @@ namespace ctypes
         // Parse return type
         try
         {
-            if (info[1].IsString())
+            if (info[1].IsNumber())
             {
-                data_->return_type = StringToCType(info[1].As<Napi::String>().Utf8Value());
-            }
-            else if (info[1].IsObject() && IsTypeInfo(info[1].As<Napi::Object>()))
-            {
-                data_->return_type = Napi::ObjectWrap<TypeInfo>::Unwrap(info[1].As<Napi::Object>())->GetCType();
+                data_->return_type = IntToCType(info[1].As<Napi::Number>().Int32Value());
             }
             else
             {
-                throw std::runtime_error("Invalid return type");
+                throw std::runtime_error("Return type must be CType enum value (number) or CType object");
             }
         }
         catch (const std::exception &e)
@@ -210,18 +200,13 @@ namespace ctypes
             Napi::Value elem = arr.Get(i);
             try
             {
-                if (elem.IsString())
+                if (elem.IsNumber())
                 {
-                    data_->arg_types.push_back(StringToCType(elem.As<Napi::String>().Utf8Value()));
-                }
-                else if (elem.IsObject() && IsTypeInfo(elem.As<Napi::Object>()))
-                {
-                    data_->arg_types.push_back(
-                        Napi::ObjectWrap<TypeInfo>::Unwrap(elem.As<Napi::Object>())->GetCType());
+                    data_->arg_types.push_back(IntToCType(elem.As<Napi::Number>().Int32Value()));
                 }
                 else
                 {
-                    throw std::runtime_error("Invalid type");
+                    throw std::runtime_error("Type must be CType enum value (number) or CType object");
                 }
             }
             catch (const std::exception &e)
@@ -290,8 +275,6 @@ namespace ctypes
 
     Callback::~Callback()
     {
-        spdlog::trace(__FUNCTION__);
-
         // Cleanup - il flag atomico previene double-free
         if (data_ && !data_->released.exchange(true))
         {
@@ -311,8 +294,6 @@ namespace ctypes
 
     Napi::Value Callback::GetPointer(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         if (!data_ || data_->released.load())
@@ -326,8 +307,6 @@ namespace ctypes
 
     Napi::Value Callback::Release(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         if (data_ && !data_->released.exchange(true))
         {
             if (data_->closure)
@@ -346,8 +325,6 @@ namespace ctypes
 
     Napi::Value Callback::SetErrorHandler(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         if (!data_ || data_->released.load())
@@ -368,8 +345,6 @@ namespace ctypes
 
     Napi::Value Callback::GetLastError(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         if (!data_)
@@ -393,8 +368,6 @@ namespace ctypes
     // Handler per ThreadSafeCallback
     static void ThreadSafeCallbackHandler(ffi_cif *cif, void *ret, void **args, void *user_data)
     {
-        spdlog::trace(__FUNCTION__);
-
         ThreadSafeCallbackData *data = static_cast<ThreadSafeCallbackData *>(user_data);
 
         if (data->released.load(std::memory_order_acquire))
@@ -672,8 +645,6 @@ namespace ctypes
 
     Napi::Function ThreadSafeCallback::GetClass(Napi::Env env)
     {
-        spdlog::trace(__FUNCTION__);
-
         return DefineClass(
             env,
             "ThreadSafeCallback",
@@ -688,8 +659,6 @@ namespace ctypes
     ThreadSafeCallback::ThreadSafeCallback(const Napi::CallbackInfo &info)
         : Napi::ObjectWrap<ThreadSafeCallback>(info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         if (info.Length() < 3)
@@ -715,17 +684,13 @@ namespace ctypes
         // Parse return type
         try
         {
-            if (info[1].IsString())
+            if (info[1].IsNumber())
             {
-                data_->return_type = StringToCType(info[1].As<Napi::String>().Utf8Value());
-            }
-            else if (info[1].IsObject() && IsTypeInfo(info[1].As<Napi::Object>()))
-            {
-                data_->return_type = Napi::ObjectWrap<TypeInfo>::Unwrap(info[1].As<Napi::Object>())->GetCType();
+                data_->return_type = IntToCType(info[1].As<Napi::Number>().Int32Value());
             }
             else
             {
-                throw std::runtime_error("Invalid return type");
+                throw std::runtime_error("Return type must be CType enum value (number) or CType object");
             }
         }
         catch (const std::exception &e)
@@ -749,18 +714,13 @@ namespace ctypes
             Napi::Value elem = arr.Get(i);
             try
             {
-                if (elem.IsString())
+                if (elem.IsNumber())
                 {
-                    data_->arg_types.push_back(StringToCType(elem.As<Napi::String>().Utf8Value()));
-                }
-                else if (elem.IsObject() && IsTypeInfo(elem.As<Napi::Object>()))
-                {
-                    data_->arg_types.push_back(
-                        Napi::ObjectWrap<TypeInfo>::Unwrap(elem.As<Napi::Object>())->GetCType());
+                    data_->arg_types.push_back(IntToCType(elem.As<Napi::Number>().Int32Value()));
                 }
                 else
                 {
-                    throw std::runtime_error("Invalid type");
+                    throw std::runtime_error("Type must be CType enum value (number) or CType object");
                 }
             }
             catch (const std::exception &e)
@@ -839,15 +799,11 @@ namespace ctypes
 
     ThreadSafeCallback::~ThreadSafeCallback()
     {
-        spdlog::trace(__FUNCTION__);
-
         // Il cleanup verrà fatto in Release()
     }
 
     Napi::Value ThreadSafeCallback::SetErrorHandler(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         if (!data_ || data_->released.load())
@@ -868,8 +824,6 @@ namespace ctypes
 
     Napi::Value ThreadSafeCallback::GetLastError(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         if (!data_)
@@ -888,8 +842,6 @@ namespace ctypes
 
     Napi::Value ThreadSafeCallback::GetPointer(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         Napi::Env env = info.Env();
 
         if (!data_ || data_->released.load())
@@ -903,8 +855,6 @@ namespace ctypes
 
     Napi::Value ThreadSafeCallback::Release(const Napi::CallbackInfo &info)
     {
-        spdlog::trace(__FUNCTION__);
-
         if (data_ && !data_->released.exchange(true))
         {
             if (data_->closure)
