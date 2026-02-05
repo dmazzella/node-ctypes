@@ -161,6 +161,10 @@ namespace ctypes
         }
     }
 
+    // ============================================================================
+    // JSToC - Converte valore JS in bytes C
+    // ============================================================================
+
     int JSToC(Napi::Env env, Napi::Value value, CType type, void *buffer, size_t bufsize)
     {
         switch (type)
@@ -276,15 +280,6 @@ namespace ctypes
             return sizeof(val);
         }
 
-        case CType::CTYPES_BOOL:
-        {
-            if (bufsize < 1)
-                return -1;
-            uint8_t val = value.ToBoolean().Value() ? 1 : 0;
-            memcpy(buffer, &val, sizeof(val));
-            return sizeof(val);
-        }
-
         case CType::CTYPES_POINTER:
         {
             if (bufsize < sizeof(void *))
@@ -390,6 +385,15 @@ namespace ctypes
             return sizeof(wchar_t);
         }
 
+        case CType::CTYPES_BOOL:
+        {
+            if (bufsize < 1)
+                return -1;
+            uint8_t val = value.ToBoolean().Value() ? 1 : 0;
+            memcpy(buffer, &val, sizeof(val));
+            return sizeof(val);
+        }
+
         case CType::CTYPES_SIZE_T:
         {
             if (bufsize < sizeof(size_t))
@@ -463,9 +467,14 @@ namespace ctypes
         }
 
         default:
+            // STRUCT/UNION/ARRAY non supportati - usare StructInfo/ArrayInfo
             return -1;
         }
     }
+
+    // ============================================================================
+    // CToJS - Converte bytes C in valore JS
+    // ============================================================================
 
     Napi::Value CToJS(Napi::Env env, const void *buffer, CType type)
     {
@@ -544,13 +553,6 @@ namespace ctypes
             return Napi::Number::New(env, val);
         }
 
-        case CType::CTYPES_BOOL:
-        {
-            uint8_t val;
-            memcpy(&val, buffer, sizeof(val));
-            return Napi::Boolean::New(env, val != 0);
-        }
-
         case CType::CTYPES_POINTER:
         {
             void *ptr;
@@ -581,7 +583,6 @@ namespace ctypes
             {
                 return env.Null();
             }
-            // Converti wchar_t* a stringa JS
 #ifdef _WIN32
             // Windows: wchar_t è 16-bit (UTF-16)
             return Napi::String::New(env, reinterpret_cast<const char16_t *>(str));
@@ -623,8 +624,14 @@ namespace ctypes
         {
             wchar_t val;
             memcpy(&val, buffer, sizeof(wchar_t));
-            // Restituisci come numero (code point)
             return Napi::Number::New(env, static_cast<uint32_t>(val));
+        }
+
+        case CType::CTYPES_BOOL:
+        {
+            uint8_t val;
+            memcpy(&val, buffer, sizeof(val));
+            return Napi::Boolean::New(env, val != 0);
         }
 
         case CType::CTYPES_SIZE_T:
@@ -656,6 +663,7 @@ namespace ctypes
         }
 
         default:
+            // STRUCT/UNION/ARRAY non supportati - usare StructInfo/ArrayInfo
             return env.Undefined();
         }
     }

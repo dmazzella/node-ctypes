@@ -1,7 +1,7 @@
 // Windows Controls Showcase Demo
 // A compact demo that creates a window with a wide set of common Win32 controls
 
-import { WinDLL, struct, create_unicode_buffer, c_short, c_int, c_uint, c_long, c_void, c_void_p } from "node-ctypes";
+import { WinDLL, Structure, create_unicode_buffer, byref, c_short, c_int, c_uint, c_long, c_void, c_void_p } from "node-ctypes";
 
 // Constants
 const WS_OVERLAPPEDWINDOW = 0x00cf0000;
@@ -33,6 +33,7 @@ const WM_TIMER = 0x0113;
 const ID_PROGRESS_TIMER = 1;
 const WM_SIZE = 0x0005;
 const WM_VSCROLL = 0x0115;
+const WM_HSCROLL = 0x0114;
 const WM_MOUSEWHEEL = 0x020a;
 
 const SB_LINEUP = 0;
@@ -105,63 +106,123 @@ const kernel32 = new WinDLL("kernel32.dll");
 const comctl32 = new WinDLL("comctl32.dll");
 const gdi32 = new WinDLL("gdi32.dll");
 
-// Functions
-const RegisterClassExW = user32.func("RegisterClassExW", c_short, [c_void_p]);
-const CreateWindowExW = user32.func("CreateWindowExW", c_void_p, [c_uint, c_void_p, c_void_p, c_uint, c_int, c_int, c_int, c_int, c_void_p, c_void_p, c_void_p, c_void_p]);
-const ShowWindow = user32.func("ShowWindow", c_int, [c_void_p, c_int]);
-const UpdateWindow = user32.func("UpdateWindow", c_int, [c_void_p]);
-const InvalidateRect = user32.func("InvalidateRect", c_int, [c_void_p, c_void_p, c_int]);
-const RedrawWindow = user32.func("RedrawWindow", c_int, [c_void_p, c_void_p, c_void_p, c_uint]);
-const GetMessageW = user32.func("GetMessageW", c_int, [c_void_p, c_void_p, c_uint, c_uint]);
-const TranslateMessage = user32.func("TranslateMessage", c_int, [c_void_p]);
-const DispatchMessageW = user32.func("DispatchMessageW", c_void_p, [c_void_p]);
-const DefWindowProcW = user32.func("DefWindowProcW", c_void_p, [c_void_p, c_uint, c_void_p, c_void_p]);
-const PostQuitMessage = user32.func("PostQuitMessage", c_void, [c_int]);
-const LoadCursorW = user32.func("LoadCursorW", c_void_p, [c_void_p, c_uint]);
-const GetModuleHandleW = kernel32.func("GetModuleHandleW", c_void_p, [c_void_p]);
-const SetWindowTextW = user32.func("SetWindowTextW", c_int, [c_void_p, c_void_p]);
-const GetDlgItem = user32.func("GetDlgItem", c_void_p, [c_void_p, c_int]);
-const GetWindowTextW = user32.func("GetWindowTextW", c_int, [c_void_p, c_void_p, c_int]);
-const GetClientRect = user32.func("GetClientRect", c_int, [c_void_p, c_void_p]);
-const GetWindowRect = user32.func("GetWindowRect", c_int, [c_void_p, c_void_p]);
-const MapWindowPoints = user32.func("MapWindowPoints", c_int, [c_void_p, c_void_p, c_void_p, c_uint]);
-const SetScrollInfo = user32.func("SetScrollInfo", c_int, [c_void_p, c_int, c_void_p, c_int]);
-const ScrollWindow = user32.func("ScrollWindow", c_int, [c_void_p, c_int, c_int, c_void_p, c_void_p]);
-const MoveWindow = user32.func("MoveWindow", c_int, [c_void_p, c_int, c_int, c_int, c_int, c_int]);
-const BeginDeferWindowPos = user32.func("BeginDeferWindowPos", c_void_p, [c_int]);
-const DeferWindowPos = user32.func("DeferWindowPos", c_void_p, [c_void_p, c_void_p, c_void_p, c_int, c_int, c_int, c_int, c_uint]);
-const EndDeferWindowPos = user32.func("EndDeferWindowPos", c_int, [c_void_p]);
-const SendMessageW = user32.func("SendMessageW", c_long, [c_void_p, c_uint, c_void_p, c_void_p]);
-const PostMessageW = user32.func("PostMessageW", c_int, [c_void_p, c_uint, c_void_p, c_void_p]);
-const SetTimer = user32.func("SetTimer", c_void_p, [c_void_p, c_uint, c_uint, c_void_p]);
-const KillTimer = user32.func("KillTimer", c_void, [c_void_p, c_uint]);
-const IsIconic = user32.func("IsIconic", c_int, [c_void_p]);
-const IsZoomed = user32.func("IsZoomed", c_int, [c_void_p]);
-const CreateFontW = gdi32.func("CreateFontW", c_void_p, [c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_void_p]);
-const DeleteObject = gdi32.func("DeleteObject", c_int, [c_void_p]);
+// Define function signatures (Python-like argtypes/restype syntax)
+user32.RegisterClassExW.argtypes = [c_void_p];
+user32.RegisterClassExW.restype = c_short;
+
+user32.CreateWindowExW.argtypes = [c_uint, c_void_p, c_void_p, c_uint, c_int, c_int, c_int, c_int, c_void_p, c_void_p, c_void_p, c_void_p];
+user32.CreateWindowExW.restype = c_void_p;
+
+user32.ShowWindow.argtypes = [c_void_p, c_int];
+user32.ShowWindow.restype = c_int;
+
+user32.UpdateWindow.argtypes = [c_void_p];
+user32.UpdateWindow.restype = c_int;
+
+user32.InvalidateRect.argtypes = [c_void_p, c_void_p, c_int];
+user32.InvalidateRect.restype = c_int;
+
+user32.RedrawWindow.argtypes = [c_void_p, c_void_p, c_void_p, c_uint];
+user32.RedrawWindow.restype = c_int;
+
+user32.GetMessageW.argtypes = [c_void_p, c_void_p, c_uint, c_uint];
+user32.GetMessageW.restype = c_int;
+
+user32.TranslateMessage.argtypes = [c_void_p];
+user32.TranslateMessage.restype = c_int;
+
+user32.DispatchMessageW.argtypes = [c_void_p];
+user32.DispatchMessageW.restype = c_void_p;
+
+user32.DefWindowProcW.argtypes = [c_void_p, c_uint, c_void_p, c_void_p];
+user32.DefWindowProcW.restype = c_void_p;
+
+user32.PostQuitMessage.argtypes = [c_int];
+user32.PostQuitMessage.restype = c_void;
+
+user32.LoadCursorW.argtypes = [c_void_p, c_uint];
+user32.LoadCursorW.restype = c_void_p;
+
+kernel32.GetModuleHandleW.argtypes = [c_void_p];
+kernel32.GetModuleHandleW.restype = c_void_p;
+
+user32.SetWindowTextW.argtypes = [c_void_p, c_void_p];
+user32.SetWindowTextW.restype = c_int;
+
+user32.GetDlgItem.argtypes = [c_void_p, c_int];
+user32.GetDlgItem.restype = c_void_p;
+
+user32.GetWindowTextW.argtypes = [c_void_p, c_void_p, c_int];
+user32.GetWindowTextW.restype = c_int;
+
+user32.GetClientRect.argtypes = [c_void_p, c_void_p];
+user32.GetClientRect.restype = c_int;
+
+user32.GetWindowRect.argtypes = [c_void_p, c_void_p];
+user32.GetWindowRect.restype = c_int;
+
+user32.MapWindowPoints.argtypes = [c_void_p, c_void_p, c_void_p, c_uint];
+user32.MapWindowPoints.restype = c_int;
+
+user32.SetScrollInfo.argtypes = [c_void_p, c_int, c_void_p, c_int];
+user32.SetScrollInfo.restype = c_int;
+
+user32.ScrollWindow.argtypes = [c_void_p, c_int, c_int, c_void_p, c_void_p];
+user32.ScrollWindow.restype = c_int;
+
+user32.MoveWindow.argtypes = [c_void_p, c_int, c_int, c_int, c_int, c_int];
+user32.MoveWindow.restype = c_int;
+
+user32.BeginDeferWindowPos.argtypes = [c_int];
+user32.BeginDeferWindowPos.restype = c_void_p;
+
+user32.DeferWindowPos.argtypes = [c_void_p, c_void_p, c_void_p, c_int, c_int, c_int, c_int, c_uint];
+user32.DeferWindowPos.restype = c_void_p;
+
+user32.EndDeferWindowPos.argtypes = [c_void_p];
+user32.EndDeferWindowPos.restype = c_int;
+
+user32.SendMessageW.argtypes = [c_void_p, c_uint, c_void_p, c_void_p];
+user32.SendMessageW.restype = c_long;
+
+user32.PostMessageW.argtypes = [c_void_p, c_uint, c_void_p, c_void_p];
+user32.PostMessageW.restype = c_int;
+
+user32.SetTimer.argtypes = [c_void_p, c_uint, c_uint, c_void_p];
+user32.SetTimer.restype = c_void_p;
+
+user32.KillTimer.argtypes = [c_void_p, c_uint];
+user32.KillTimer.restype = c_void;
+
+user32.IsIconic.argtypes = [c_void_p];
+user32.IsIconic.restype = c_int;
+
+user32.IsZoomed.argtypes = [c_void_p];
+user32.IsZoomed.restype = c_int;
+
+gdi32.CreateFontW.argtypes = [c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_void_p];
+gdi32.CreateFontW.restype = c_void_p;
+
+gdi32.DeleteObject.argtypes = [c_void_p];
+gdi32.DeleteObject.restype = c_int;
+
 // helper to copy memory from a pointer into a local buffer/struct
-let RtlMoveMemory = null;
 try {
-  RtlMoveMemory = kernel32.func("RtlMoveMemory", c_void, [c_void_p, c_void_p, c_uint]);
-} catch (e) {
-  try {
-    RtlMoveMemory = kernel32.func("CopyMemory", c_void, [c_void_p, c_void_p, c_uint]);
-  } catch (e) {
-    RtlMoveMemory = null;
-  }
-}
+  kernel32.RtlMoveMemory.argtypes = [c_void_p, c_void_p, c_uint];
+  kernel32.RtlMoveMemory.restype = c_void;
+} catch (e) {}
 
 // Initialize common controls (comctl32)
-let InitCommonControls = null;
 try {
-  InitCommonControls = comctl32.func("InitCommonControls", c_void, []);
-  InitCommonControls();
+  comctl32.InitCommonControls.argtypes = [];
+  comctl32.InitCommonControls.restype = c_void;
+  comctl32.InitCommonControls();
 } catch (e) {}
 
 // Prefer InitCommonControlsEx for specific control classes
-let InitCommonControlsEx = null;
 try {
-  InitCommonControlsEx = comctl32.func("InitCommonControlsEx", c_int, [c_void_p]);
+  comctl32.InitCommonControlsEx.argtypes = [c_void_p];
+  comctl32.InitCommonControlsEx.restype = c_int;
 } catch (e) {}
 
 const ICC_PROGRESS_CLASS = 0x00002000;
@@ -169,18 +230,20 @@ const ICC_BAR_CLASSES = 0x00000004;
 const ICC_UPDOWN_CLASS = 0x00000040;
 const ICC_TRACKBAR_CLASSES = 0x00000001;
 
-const INITCOMMONCONTROLSEX = struct({
-  dwSize: c_uint,
-  dwICC: c_uint,
-});
+class INITCOMMONCONTROLSEX extends Structure {
+  static _fields_ = [
+    ["dwSize", c_uint],
+    ["dwICC", c_uint],
+  ];
+}
 
 try {
   if (InitCommonControlsEx) {
-    const icex = INITCOMMONCONTROLSEX.create();
+    const icex = new comctl32.InitCommonControlsEx();
     icex.dwSize = INITCOMMONCONTROLSEX.size;
     icex.dwICC = ICC_BAR_CLASSES | ICC_PROGRESS_CLASS | ICC_UPDOWN_CLASS | ICC_TRACKBAR_CLASSES;
     // Call InitCommonControlsEx early to register control classes before creating windows
-    InitCommonControlsEx(icex.ref());
+    comctl32.InitCommonControlsEx(byref(icex));
   }
 } catch (e) {}
 
@@ -190,11 +253,12 @@ const TBM_GETPOS = 0x0400; // WM_USER
 const TBM_SETPOS = 0x0405; // WM_USER + 5
 const TBM_SETRANGE = 0x0406; // WM_USER + 6
 
-const UDM_SETRANGE32 = 0x0464;
-const UDM_GETPOS = 0x0468;
-const UDM_SETPOS32 = 0x0465;
-const UDM_GETPOS32 = 0x0472;
-const UDM_SETBUDDY = 0x0460;
+// Up-Down control messages (WM_USER = 0x0400)
+const UDM_SETBUDDY = 0x0401; // WM_USER + 1
+const UDM_GETPOS = 0x0408; // WM_USER + 8
+const UDM_SETRANGE32 = 0x046f; // WM_USER + 111
+const UDM_SETPOS32 = 0x0471; // WM_USER + 113
+const UDM_GETPOS32 = 0x0472; // WM_USER + 114
 
 const TTS_ALWAYSTIP = 0x01;
 const TTM_SETMAXTIPWIDTH = 0x0418;
@@ -218,58 +282,75 @@ const DEBUG_LOG_INTERVAL = 1000;
 
 // We'll need CreateWindowExW already available; SendMessageW used for TB/UD messages
 
-// Minimal structs
-const WNDCLASSEX = struct({
-  cbSize: c_uint,
-  style: c_uint,
-  lpfnWndProc: c_void_p,
-  cbClsExtra: c_int,
-  cbWndExtra: c_int,
-  hInstance: c_void_p,
-  hIcon: c_void_p,
-  hCursor: c_void_p,
-  hbrBackground: c_void_p,
-  lpszMenuName: c_void_p,
-  lpszClassName: c_void_p,
-  hIconSm: c_void_p,
-});
+// Windows structures (Python-like syntax)
+class POINT extends Structure {
+  static _fields_ = [
+    ["x", c_long],
+    ["y", c_long],
+  ];
+}
 
-const MSG = struct({
-  hwnd: c_void_p,
-  message: c_uint,
-  wParam: c_void_p,
-  lParam: c_void_p,
-  time: c_uint,
-  pt: struct({ x: c_long, y: c_long }),
-});
+class WNDCLASSEX extends Structure {
+  static _fields_ = [
+    ["cbSize", c_uint],
+    ["style", c_uint],
+    ["lpfnWndProc", c_void_p],
+    ["cbClsExtra", c_int],
+    ["cbWndExtra", c_int],
+    ["hInstance", c_void_p],
+    ["hIcon", c_void_p],
+    ["hCursor", c_void_p],
+    ["hbrBackground", c_void_p],
+    ["lpszMenuName", c_void_p],
+    ["lpszClassName", c_void_p],
+    ["hIconSm", c_void_p],
+  ];
+}
 
-const RECT = struct({
-  left: c_long,
-  top: c_long,
-  right: c_long,
-  bottom: c_long,
-});
+class MSG extends Structure {
+  static _fields_ = [
+    ["hwnd", c_void_p],
+    ["message", c_uint],
+    ["wParam", c_void_p],
+    ["lParam", c_void_p],
+    ["time", c_uint],
+    ["pt", POINT],
+  ];
+}
 
-const SCROLLINFO = struct({
-  cbSize: c_uint,
-  fMask: c_uint,
-  nMin: c_int,
-  nMax: c_int,
-  nPage: c_uint,
-  nPos: c_int,
-  nTrackPos: c_int,
-});
+class RECT extends Structure {
+  static _fields_ = [
+    ["left", c_long],
+    ["top", c_long],
+    ["right", c_long],
+    ["bottom", c_long],
+  ];
+}
 
-const TOOLINFOW = struct({
-  cbSize: c_uint,
-  uFlags: c_uint,
-  hwnd: c_void_p,
-  uId: c_void_p,
-  rect: RECT,
-  hinst: c_void_p,
-  lpszText: c_void_p,
-  lParam: c_void_p,
-});
+class SCROLLINFO extends Structure {
+  static _fields_ = [
+    ["cbSize", c_uint],
+    ["fMask", c_uint],
+    ["nMin", c_int],
+    ["nMax", c_int],
+    ["nPage", c_uint],
+    ["nPos", c_int],
+    ["nTrackPos", c_int],
+  ];
+}
+
+class TOOLINFOW extends Structure {
+  static _fields_ = [
+    ["cbSize", c_uint],
+    ["uFlags", c_uint],
+    ["hwnd", c_void_p],
+    ["uId", c_void_p],
+    ["rect", RECT],
+    ["hinst", c_void_p],
+    ["lpszText", c_void_p],
+    ["lParam", c_void_p],
+  ];
+}
 
 // Global state for demo
 let hInstance = null;
@@ -304,6 +385,7 @@ let __scrollY = 0;
 let __contentHeight = 0;
 let __clientHeight = 0;
 let lastSpinPos = 0;
+let isUpdatingSpin = false; // Re-entrancy guard for spin/trackbar sync
 
 function log(...args) {
   try {
@@ -312,36 +394,35 @@ function log(...args) {
 }
 
 function createScaledFont() {
-  if (hFont) DeleteObject(hFont);
+  if (hFont) gdi32.DeleteObject(hFont);
   // Fixed comfortable font
   const fontHeight = 24;
-  hFont = CreateFontW(fontHeight, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 1, 0, create_unicode_buffer("Segoe UI"));
+  hFont = gdi32.CreateFontW(fontHeight, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 1, 0, create_unicode_buffer("Segoe UI"));
   return hFont;
 }
 
 function applyFont(hwnd) {
   if (hFont && hwnd) {
-    SendMessageW(hwnd, WM_SETFONT, hFont, 1);
+    user32.SendMessageW(hwnd, WM_SETFONT, hFont, 1);
   }
 }
 
 function WindowProc(hwnd, msg, wParam, lParam) {
-  log("WindowProc called:", "msg=" + msg, "wParam=" + wParam, "lParam=" + lParam);
   switch (msg) {
     case WM_SIZE:
       try {
-        const rc = RECT.create();
-        GetClientRect(hwnd, rc);
+        const rc = new RECT();
+        user32.GetClientRect(hwnd, byref(rc));
         __clientHeight = Number(rc.bottom) - Number(rc.top);
         // update scrollinfo
-        const si = SCROLLINFO.create();
+        const si = new SCROLLINFO();
         si.cbSize = SCROLLINFO.size;
         si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
         si.nMin = 0;
         si.nMax = Math.max(0, __contentHeight - 1);
         si.nPage = __clientHeight;
         si.nPos = __scrollY;
-        SetScrollInfo(hwnd, SB_VERT, si, 1);
+        user32.SetScrollInfo(hwnd, SB_VERT, byref(si), 1);
       } catch (e) {}
       break;
     case WM_VSCROLL:
@@ -364,13 +445,13 @@ function WindowProc(hwnd, msg, wParam, lParam) {
           if (scrollBy !== 0) {
             __scrollY = newY;
             // positive scrollBy means move content up, so scroll by -scrollBy
-            ScrollWindow(hwnd, 0, -scrollBy, null, null);
+            user32.ScrollWindow(hwnd, 0, -scrollBy, null, null);
             // update scrollinfo position
-            const si2 = SCROLLINFO.create();
+            const si2 = new SCROLLINFO();
             si2.cbSize = SCROLLINFO.size;
             si2.fMask = SIF_POS;
             si2.nPos = __scrollY;
-            SetScrollInfo(hwnd, SB_VERT, si2, 1);
+            user32.SetScrollInfo(hwnd, SB_VERT, byref(si2), 1);
           }
         }
       } catch (e) {}
@@ -386,20 +467,40 @@ function WindowProc(hwnd, msg, wParam, lParam) {
         const scrollBy = newY - __scrollY;
         if (scrollBy !== 0) {
           __scrollY = newY;
-          ScrollWindow(hwnd, 0, -scrollBy, null, null);
-          const si3 = SCROLLINFO.create();
+          user32.ScrollWindow(hwnd, 0, -scrollBy, null, null);
+          const si3 = new SCROLLINFO();
           si3.cbSize = SCROLLINFO.size;
           si3.fMask = SIF_POS;
           si3.nPos = __scrollY;
-          SetScrollInfo(hwnd, SB_VERT, si3, 1);
+          user32.SetScrollInfo(hwnd, SB_VERT, byref(si3), 1);
         }
       } catch (e) {}
+      return 0n;
+    case WM_HSCROLL:
+      // Trackbar sends WM_HSCROLL when value changes
+      if (isUpdatingSpin) return 0n; // Prevent re-entrancy
+      try {
+        const lpNum = BigInt(lParam || 0);
+        const tkNum = BigInt(hwndTrack || 0);
+        if (lpNum !== 0n && tkNum !== 0n && lpNum === tkNum) {
+          const tpos = Number(user32.SendMessageW(hwndTrack, TBM_GETPOS, 0, 0) || 0);
+          const pos = Math.max(0, Math.min(100, tpos));
+          if (pos !== lastSpinPos) {
+            isUpdatingSpin = true;
+            lastSpinPos = pos;
+            if (hwndSpin) user32.SendMessageW(hwndSpin, UDM_SETPOS32, 0, pos);
+            if (hwndSpinEdit) user32.SetWindowTextW(hwndSpinEdit, create_unicode_buffer(String(pos)));
+            isUpdatingSpin = false;
+          }
+        }
+      } catch (e) {
+        isUpdatingSpin = false;
+      }
       return 0n;
     case WM_COMMAND:
       {
         const controlId = Number(wParam) & 0xffff;
         const notification = (Number(wParam) >> 16) & 0xffff;
-        log("WM_COMMAND: controlId=", controlId, "notificationCode=", notification);
         switch (controlId) {
           case ID_BUTTON1:
             log("Button 1 clicked");
@@ -410,19 +511,19 @@ function WindowProc(hwnd, msg, wParam, lParam) {
           case ID_TOGGLE_WINDOW:
             {
               // If window is minimized, restore/maximize; if normal, minimize; if maximized, restore
-              const isMin = IsIconic(hwndMain);
-              const isMax = IsZoomed(hwndMain);
+              const isMin = user32.IsIconic(hwndMain);
+              const isMax = user32.IsZoomed(hwndMain);
               if (isMin) {
                 // Restore (use SW_RESTORE)
-                ShowWindow(hwndMain, SW_RESTORE);
+                user32.ShowWindow(hwndMain, SW_RESTORE);
                 log("Window restored from minimized state");
               } else if (isMax) {
                 // If currently maximized, restore
-                ShowWindow(hwndMain, SW_RESTORE);
+                user32.ShowWindow(hwndMain, SW_RESTORE);
                 log("Window restored from maximized state");
               } else {
                 // Minimize
-                ShowWindow(hwndMain, SW_MINIMIZE);
+                user32.ShowWindow(hwndMain, SW_MINIMIZE);
                 log("Window minimized");
               }
             }
@@ -433,14 +534,14 @@ function WindowProc(hwnd, msg, wParam, lParam) {
             try {
               const text = create_unicode_buffer("Count: " + counter);
               // prefer using the known hwndCounter handle
-              if (hwndCounter) SetWindowTextW(hwndCounter, text);
-              else SetWindowTextW(GetDlgItem(hwndMain, ID_COUNTER), text);
+              if (hwndCounter) user32.SetWindowTextW(hwndCounter, text);
+              else user32.SetWindowTextW(user32.GetDlgItem(hwndMain, ID_COUNTER), text);
             } catch (e) {}
             break;
           case ID_CHECKBOX:
             // toggle checkbox state
             {
-              const state = SendMessageW(GetDlgItem(hwndMain, ID_CHECKBOX), BM_GETCHECK, 0, 0);
+              const state = user32.SendMessageW(user32.GetDlgItem(hwndMain, ID_CHECKBOX), BM_GETCHECK, 0, 0);
               log("Checkbox raw state:", state);
             }
             break;
@@ -452,16 +553,16 @@ function WindowProc(hwnd, msg, wParam, lParam) {
             break;
           case ID_COMBOBOX:
             if (notification === CBN_SELCHANGE) {
-              const sel = SendMessageW(GetDlgItem(hwndMain, ID_COMBOBOX), CB_GETCURSEL, 0, 0);
+              const sel = user32.SendMessageW(user32.GetDlgItem(hwndMain, ID_COMBOBOX), CB_GETCURSEL, 0, 0);
               log("Combobox selection index:", Number(sel));
             }
             break;
           case ID_TEXT_INPUT:
             if (notification === EN_CHANGE) {
               try {
-                const textControl = GetDlgItem(hwndMain, ID_TEXT_INPUT);
+                const textControl = user32.GetDlgItem(hwndMain, ID_TEXT_INPUT);
                 const buf = create_unicode_buffer(256);
-                const len = GetWindowTextW(textControl, buf, 256);
+                const len = user32.GetWindowTextW(textControl, buf, 256);
                 if (len > 0) {
                   // buffer is UTF-16LE
                   const text = buf.toString("ucs2", 0, Number(len) * 2);
@@ -473,44 +574,33 @@ function WindowProc(hwnd, msg, wParam, lParam) {
             }
             break;
           case ID_SPIN_EDIT:
-            if (notification === EN_CHANGE) {
+            if (notification === EN_CHANGE && !isUpdatingSpin) {
               try {
-                const hEdit = GetDlgItem(hwndMain, ID_SPIN_EDIT);
+                const hEdit = user32.GetDlgItem(hwndMain, ID_SPIN_EDIT);
                 const buf = create_unicode_buffer(64);
-                const len = GetWindowTextW(hEdit, buf, 64);
+                const len = user32.GetWindowTextW(hEdit, buf, 64);
                 let text = "";
                 if (len > 0) text = buf.toString("ucs2", 0, Number(len) * 2);
                 let num = parseInt(text, 10);
                 if (Number.isNaN(num)) num = 0;
                 num = Math.max(0, Math.min(100, num));
-                log("SPIN_EDIT EN_CHANGE: text=", text, " parsed=", num);
-                // update spin internal state and trackbar to keep everything in sync
-                try {
-                  if (hwndSpin) {
-                    const udRet = SendMessageW(hwndSpin, UDM_SETPOS32, 0, num);
-                    log("EN_CHANGE: UDM_SETPOS32 return:", udRet);
-                  }
-                } catch (e) {
-                  log("EN_CHANGE: UDM_SETPOS32 call failed", e);
+                // Only update if value actually changed
+                if (num !== lastSpinPos) {
+                  isUpdatingSpin = true;
+                  lastSpinPos = num;
+                  // update spin internal state and trackbar to keep everything in sync
+                  if (hwndSpin) user32.SendMessageW(hwndSpin, UDM_SETPOS32, 0, num);
+                  if (hwndTrack) user32.SendMessageW(hwndTrack, TBM_SETPOS, 1, num);
+                  isUpdatingSpin = false;
                 }
-                try {
-                  if (hwndTrack) {
-                    const tbRet = SendMessageW(hwndTrack, TBM_SETPOS, 1, num);
-                    log("EN_CHANGE: TBM_SETPOS return:", tbRet);
-                  }
-                } catch (e) {
-                  log("EN_CHANGE: TBM_SETPOS call failed", e);
-                }
-                // ensure edit contains clamped value
-                try {
-                  SetWindowTextW(hEdit, create_unicode_buffer(String(num)));
-                } catch (e) {}
-              } catch (e) {}
+              } catch (e) {
+                isUpdatingSpin = false;
+              }
             }
             break;
           case ID_LISTBOX:
             if (notification === LBN_SELCHANGE) {
-              const selIndex = SendMessageW(GetDlgItem(hwndMain, ID_LISTBOX), LB_GETCURSEL, 0, 0);
+              const selIndex = user32.SendMessageW(user32.GetDlgItem(hwndMain, ID_LISTBOX), LB_GETCURSEL, 0, 0);
               log("Listbox selection index:", Number(selIndex));
             }
             break;
@@ -525,19 +615,19 @@ function WindowProc(hwnd, msg, wParam, lParam) {
 
         try {
           // set range (MAKELPARAM style) and set position (wParam=bRedraw, lParam=pos for some wrappers)
-          SendMessageW(hwndProgressBar, PBM_SETRANGE, 0, (100 << 16) | 0);
-          SendMessageW(hwndProgressBar, PBM_SETPOS, progressPos, 0);
+          user32.SendMessageW(hwndProgressBar, PBM_SETRANGE, 0, (100 << 16) | 0);
+          user32.SendMessageW(hwndProgressBar, PBM_SETPOS, progressPos, 0);
         } catch (e) {}
 
         // force immediate redraw
         try {
-          InvalidateRect(hwndProgressBar, 0, 1);
+          user32.InvalidateRect(hwndProgressBar, 0, 1);
         } catch (e) {}
         try {
-          UpdateWindow(hwndProgressBar);
+          user32.UpdateWindow(hwndProgressBar);
         } catch (e) {}
         try {
-          RedrawWindow(hwndProgressBar, 0, 0, 0x85);
+          user32.RedrawWindow(hwndProgressBar, 0, 0, 0x85);
         } catch (e) {}
       } catch (e) {
         console.error("WM_TIMER error", e);
@@ -547,112 +637,44 @@ function WindowProc(hwnd, msg, wParam, lParam) {
     case WM_NOTIFY:
       try {
         const ctrlId = Number(wParam) & 0xffff;
-        const lparamNum = Number(lParam || 0);
-        log("WM_NOTIFY received: ctrlId=", ctrlId, " lParam=", lparamNum);
-
-        // NMHDR struct: hwndFrom (pointer), idFrom (uint32), code (int32)
-        const NMHDR = struct({
-          hwndFrom: c_void_p,
-          idFrom: c_uint,
-          code: c_int,
-        });
-        // NMUPDOWN: NMHDR hdr; int iPos; int iDelta;
-        const NMUPDOWN = struct({ hdr: NMHDR, iPos: c_int, iDelta: c_int });
-
-        if (lparamNum && lparamNum !== 0) {
-          try {
-            // read NMHDR from lParam pointer
-            const bufHdr = Buffer.alloc(NMHDR.size);
-            // read memory at pointer: use user32.ReadProcessMemory isn't available here;
-            // but node-ctypes's SendMessageW wrappers usually return lParam as numeric pointer only.
-            // We'll try to reinterpret the pointer address into a Buffer using ref-style approach
-            // Fallback: log pointer value so we can inspect it from the runtime
-            log("WM_NOTIFY lParam pointer value:", lparamNum);
-          } catch (inner) {
-            log("NMHDR read attempt failed:", inner);
-          }
-        }
-
-        // Try to use control-specific fallback reads
+        // Handle spin control notifications
         if (ctrlId === ID_SPIN) {
-          try {
-            // Try primary source: query up-down control for its current position
-            let pos = 0;
-            try {
-              const raw = SendMessageW(hwndSpin, UDM_GETPOS32, 0, 0);
-              pos = Number(raw || 0);
-              log("WM_NOTIFY: primary UDM_GETPOS32 returned:", raw, " interpreted:", pos);
-            } catch (inner) {
-              log("WM_NOTIFY: UDM_GETPOS32 failed", inner);
-            }
-
-            // fallback to reading buddy edit
-            if (!pos && hwndSpinEdit) {
-              try {
-                const buf = create_unicode_buffer(64);
-                const len = GetWindowTextW(hwndSpinEdit, buf, 64);
-                if (len > 0) pos = parseInt(buf.toString("ucs2", 0, Number(len) * 2), 10) || 0;
-                log("WM_NOTIFY: fallback buddy edit value:", pos);
-              } catch (inner) {
-                log("WM_NOTIFY: buddy read failed", inner);
-              }
-            }
-
-            pos = Math.max(0, Math.min(100, pos));
-
-            // Avoid endless feedback loops: only propagate if changed
-            if (pos !== lastSpinPos) {
-              lastSpinPos = pos;
-              try {
-                if (hwndSpinEdit) SetWindowTextW(hwndSpinEdit, create_unicode_buffer(String(pos)));
-              } catch (e) {}
-              try {
-                const tbRet = SendMessageW(hwndTrack, TBM_SETPOS, 1, pos);
-                log("WM_NOTIFY spin TBM_SETPOS return:", tbRet);
-              } catch (e) {
-                log("WM_NOTIFY spin TBM_SETPOS failed", e);
-              }
-              try {
-                const udRet = SendMessageW(hwndSpin, UDM_SETPOS32, 0, pos);
-                log("WM_NOTIFY spin UDM_SETPOS32 return:", udRet);
-              } catch (e) {
-                log("WM_NOTIFY spin UDM_SETPOS32 failed", e);
-              }
-            }
-
-            log("NOTIFY DBG: spin pos =", pos, " lastSpinPos=", lastSpinPos);
-          } catch (e) {
-            log("Spin notify read failed", e);
+          let pos = Number(user32.SendMessageW(hwndSpin, UDM_GETPOS32, 0, 0) || 0);
+          // Fallback to reading buddy edit if needed
+          if (!pos && hwndSpinEdit) {
+            const buf = create_unicode_buffer(64);
+            const len = user32.GetWindowTextW(hwndSpinEdit, buf, 64);
+            if (len > 0) pos = parseInt(buf.toString("ucs2", 0, Number(len) * 2), 10) || 0;
+          }
+          pos = Math.max(0, Math.min(100, pos));
+          if (pos !== lastSpinPos) {
+            lastSpinPos = pos;
+            if (hwndSpinEdit) user32.SetWindowTextW(hwndSpinEdit, create_unicode_buffer(String(pos)));
+            if (hwndTrack) user32.SendMessageW(hwndTrack, TBM_SETPOS, 1, pos);
+            if (hwndSpin) user32.SendMessageW(hwndSpin, UDM_SETPOS32, 0, pos);
           }
         }
+        // Handle trackbar notifications
         if (ctrlId === ID_TRACKBAR) {
-          try {
-            const tpos = Number(SendMessageW(hwndTrack, TBM_GETPOS, 0, 0) || 0);
-            const pos = Math.max(0, Math.min(100, tpos));
-            // update spin control and buddy edit explicitly
-            if (hwndSpin) SendMessageW(hwndSpin, UDM_SETPOS32, 0, pos);
-            if (hwndSpinEdit) SetWindowTextW(hwndSpinEdit, create_unicode_buffer(String(pos)));
-            log("NOTIFY DBG: track pos =", pos);
-          } catch (e) {
-            log("Track notify read failed", e);
-          }
+          const tpos = Number(user32.SendMessageW(hwndTrack, TBM_GETPOS, 0, 0) || 0);
+          const pos = Math.max(0, Math.min(100, tpos));
+          if (hwndSpin) user32.SendMessageW(hwndSpin, UDM_SETPOS32, 0, pos);
+          if (hwndSpinEdit) user32.SetWindowTextW(hwndSpinEdit, create_unicode_buffer(String(pos)));
         }
-      } catch (e) {
-        log("WM_NOTIFY top-level handler error", e);
-      }
+      } catch (e) {}
       break;
 
     case WM_DESTROY:
       // Cleanup resources: kill timer, delete font, release callback, close libraries
       try {
         if (globalThis.__windowsControlsTimer) {
-          KillTimer(hwnd, ID_PROGRESS_TIMER);
+          user32.KillTimer(hwnd, ID_PROGRESS_TIMER);
           globalThis.__windowsControlsTimer = null;
         }
       } catch (e) {}
       try {
         if (hFont) {
-          DeleteObject(hFont);
+          gdi32.DeleteObject(hFont);
           hFont = null;
         }
       } catch (e) {}
@@ -663,16 +685,17 @@ function WindowProc(hwnd, msg, wParam, lParam) {
           windowProcCallback._callback.release();
         }
       } catch (e) {}
+      // Call PostQuitMessage BEFORE closing libraries
+      user32.PostQuitMessage(0);
       try {
         if (user32 && typeof user32.close === "function") user32.close();
         if (kernel32 && typeof kernel32.close === "function") kernel32.close();
         if (comctl32 && typeof comctl32.close === "function") comctl32.close();
         if (gdi32 && typeof gdi32.close === "function") gdi32.close();
       } catch (e) {}
-      PostQuitMessage(0);
       return 0n;
     default:
-      return DefWindowProcW(hwnd, msg, wParam, lParam);
+      return user32.DefWindowProcW(hwnd, msg, wParam, lParam);
   }
 }
 
@@ -680,13 +703,13 @@ async function createControlsDemo() {
   log("Creating Windows Controls Demo...");
 
   const className = create_unicode_buffer("WindowsControlsDemoClass");
-  const windowClass = WNDCLASSEX.create();
+  const windowClass = new WNDCLASSEX();
   windowClass.cbSize = WNDCLASSEX.size;
   windowClass.style = 0;
-  hInstance = GetModuleHandleW(null);
+  hInstance = kernel32.GetModuleHandleW(null);
   windowClass.hInstance = hInstance;
   windowClass.hIcon = null;
-  windowClass.hCursor = LoadCursorW(null, 32512);
+  windowClass.hCursor = user32.LoadCursorW(null, 32512);
   windowClass.hbrBackground = 16; // COLOR_WINDOW + 1
   windowClass.lpszMenuName = null;
   windowClass.lpszClassName = className;
@@ -694,13 +717,13 @@ async function createControlsDemo() {
   windowClass.lpfnWndProc = windowProcCallback.pointer;
 
   // Register and create window
-  const atom = RegisterClassExW(windowClass);
+  const atom = user32.RegisterClassExW(byref(windowClass));
   if (!atom) throw new Error("RegisterClassExW failed: " + atom);
 
   const windowTitle = create_unicode_buffer("Windows Controls Showcase Demo");
   const baseW = 1000;
   const baseH = 700;
-  const hwnd = CreateWindowExW(0, className, windowTitle, WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, baseW, baseH, null, null, hInstance, null);
+  const hwnd = user32.CreateWindowExW(0, className, windowTitle, WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, baseW, baseH, null, null, hInstance, null);
   if (!hwnd) throw new Error("CreateWindowExW failed");
   hwndMain = hwnd;
 
@@ -710,106 +733,106 @@ async function createControlsDemo() {
   const gbX = 20;
   const gbY = 20;
   const gbW = 460;
-  hwndGroupBox = CreateWindowExW(0, create_unicode_buffer("BUTTON"), gbButtons, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, gbX, gbY, gbW, gbButtonsH, hwnd, 3000, hInstance, null);
+  hwndGroupBox = user32.CreateWindowExW(0, create_unicode_buffer("BUTTON"), gbButtons, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, gbX, gbY, gbW, gbButtonsH, hwnd, 3000, hInstance, null);
 
   // Buttons
   const b1 = create_unicode_buffer("Push");
-  hwndButton1 = CreateWindowExW(0, create_unicode_buffer("BUTTON"), b1, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, gbX + 14, gbY + 26, 100, 28, hwnd, ID_BUTTON1, hInstance, null);
+  hwndButton1 = user32.CreateWindowExW(0, create_unicode_buffer("BUTTON"), b1, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, gbX + 14, gbY + 26, 100, 28, hwnd, ID_BUTTON1, hInstance, null);
   const b2 = create_unicode_buffer("Default");
-  hwndButton2 = CreateWindowExW(0, create_unicode_buffer("BUTTON"), b2, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, gbX + 124, gbY + 26, 100, 28, hwnd, ID_BUTTON2, hInstance, null);
+  hwndButton2 = user32.CreateWindowExW(0, create_unicode_buffer("BUTTON"), b2, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, gbX + 124, gbY + 26, 100, 28, hwnd, ID_BUTTON2, hInstance, null);
   const toggle = create_unicode_buffer("Hide");
-  hwndToggle = CreateWindowExW(0, create_unicode_buffer("BUTTON"), toggle, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, gbX + 234, gbY + 26, 100, 28, hwnd, ID_TOGGLE_WINDOW, hInstance, null);
+  hwndToggle = user32.CreateWindowExW(0, create_unicode_buffer("BUTTON"), toggle, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, gbX + 234, gbY + 26, 100, 28, hwnd, ID_TOGGLE_WINDOW, hInstance, null);
   const counterBtn = create_unicode_buffer("Count: 0");
-  hwndCounter = CreateWindowExW(0, create_unicode_buffer("BUTTON"), counterBtn, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, gbX + 344, gbY + 26, 100, 28, hwnd, ID_COUNTER, hInstance, null);
+  hwndCounter = user32.CreateWindowExW(0, create_unicode_buffer("BUTTON"), counterBtn, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, gbX + 344, gbY + 26, 100, 28, hwnd, ID_COUNTER, hInstance, null);
 
   // Text input group
   const gbText = create_unicode_buffer("Text Input");
   const gbTextY = gbY + gbButtonsH + 16;
-  hwndTextGroupBox = CreateWindowExW(0, create_unicode_buffer("BUTTON"), gbText, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, gbX, gbTextY, gbW, 90, hwnd, 3001, hInstance, null);
-  hwndTextInput = CreateWindowExW(0, create_unicode_buffer("EDIT"), create_unicode_buffer(""), WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT | ES_AUTOHSCROLL, gbX + 12, gbTextY + 24, gbW - 24, 28, hwnd, ID_TEXT_INPUT, hInstance, null);
+  hwndTextGroupBox = user32.CreateWindowExW(0, create_unicode_buffer("BUTTON"), gbText, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, gbX, gbTextY, gbW, 90, hwnd, 3001, hInstance, null);
+  hwndTextInput = user32.CreateWindowExW(0, create_unicode_buffer("EDIT"), create_unicode_buffer(""), WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT | ES_AUTOHSCROLL, gbX + 12, gbTextY + 24, gbW - 24, 28, hwnd, ID_TEXT_INPUT, hInstance, null);
 
   // Options (checkbox + radios)
   const gbOptions = create_unicode_buffer("Options");
   const gbOptionsY = gbTextY + 90 + 16;
-  hwndOptionsGroupBox = CreateWindowExW(0, create_unicode_buffer("BUTTON"), gbOptions, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, gbX, gbOptionsY, gbW, 120, hwnd, 3002, hInstance, null);
-  hwndCheckbox = CreateWindowExW(0, create_unicode_buffer("BUTTON"), create_unicode_buffer("Enable feature"), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP, gbX + 12, gbOptionsY + 28, 160, 24, hwnd, ID_CHECKBOX, hInstance, null);
-  hwndRadio1 = CreateWindowExW(0, create_unicode_buffer("BUTTON"), create_unicode_buffer("Choice A"), WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_TABSTOP, gbX + 12, gbOptionsY + 56, 120, 24, hwnd, ID_RADIO1, hInstance, null);
-  hwndRadio2 = CreateWindowExW(0, create_unicode_buffer("BUTTON"), create_unicode_buffer("Choice B"), WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_TABSTOP, gbX + 140, gbOptionsY + 56, 120, 24, hwnd, ID_RADIO2, hInstance, null);
+  hwndOptionsGroupBox = user32.CreateWindowExW(0, create_unicode_buffer("BUTTON"), gbOptions, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, gbX, gbOptionsY, gbW, 120, hwnd, 3002, hInstance, null);
+  hwndCheckbox = user32.CreateWindowExW(0, create_unicode_buffer("BUTTON"), create_unicode_buffer("Enable feature"), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP, gbX + 12, gbOptionsY + 28, 160, 24, hwnd, ID_CHECKBOX, hInstance, null);
+  hwndRadio1 = user32.CreateWindowExW(0, create_unicode_buffer("BUTTON"), create_unicode_buffer("Choice A"), WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_TABSTOP, gbX + 12, gbOptionsY + 56, 120, 24, hwnd, ID_RADIO1, hInstance, null);
+  hwndRadio2 = user32.CreateWindowExW(0, create_unicode_buffer("BUTTON"), create_unicode_buffer("Choice B"), WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_TABSTOP, gbX + 140, gbOptionsY + 56, 120, 24, hwnd, ID_RADIO2, hInstance, null);
 
   // Combobox and listbox on the right
   const rightX = gbX + gbW + 20;
   const rightW = 440;
   const gbCombo = create_unicode_buffer("Combo / List");
-  hwndComboGroupBox = CreateWindowExW(0, create_unicode_buffer("BUTTON"), gbCombo, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, rightX, gbY, rightW, 180, hwnd, 3003, hInstance, null);
-  hwndCombobox = CreateWindowExW(0, create_unicode_buffer("COMBOBOX"), null, WS_CHILD | WS_VISIBLE | CBS_DROPDOWN | CBS_HASSTRINGS | WS_TABSTOP, rightX + 12, gbY + 28, rightW - 24, 300, hwnd, ID_COMBOBOX, hInstance, null);
+  hwndComboGroupBox = user32.CreateWindowExW(0, create_unicode_buffer("BUTTON"), gbCombo, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, rightX, gbY, rightW, 180, hwnd, 3003, hInstance, null);
+  hwndCombobox = user32.CreateWindowExW(0, create_unicode_buffer("COMBOBOX"), null, WS_CHILD | WS_VISIBLE | CBS_DROPDOWN | CBS_HASSTRINGS | WS_TABSTOP, rightX + 12, gbY + 28, rightW - 24, 300, hwnd, ID_COMBOBOX, hInstance, null);
   // populate combobox
-  SendMessageW(hwndCombobox, CB_ADDSTRING, 0, create_unicode_buffer("First option"));
-  SendMessageW(hwndCombobox, CB_ADDSTRING, 0, create_unicode_buffer("Second option"));
-  SendMessageW(hwndCombobox, CB_ADDSTRING, 0, create_unicode_buffer("Third option"));
-  SendMessageW(hwndCombobox, CB_SETCURSEL, 0, 0);
+  user32.SendMessageW(hwndCombobox, CB_ADDSTRING, 0, create_unicode_buffer("First option"));
+  user32.SendMessageW(hwndCombobox, CB_ADDSTRING, 0, create_unicode_buffer("Second option"));
+  user32.SendMessageW(hwndCombobox, CB_ADDSTRING, 0, create_unicode_buffer("Third option"));
+  user32.SendMessageW(hwndCombobox, CB_SETCURSEL, 0, 0);
 
   const gbList = create_unicode_buffer("List Box");
-  hwndListGroupBox = CreateWindowExW(0, create_unicode_buffer("BUTTON"), gbList, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, rightX, gbY + 200, rightW, 220, hwnd, 3004, hInstance, null);
-  hwndListBox = CreateWindowExW(0, create_unicode_buffer("LISTBOX"), null, WS_CHILD | WS_VISIBLE | LBS_NOTIFY | LBS_SORT | LBS_HASSTRINGS | WS_TABSTOP, rightX + 12, gbY + 224, rightW - 24, 180, hwnd, ID_LISTBOX, hInstance, null);
-  SendMessageW(hwndListBox, LB_ADDSTRING, 0, create_unicode_buffer("Item A"));
-  SendMessageW(hwndListBox, LB_ADDSTRING, 0, create_unicode_buffer("Item B"));
-  SendMessageW(hwndListBox, LB_ADDSTRING, 0, create_unicode_buffer("Item C"));
+  hwndListGroupBox = user32.CreateWindowExW(0, create_unicode_buffer("BUTTON"), gbList, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, rightX, gbY + 200, rightW, 220, hwnd, 3004, hInstance, null);
+  hwndListBox = user32.CreateWindowExW(0, create_unicode_buffer("LISTBOX"), null, WS_CHILD | WS_VISIBLE | LBS_NOTIFY | LBS_SORT | LBS_HASSTRINGS | WS_TABSTOP, rightX + 12, gbY + 224, rightW - 24, 180, hwnd, ID_LISTBOX, hInstance, null);
+  user32.SendMessageW(hwndListBox, LB_ADDSTRING, 0, create_unicode_buffer("Item A"));
+  user32.SendMessageW(hwndListBox, LB_ADDSTRING, 0, create_unicode_buffer("Item B"));
+  user32.SendMessageW(hwndListBox, LB_ADDSTRING, 0, create_unicode_buffer("Item C"));
 
   // Progress bar
   const gbProg = create_unicode_buffer("Progress");
-  hwndProgressGroupBox = CreateWindowExW(0, create_unicode_buffer("BUTTON"), gbProg, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, rightX, gbY + 440, rightW, 80, hwnd, 3005, hInstance, null);
+  hwndProgressGroupBox = user32.CreateWindowExW(0, create_unicode_buffer("BUTTON"), gbProg, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, rightX, gbY + 440, rightW, 80, hwnd, 3005, hInstance, null);
   // create a smooth progress bar
-  hwndProgressBar = CreateWindowExW(0, create_unicode_buffer("msctls_progress32"), null, WS_CHILD | WS_VISIBLE | PBS_SMOOTH, rightX + 12, gbY + 468, rightW - 24, 20, hwnd, ID_PROGRESSBAR, hInstance, null);
+  hwndProgressBar = user32.CreateWindowExW(0, create_unicode_buffer("msctls_progress32"), null, WS_CHILD | WS_VISIBLE | PBS_SMOOTH, rightX + 12, gbY + 468, rightW - 24, 20, hwnd, ID_PROGRESSBAR, hInstance, null);
   // set a clear 0..100 range and initial position using PBM_SETRANGE32
   try {
-    SendMessageW(hwndProgressBar, PBM_SETRANGE32, 0, 100);
-    SendMessageW(hwndProgressBar, PBM_SETPOS, 0, 0);
+    user32.SendMessageW(hwndProgressBar, PBM_SETRANGE32, 0, 100);
+    user32.SendMessageW(hwndProgressBar, PBM_SETPOS, 0, 0);
   } catch (e) {}
 
   // Trackbar (slider) below the progress bar area
   const gbTrack = create_unicode_buffer("Trackbar");
   const trackY = gbY + 530;
   const trackH = 54;
-  const hwndTrackGroup = CreateWindowExW(0, create_unicode_buffer("BUTTON"), gbTrack, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, gbX, trackY, gbW, trackH, hwnd, 3006, hInstance, null);
-  hwndTrack = CreateWindowExW(0, create_unicode_buffer("msctls_trackbar32"), null, WS_CHILD | WS_VISIBLE | WS_TABSTOP, gbX + 12, trackY + 18, gbW - 24, 24, hwnd, ID_TRACKBAR, hInstance, null);
+  const hwndTrackGroup = user32.CreateWindowExW(0, create_unicode_buffer("BUTTON"), gbTrack, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, gbX, trackY, gbW, trackH, hwnd, 3006, hInstance, null);
+  hwndTrack = user32.CreateWindowExW(0, create_unicode_buffer("msctls_trackbar32"), null, WS_CHILD | WS_VISIBLE | WS_TABSTOP, gbX + 12, trackY + 18, gbW - 24, 24, hwnd, ID_TRACKBAR, hInstance, null);
   // set trackbar range 0..100 and start at 0
   try {
     // lParam = MAKELONG(min, max) -> low = min, high = max, so (max<<16)|min
     const rangeParam = (100 << 16) | 0;
-    SendMessageW(hwndTrack, TBM_SETRANGE, 0, rangeParam);
+    user32.SendMessageW(hwndTrack, TBM_SETRANGE, 0, rangeParam);
     // TBM_SETPOS: wParam = bRedraw (TRUE), lParam = position
-    SendMessageW(hwndTrack, TBM_SETPOS, 1, 0);
+    user32.SendMessageW(hwndTrack, TBM_SETPOS, 1, 0);
   } catch (e) {}
 
   // Up-Down (spin) with numeric edit
   const gbSpin = create_unicode_buffer("Spin / Numeric");
   // place spin group below the Options group to avoid overlap
   const spinY = gbOptionsY + 120 + 16;
-  const hwndSpinGroup = CreateWindowExW(0, create_unicode_buffer("BUTTON"), gbSpin, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, gbX, spinY, 220, 80, hwnd, 3007, hInstance, null);
+  const hwndSpinGroup = user32.CreateWindowExW(0, create_unicode_buffer("BUTTON"), gbSpin, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, gbX, spinY, 220, 80, hwnd, 3007, hInstance, null);
   // small edit to display the spin value
   const spinEdit = create_unicode_buffer("");
-  hwndSpinEdit = CreateWindowExW(WS_EX_CLIENTEDGE, create_unicode_buffer("EDIT"), spinEdit, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT | ES_AUTOHSCROLL, gbX + 12, spinY + 26, 80, 24, hwnd, ID_SPIN_EDIT, hInstance, null);
+  hwndSpinEdit = user32.CreateWindowExW(WS_EX_CLIENTEDGE, create_unicode_buffer("EDIT"), spinEdit, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT | ES_AUTOHSCROLL, gbX + 12, spinY + 26, 80, 24, hwnd, ID_SPIN_EDIT, hInstance, null);
   // create up-down control (msctls_updown32) to the right of edit
   // create up-down control with buddy behavior and arrow keys
   const udStyles = UDS_AUTOBUDDY | UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS;
-  hwndSpin = CreateWindowExW(0, create_unicode_buffer("msctls_updown32"), null, WS_CHILD | WS_VISIBLE | udStyles, gbX + 96, spinY + 26, 16, 24, hwnd, ID_SPIN, hInstance, null);
+  hwndSpin = user32.CreateWindowExW(0, create_unicode_buffer("msctls_updown32"), null, WS_CHILD | WS_VISIBLE | udStyles, gbX + 96, spinY + 26, 16, 24, hwnd, ID_SPIN, hInstance, null);
   try {
     // UDM_SETRANGE32: wParam = nMin, lParam = nMax
-    SendMessageW(hwndSpin, UDM_SETRANGE32, 0, 100);
+    user32.SendMessageW(hwndSpin, UDM_SETRANGE32, 0, 100);
     // UDM_SETPOS32: wParam = 0, lParam = position
-    SendMessageW(hwndSpin, UDM_SETPOS32, 0, 0);
+    user32.SendMessageW(hwndSpin, UDM_SETPOS32, 0, 0);
     // explicitly set the buddy edit control for the up-down so it can update it
     try {
-      SendMessageW(hwndSpin, UDM_SETBUDDY, hwndSpinEdit, 0);
+      user32.SendMessageW(hwndSpin, UDM_SETBUDDY, hwndSpinEdit, 0);
     } catch (e) {}
   } catch (e) {}
 
   // ToolTip (unicode) for a few controls
-  hwndTooltip = CreateWindowExW(0, create_unicode_buffer("tooltips_class32"), null, WS_CHILD | TTS_ALWAYSTIP, 0, 0, 0, 0, hwnd, ID_TOOLTIP, hInstance, null);
+  hwndTooltip = user32.CreateWindowExW(0, create_unicode_buffer("tooltips_class32"), null, WS_CHILD | TTS_ALWAYSTIP, 0, 0, 0, 0, hwnd, ID_TOOLTIP, hInstance, null);
   try {
     // set max tip width
     const maxw = 300;
-    SendMessageW(hwndTooltip, TTM_SETMAXTIPWIDTH, 0, maxw);
+    user32.SendMessageW(hwndTooltip, TTM_SETMAXTIPWIDTH, 0, maxw);
     // Add tools: we need to prepare TOOLINFO structure; to simplify we'll use SendMessage with TTM_ADDTOOLW and minimal TOOLINFO data pointer = NULL in this demo (many wrappers need proper struct marshalling). As a practical approach, set tooltip text via control's window text for this demo.
   } catch (e) {}
 
@@ -817,7 +840,7 @@ async function createControlsDemo() {
   function addTooltipForControl(targetHwnd, text) {
     if (!hwndTooltip || !targetHwnd) return;
     try {
-      const ti = TOOLINFOW.create();
+      const ti = new TOOLINFOW();
       ti.cbSize = TOOLINFOW.size;
       ti.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
       ti.hwnd = hwnd;
@@ -825,7 +848,7 @@ async function createControlsDemo() {
       ti.hinst = null;
       ti.lpszText = create_unicode_buffer(text + "\0");
       // send pointer to TOOLINFO struct
-      SendMessageW(hwndTooltip, TTM_ADDTOOLW, 0, ti.ref());
+      user32.SendMessageW(hwndTooltip, TTM_ADDTOOLW, 0, byref(ti));
     } catch (e) {}
   }
 
@@ -855,13 +878,13 @@ async function createControlsDemo() {
   ].forEach(applyFont);
 
   // Start progress timer and keep its handle for cleanup
-  const __timer = SetTimer(hwnd, ID_PROGRESS_TIMER, 1000, null);
+  const __timer = user32.SetTimer(hwnd, ID_PROGRESS_TIMER, 1000, null);
   globalThis.__windowsControlsTimer = __timer;
 
   // Compute content height precisely by mapping each child rect into client coords
   try {
-    const rcClient = RECT.create();
-    GetClientRect(hwnd, rcClient);
+    const rcClient = new RECT();
+    user32.GetClientRect(hwnd, byref(rcClient));
     __clientHeight = Number(rcClient.bottom) - Number(rcClient.top);
 
     const children = [
@@ -892,10 +915,10 @@ async function createControlsDemo() {
       const h = children[i];
       if (!h) continue;
       try {
-        const rc = RECT.create();
-        GetWindowRect(h, rc);
+        const rc = new RECT();
+        user32.GetWindowRect(h, byref(rc));
         // Map from screen to client coords of our main window
-        MapWindowPoints(null, hwnd, rc, 2);
+        user32.MapWindowPoints(null, hwnd, byref(rc), 2);
         const bottom = Number(rc.bottom);
         if (bottom > maxBottom) maxBottom = bottom;
       } catch (e) {}
@@ -903,18 +926,18 @@ async function createControlsDemo() {
     // add a small margin
     __contentHeight = Math.max(__clientHeight, maxBottom + 16);
 
-    const siInit = SCROLLINFO.create();
+    const siInit = new SCROLLINFO();
     siInit.cbSize = SCROLLINFO.size;
     siInit.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
     siInit.nMin = 0;
     siInit.nMax = Math.max(0, __contentHeight - 1);
     siInit.nPage = __clientHeight;
     siInit.nPos = __scrollY;
-    SetScrollInfo(hwnd, SB_VERT, siInit, 1);
+    user32.SetScrollInfo(hwnd, SB_VERT, byref(siInit), 1);
   } catch (e) {}
 
-  ShowWindow(hwnd, SW_SHOW);
-  UpdateWindow(hwnd);
+  user32.ShowWindow(hwnd, SW_SHOW);
+  user32.UpdateWindow(hwnd);
 
   // register tooltips for some controls
   try {
@@ -926,10 +949,10 @@ async function createControlsDemo() {
   } catch (e) {}
 
   // Message loop
-  const msg = MSG.create();
-  while (GetMessageW(msg, null, 0, 0) !== 0) {
-    TranslateMessage(msg);
-    DispatchMessageW(msg);
+  const msg = new MSG();
+  while (user32.GetMessageW(byref(msg), null, 0, 0) !== 0) {
+    user32.TranslateMessage(byref(msg));
+    user32.DispatchMessageW(byref(msg));
   }
   log("Message loop ended");
 }

@@ -61,81 +61,125 @@ describe("Structs and Unions", function () {
   });
 
   describe("Unions", function () {
-    it("should create and use unions", function () {
-      const IntOrFloat = ctypes.union({
-        i: ctypes.c_int32,
-        f: ctypes.c_float,
-      });
+    it("should create and use unions with Python-style syntax", function () {
+      // Python: class IntOrFloat(Union): _fields_ = [("i", c_int32), ("f", c_float)]
+      class IntOrFloat extends ctypes.Union {
+        static _fields_ = [
+          ["i", ctypes.c_int32],
+          ["f", ctypes.c_float],
+        ];
+      }
 
-      const u = IntOrFloat.create();
-      IntOrFloat.set(u, "f", 3.14159);
+      const u = new IntOrFloat();
+      u.f = 3.14159;
 
       // Union shares memory - reading as int gives bit pattern
-      const asInt = IntOrFloat.get(u, "i");
-      assert(typeof asInt === "number");
+      assert(typeof u.i === "number");
 
       // Reading back as float gives original value
-      const asFloat = IntOrFloat.get(u, "f");
-      assert(Math.abs(asFloat - 3.14159) < 0.00001);
+      assert(Math.abs(u.f - 3.14159) < 0.00001);
     });
 
     it("should have size of largest member", function () {
-      const IntOrDouble = ctypes.union({
-        i: ctypes.c_int32, // 4 bytes
-        d: ctypes.c_double, // 8 bytes
-      });
+      // Python: class IntOrDouble(Union): _fields_ = [("i", c_int32), ("d", c_double)]
+      class IntOrDouble extends ctypes.Union {
+        static _fields_ = [
+          ["i", ctypes.c_int32],  // 4 bytes
+          ["d", ctypes.c_double], // 8 bytes
+        ];
+      }
 
-      assert.strictEqual(IntOrDouble.size, 8);
+      // sizeof() correctly accesses the class size
+      assert.strictEqual(ctypes.sizeof(IntOrDouble), 8);
+    });
+
+    it("should support Python-style bitfield syntax with Union class", function () {
+      // Python: class Flags(Union): _fields_ = [("low", c_uint32, 16), ("high", c_uint32, 16)]
+      class Flags extends ctypes.Union {
+        static _fields_ = [
+          ["low", ctypes.c_uint32, 16],
+          ["high", ctypes.c_uint32, 16],
+        ];
+      }
+
+      const f = new Flags();
+      f.low = 0xABCD;
+      assert.strictEqual(f.low, 0xABCD);
+
+      f.high = 0x1234;
+      assert.strictEqual(f.high, 0x1234);
     });
   });
 
   describe("Bit Fields", function () {
-    it("should support bit fields", function () {
-      const Flags = ctypes.struct({
-        enabled: ctypes.bitfield(ctypes.c_uint32, 1),
-        mode: ctypes.bitfield(ctypes.c_uint32, 3),
-        priority: ctypes.bitfield(ctypes.c_uint32, 4),
-        reserved: ctypes.bitfield(ctypes.c_uint32, 24),
-      });
+    it("should support bit fields with Python-style syntax", function () {
+      // Python: _fields_ = [("enabled", c_uint32, 1), ("mode", c_uint32, 3), ...]
+      class Flags extends ctypes.Structure {
+        static _fields_ = [
+          ["enabled", ctypes.c_uint32, 1],
+          ["mode", ctypes.c_uint32, 3],
+          ["priority", ctypes.c_uint32, 4],
+          ["reserved", ctypes.c_uint32, 24],
+        ];
+      }
 
-      const f = Flags.create({
-        enabled: 1,
-        mode: 5,
-        priority: 15,
-      });
+      const f = new Flags({ enabled: 1, mode: 5, priority: 15 });
 
-      assert.strictEqual(Flags.get(f, "enabled"), 1);
-      assert.strictEqual(Flags.get(f, "mode"), 5);
-      assert.strictEqual(Flags.get(f, "priority"), 15);
+      assert.strictEqual(f.enabled, 1);
+      assert.strictEqual(f.mode, 5);
+      assert.strictEqual(f.priority, 15);
     });
 
     it("should handle bit field overflow correctly", function () {
+      // Python: _fields_ = [("value", c_uint32, 3)]
+      class Flags extends ctypes.Structure {
+        static _fields_ = [
+          ["value", ctypes.c_uint32, 3], // Max 7 (0b111)
+        ];
+      }
+
+      const f = new Flags({ value: 15 }); // 0b1111 - overflow
+      assert.strictEqual(f.value, 7); // Truncated to 0b111
+    });
+
+    it("should also support bitfield() helper function", function () {
+      // Alternative syntax with bitfield() helper
       const Flags = ctypes.struct({
-        value: ctypes.bitfield(ctypes.c_uint32, 3), // Max 7 (0b111)
+        enabled: ctypes.bitfield(ctypes.c_uint32, 1),
+        mode: ctypes.bitfield(ctypes.c_uint32, 3),
       });
 
-      const f = Flags.create({ value: 15 }); // 0b1111 - overflow
-      assert.strictEqual(Flags.get(f, "value"), 7); // Truncated to 0b111
+      const f = Flags.create({ enabled: 1, mode: 5 });
+
+      assert.strictEqual(Flags.get(f, "enabled"), 1);
+      assert.strictEqual(Flags.get(f, "mode"), 5);
     });
   });
 
   describe("Anonymous Fields", function () {
     it("should support anonymous union fields", function () {
-      const Inner = ctypes.union({
-        i: ctypes.c_int32,
-        f: ctypes.c_float,
-      });
+      // Python: class Inner(Union): _fields_ = [("i", c_int32), ("f", c_float)]
+      class Inner extends ctypes.Union {
+        static _fields_ = [
+          ["i", ctypes.c_int32],
+          ["f", ctypes.c_float],
+        ];
+      }
 
-      const Outer = ctypes.struct({
-        tag: ctypes.c_uint32,
-        data: { type: Inner, anonymous: true },
-      });
+      // Python: class Outer(Structure): _fields_ = [("tag", c_uint32), ("data", Inner)]; _anonymous_ = ["data"]
+      class Outer extends ctypes.Structure {
+        static _fields_ = [
+          ["tag", ctypes.c_uint32],
+          ["data", Inner],
+        ];
+        static _anonymous_ = ["data"];
+      }
 
-      const obj = Outer.create({ tag: 1, i: 42 });
+      const obj = new Outer({ tag: 1, i: 42 });
 
       // Anonymous field members are promoted to parent level
-      assert.strictEqual(Outer.get(obj, "i"), 42);
-      assert.strictEqual(Outer.get(obj, "tag"), 1);
+      assert.strictEqual(obj.i, 42);
+      assert.strictEqual(obj.tag, 1);
     });
 
     it("should support nested anonymous structures", function () {

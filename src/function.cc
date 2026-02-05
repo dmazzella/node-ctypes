@@ -55,6 +55,7 @@ namespace ctypes
           abi_(FFI_DEFAULT_ABI),
           return_type_(CType::CTYPES_VOID),
           ffi_return_type_(nullptr),
+          inline_string_offset_(0),
           use_inline_storage_(true),
           next_cache_slot_(0)
     {
@@ -490,27 +491,6 @@ namespace ctypes
         }
 
         // =====================================================================
-        // Fast path: funzioni senza argomenti (es. GetTickCount)
-        // =====================================================================
-        if (argc == 0)
-        {
-            ffi_call(&cif_, FFI_FN(fn_ptr_), &return_value_, nullptr);
-            if (return_type_ == CType::CTYPES_VOID)
-            {
-                if (errcheck_callback_.IsEmpty())
-                    return env.Undefined();
-                return ApplyErrcheck(env, env.Undefined(), info);
-            }
-            else
-            {
-                Napi::Value result = ConvertReturnValue(env);
-                if (errcheck_callback_.IsEmpty())
-                    return result;
-                return ApplyErrcheck(env, result, info);
-            }
-        }
-
-        // =====================================================================
         // Gestione variadic ottimizzata (ispirata a CPython ctypes)
         // =====================================================================
         ffi_cif *active_cif = &cif_;
@@ -676,124 +656,6 @@ namespace ctypes
         }
 
         // =====================================================================
-        // Fast path: un solo argomento int32 (es. abs)
-        // =====================================================================
-        if (argc == 1 && arg_types_[0] == CType::CTYPES_INT32)
-        {
-            // Safety check: verifica che il puntatore sia ancora valido
-            if (fn_ptr_ == nullptr)
-            {
-                Napi::Error::New(env, "Function pointer is NULL").ThrowAsJavaScriptException();
-                return env.Undefined();
-            }
-
-            int32_t arg;
-            napi_get_value_int32(env, info[0], &arg);
-            void *arg_ptr = &arg;
-            ffi_call(&cif_, FFI_FN(fn_ptr_), &return_value_, &arg_ptr);
-            if (return_type_ == CType::CTYPES_VOID)
-            {
-                if (errcheck_callback_.IsEmpty())
-                    return env.Undefined();
-                return ApplyErrcheck(env, env.Undefined(), info);
-            }
-            else
-            {
-                Napi::Value result = ConvertReturnValue(env);
-                if (errcheck_callback_.IsEmpty())
-                    return result;
-                return ApplyErrcheck(env, result, info);
-            }
-        }
-
-        // =====================================================================
-        // Fast path: un solo argomento double (es. sqrt)
-        // =====================================================================
-        if (argc == 1 && arg_types_[0] == CType::CTYPES_DOUBLE)
-        {
-            // Safety check
-            if (fn_ptr_ == nullptr)
-            {
-                Napi::Error::New(env, "Function pointer is NULL").ThrowAsJavaScriptException();
-                return env.Undefined();
-            }
-
-            double arg;
-            napi_get_value_double(env, info[0], &arg);
-            void *arg_ptr = &arg;
-            ffi_call(&cif_, FFI_FN(fn_ptr_), &return_value_, &arg_ptr);
-            Napi::Value result = ConvertReturnValue(env);
-            if (errcheck_callback_.IsEmpty())
-                return result;
-            return ApplyErrcheck(env, result, info);
-        }
-
-        // =====================================================================
-        // Fast path: un solo argomento stringa (es. strlen)
-        // =====================================================================
-        if (argc == 1 && arg_types_[0] == CType::CTYPES_STRING && info[0].IsString())
-        {
-            napi_value nval = info[0];
-            size_t len;
-            napi_get_value_string_utf8(env, nval, nullptr, 0, &len);
-
-            // Stack buffer per stringhe piccole (come CPython)
-            char stack_buf[SMALL_STRING_BUFFER];
-            char *str_ptr;
-
-            if (len < SMALL_STRING_BUFFER)
-            {
-                napi_get_value_string_utf8(env, nval, stack_buf, sizeof(stack_buf), &len);
-                str_ptr = stack_buf;
-            }
-            else
-            {
-                string_buffer_.resize(len + 1);
-                napi_get_value_string_utf8(env, nval, string_buffer_.data(), len + 1, &len);
-                str_ptr = string_buffer_.data();
-            }
-
-            void *arg_ptr = &str_ptr;
-            ffi_call(&cif_, FFI_FN(fn_ptr_), &return_value_, &arg_ptr);
-            Napi::Value result = ConvertReturnValue(env);
-            if (errcheck_callback_.IsEmpty())
-                return result;
-            return ApplyErrcheck(env, result, info);
-        }
-
-        // =====================================================================
-        // Fast path: 2 argomenti int32 (es. add, sub)
-        // =====================================================================
-        if (argc == 2 && arg_types_[0] == CType::CTYPES_INT32 && arg_types_[1] == CType::CTYPES_INT32)
-        {
-            int32_t arg0, arg1;
-            napi_get_value_int32(env, info[0], &arg0);
-            napi_get_value_int32(env, info[1], &arg1);
-            void *arg_ptrs[2] = {&arg0, &arg1};
-            ffi_call(&cif_, FFI_FN(fn_ptr_), &return_value_, arg_ptrs);
-            Napi::Value result = ConvertReturnValue(env);
-            if (errcheck_callback_.IsEmpty())
-                return result;
-            return ApplyErrcheck(env, result, info);
-        }
-
-        // =====================================================================
-        // Fast path: 2 argomenti double (es. pow)
-        // =====================================================================
-        if (argc == 2 && arg_types_[0] == CType::CTYPES_DOUBLE && arg_types_[1] == CType::CTYPES_DOUBLE)
-        {
-            double arg0, arg1;
-            napi_get_value_double(env, info[0], &arg0);
-            napi_get_value_double(env, info[1], &arg1);
-            void *arg_ptrs[2] = {&arg0, &arg1};
-            ffi_call(&cif_, FFI_FN(fn_ptr_), &return_value_, arg_ptrs);
-            Napi::Value result = ConvertReturnValue(env);
-            if (errcheck_callback_.IsEmpty())
-                return result;
-            return ApplyErrcheck(env, result, info);
-        }
-
-        // =====================================================================
         // Path generale
         // =====================================================================
 
@@ -836,7 +698,8 @@ namespace ctypes
             arg_values = heap_arg_values_.data();
         }
 
-        // Reset string buffer but keep capacity to avoid reallocation
+        // Reset string buffers
+        inline_string_offset_ = 0;
         string_buffer_.clear();
         // Periodically shrink if too large (over 10MB)
         if (string_buffer_.capacity() > 10 * 1024 * 1024)
@@ -966,18 +829,33 @@ namespace ctypes
             {
                 if (val.IsString())
                 {
-                    // Usa N-API direttamente per evitare std::string temporanea
                     napi_value nval = val;
 
-                    // Prima chiamata: ottieni lunghezza
+                    // SBO: prova prima il buffer inline
+                    size_t remaining = kInlineStringBufferSize - inline_string_offset_;
+                    if (remaining > 1) // Serve almeno 1 byte per \0
+                    {
+                        size_t copied;
+                        char *dest = inline_string_buffer_ + inline_string_offset_;
+                        napi_status status = napi_get_value_string_utf8(env, nval, dest, remaining, &copied);
+
+                        if (status == napi_ok && copied < remaining - 1)
+                        {
+                            // Stringa entra nel buffer inline!
+                            const char *str_ptr = dest;
+                            memcpy(slot, &str_ptr, sizeof(str_ptr));
+                            inline_string_offset_ += copied + 1;
+                            break;
+                        }
+                    }
+
+                    // Fallback: stringa troppo lunga, usa vector con 2 chiamate
                     size_t len;
                     napi_get_value_string_utf8(env, nval, nullptr, 0, &len);
 
-                    // Alloca spazio nel buffer
                     size_t offset = string_buffer_.size();
                     string_buffer_.resize(offset + len + 1);
 
-                    // Seconda chiamata: copia stringa
                     napi_get_value_string_utf8(env, nval, string_buffer_.data() + offset, len + 1, &len);
                     const char *str_ptr = string_buffer_.data() + offset;
                     memcpy(slot, &str_ptr, sizeof(str_ptr));

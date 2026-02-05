@@ -53,9 +53,11 @@ namespace ctypes
 
     // Converte un valore JS in bytes C
     // Ritorna il numero di bytes scritti, o -1 per errore
+    // NOTA: Solo per tipi primitivi. STRUCT/UNION/ARRAY usano StructInfo/ArrayInfo
     int JSToC(Napi::Env env, Napi::Value value, CType type, void *buffer, size_t bufsize);
 
     // Converte bytes C in valore JS
+    // NOTA: Solo per tipi primitivi. STRUCT/UNION/ARRAY usano StructInfo/ArrayInfo
     Napi::Value CToJS(Napi::Env env, const void *buffer, CType type);
 
     // Crea oggetto CType esportato a JS (enum con tutti i valori)

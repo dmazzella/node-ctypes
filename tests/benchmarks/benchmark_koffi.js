@@ -338,25 +338,25 @@ console.log("└─────────────────────�
 
   const iterations = 500_000;
 
-  // Create instances
-  const p_ctypes = Point_ctypes.create({ x: 10, y: 20 });
+  // Create instances - both use plain objects for fair comparison
+  const p_ctypes = Point_ctypes.create({ x: 10, y: 20 }).toObject();
   const p_koffi = { x: 10, y: 20 };
 
   // Warmup
   for (let i = 0; i < 1000; i++) {
-    p_ctypes.x; // Direct property access (KOFFI-style)
+    p_ctypes.x;
     p_koffi.x;
   }
 
-  // Benchmark ctypes struct read (DIRECT PROPERTY ACCESS)
+  // Benchmark ctypes struct read via toObject() (plain object)
   let start = performance.now();
   for (let i = 0; i < iterations; i++) {
-    const x = p_ctypes.x; // Direct access like koffi!
+    const x = p_ctypes.x;
     const y = p_ctypes.y;
   }
   const ctypes_time = performance.now() - start;
 
-  // Benchmark koffi struct read (koffi uses plain objects, very fast)
+  // Benchmark koffi struct read (koffi uses plain objects)
   start = performance.now();
   for (let i = 0; i < iterations; i++) {
     const x = p_koffi.x;

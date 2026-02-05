@@ -112,7 +112,12 @@ namespace ctypes
         // Union per return value (ottimizza cache locality)
         alignas(16) ReturnValue return_value_;
 
-        // Buffer per stringhe (riutilizzato, resize se necessario)
+        // SBO per stringhe: buffer inline per stringhe corte
+        static constexpr size_t kInlineStringBufferSize = 512;
+        alignas(16) char inline_string_buffer_[kInlineStringBufferSize];
+        size_t inline_string_offset_; // Offset corrente nel buffer inline
+
+        // Buffer per stringhe lunghe (fallback quando inline esaurisce)
         std::vector<char> string_buffer_;
 
         // Heap fallback per molti argomenti

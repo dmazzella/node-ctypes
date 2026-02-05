@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { struct, union, array, c_int32, c_uint16, c_uint8, c_int8, sizeof } from "node-ctypes";
+import { struct, union, array, c_int32, c_uint16, c_uint8, c_int8, sizeof, Structure, Union } from "node-ctypes";
 
 describe("Complex Nested Structures", function () {
   describe("Multi-level Nesting", function () {
@@ -79,17 +79,23 @@ describe("Complex Nested Structures", function () {
 
   describe("Union within Struct", function () {
     it("should handle union nested in struct", function () {
-      const Value = union({
-        asInt: c_int32,
-        asBytes: array(c_uint8, 4),
-      });
+      // Python: class Value(Union): _fields_ = [("asInt", c_int32), ("asBytes", c_uint8 * 4)]
+      class Value extends Union {
+        static _fields_ = [
+          ["asInt", c_int32],
+          ["asBytes", array(c_uint8, 4)],
+        ];
+      }
 
-      const Tagged = struct({
-        tag: c_uint16,
-        value: Value,
-      });
+      // Python: class Tagged(Structure): _fields_ = [("tag", c_uint16), ("value", Value)]
+      class Tagged extends Structure {
+        static _fields_ = [
+          ["tag", c_uint16],
+          ["value", Value],
+        ];
+      }
 
-      const tagged = Tagged.create();
+      const tagged = new Tagged();
       tagged.tag = 1;
       tagged.value.asInt = 0x12345678;
 
@@ -191,23 +197,34 @@ describe("Complex Nested Structures", function () {
 
   describe("Deeply Nested with Mixed Types", function () {
     it("should handle union with nested struct", function () {
-      const Color = union({
-        rgb: struct({
-          r: c_uint8,
-          g: c_uint8,
-          b: c_uint8,
-          a: c_uint8,
-        }),
-        value: c_int32,
-      });
+      // Python: class RGB(Structure): _fields_ = [("r", c_uint8), ("g", c_uint8), ("b", c_uint8), ("a", c_uint8)]
+      class RGB extends Structure {
+        static _fields_ = [
+          ["r", c_uint8],
+          ["g", c_uint8],
+          ["b", c_uint8],
+          ["a", c_uint8],
+        ];
+      }
 
-      const Pixel = struct({
-        x: c_uint16,
-        y: c_uint16,
-        color: Color,
-      });
+      // Python: class Color(Union): _fields_ = [("rgb", RGB), ("value", c_int32)]
+      class Color extends Union {
+        static _fields_ = [
+          ["rgb", RGB],
+          ["value", c_int32],
+        ];
+      }
 
-      const pixel = Pixel.create();
+      // Python: class Pixel(Structure): _fields_ = [("x", c_uint16), ("y", c_uint16), ("color", Color)]
+      class Pixel extends Structure {
+        static _fields_ = [
+          ["x", c_uint16],
+          ["y", c_uint16],
+          ["color", Color],
+        ];
+      }
+
+      const pixel = new Pixel();
       pixel.x = 10;
       pixel.y = 20;
       pixel.color.rgb.r = 255;

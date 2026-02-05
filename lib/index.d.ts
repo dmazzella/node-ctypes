@@ -92,6 +92,16 @@ export class CDLL {
   close(): void;
   readonly path: string;
   readonly loaded: boolean;
+  /** Python-like function access: lib.FuncName returns a FunctionWrapper */
+  [funcName: string]: FunctionWrapper | any;
+}
+
+/** FunctionWrapper for Python-like argtypes/restype syntax */
+export interface FunctionWrapper {
+  (...args: any[]): any;
+  argtypes: AnyType[];
+  restype: AnyType;
+  errcheck: ErrcheckCallback | null;
 }
 
 /** WinDLL - stdcall calling convention library (Windows) */
@@ -326,6 +336,7 @@ export function bitfield(baseType: AnyType, bits: number): BitFieldDef;
 export function byref(obj: Buffer | SimpleCDataInstance | { _buffer: Buffer }): Buffer;
 export function cast(ptr: Buffer | bigint, targetType: AnyType | StructDef): Buffer | { [key: string]: any };
 export function POINTER(baseType: AnyType | StructDef): PointerTypeDef;
+export function pointer(obj: SimpleCDataInstance | { _buffer: Buffer }): SimpleCDataInstance & { contents: any; [index: number]: any };
 
 // Error handling
 export function get_errno(): number;
@@ -343,7 +354,7 @@ export function WinError(code?: number): Error & { winerror: number };
 export interface SimpleCDataConstructor {
   new (value?: any): SimpleCDataInstance;
   readonly _size: number;
-  readonly _type: number;  // CType numeric value from native module
+  readonly _type: number; // CType numeric value from native module
   readonly _isSimpleCData: true;
   _reader(buf: Buffer, offset: number): any;
   _writer(buf: Buffer, offset: number, value: any): void;
@@ -384,6 +395,17 @@ export const c_bool: SimpleCDataConstructor;
 export const c_size_t: SimpleCDataConstructor;
 export const c_long: SimpleCDataConstructor;
 export const c_ulong: SimpleCDataConstructor;
+
+// Python-compatible aliases
+export const c_byte: SimpleCDataConstructor;
+export const c_ubyte: SimpleCDataConstructor;
+export const c_short: SimpleCDataConstructor;
+export const c_ushort: SimpleCDataConstructor;
+export const c_longlong: SimpleCDataConstructor;
+export const c_ulonglong: SimpleCDataConstructor;
+
+/** SimpleCData base class for creating custom simple types */
+export const SimpleCData: SimpleCDataConstructor;
 
 // =============================================================================
 // Constants

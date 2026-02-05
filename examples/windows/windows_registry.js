@@ -26,13 +26,24 @@ const RRF_RT_REG_MULTI_SZ = 0x00000020;
 
 const advapi32 = new WinDLL("advapi32.dll");
 
-// Function prototypes
-const RegCreateKeyExW = advapi32.func("RegCreateKeyExW", c_uint, [c_uint, c_void_p, c_uint, c_void_p, c_uint, c_uint, c_void_p, c_void_p, c_void_p]);
-const RegSetValueExW = advapi32.func("RegSetValueExW", c_uint, [c_uint, c_void_p, c_uint, c_uint, c_void_p, c_uint]);
-const RegGetValueW = advapi32.func("RegGetValueW", c_uint, [c_uint, c_void_p, c_void_p, c_uint, c_void_p, c_void_p, c_void_p]);
-const RegCloseKey = advapi32.func("RegCloseKey", c_uint, [c_uint]);
-const RegDeleteKeyW = advapi32.func("RegDeleteKeyW", c_uint, [c_uint, c_void_p]);
-const RegDeleteValueW = advapi32.func("RegDeleteValueW", c_uint, [c_uint, c_void_p]);
+// Function prototypes using Python-like argtypes/restype syntax
+advapi32.RegCreateKeyExW.argtypes = [c_uint, c_void_p, c_uint, c_void_p, c_uint, c_uint, c_void_p, c_void_p, c_void_p];
+advapi32.RegCreateKeyExW.restype = c_uint;
+
+advapi32.RegSetValueExW.argtypes = [c_uint, c_void_p, c_uint, c_uint, c_void_p, c_uint];
+advapi32.RegSetValueExW.restype = c_uint;
+
+advapi32.RegGetValueW.argtypes = [c_uint, c_void_p, c_void_p, c_uint, c_void_p, c_void_p, c_void_p];
+advapi32.RegGetValueW.restype = c_uint;
+
+advapi32.RegCloseKey.argtypes = [c_uint];
+advapi32.RegCloseKey.restype = c_uint;
+
+advapi32.RegDeleteKeyW.argtypes = [c_uint, c_void_p];
+advapi32.RegDeleteKeyW.restype = c_uint;
+
+advapi32.RegDeleteValueW.argtypes = [c_uint, c_void_p];
+advapi32.RegDeleteValueW.restype = c_uint;
 
 function checkRc(rc, name) {
   if (rc !== 0) {
@@ -56,7 +67,7 @@ async function main() {
   const lpdwDisposition = new c_uint32();
 
   // Create or open the key
-  const rcCreate = RegCreateKeyExW(
+  const rcCreate = advapi32.RegCreateKeyExW(
     HKEY_CURRENT_USER,
     lpSubKey,
     0,
@@ -77,7 +88,7 @@ async function main() {
   const lpValueName = create_unicode_buffer(valueName);
   const lpData = create_unicode_buffer(valueData);
 
-  const rcSet = RegSetValueExW(openedKey, lpValueName, 0, REG_SZ, lpData, lpData.length);
+  const rcSet = advapi32.RegSetValueExW(openedKey, lpValueName, 0, REG_SZ, lpData, lpData.length);
   checkRc(rcSet, "RegSetValueExW");
   console.log(`Wrote REG_SZ '${valueName}' = '${valueData}' to HKCU\\${subKey}`);
 
@@ -87,7 +98,7 @@ async function main() {
 
   // First call to get required size
   const ERROR_MORE_DATA = 0xea;
-  let rcGet = RegGetValueW(openedKey, null, lpValueName, RRF_RT_REG_SZ, byref(pdwType), null, byref(pcbData));
+  let rcGet = advapi32.RegGetValueW(openedKey, null, lpValueName, RRF_RT_REG_SZ, byref(pdwType), null, byref(pcbData));
   if (rcGet !== 0 && rcGet !== ERROR_MORE_DATA) {
     throw new Error(`RegGetValueW size query failed (rc=0x${rcGet.toString(16)})`);
   }
@@ -99,7 +110,7 @@ async function main() {
 
   const outBuf = create_unicode_buffer(Math.ceil(needed / 2));
 
-  rcGet = RegGetValueW(openedKey, null, lpValueName, RRF_RT_REG_SZ, byref(pdwType), outBuf, byref(pcbData));
+  rcGet = advapi32.RegGetValueW(openedKey, null, lpValueName, RRF_RT_REG_SZ, byref(pdwType), outBuf, byref(pcbData));
   checkRc(rcGet, "RegGetValueW");
 
   const readBack = wstring_at(outBuf);
@@ -109,7 +120,7 @@ async function main() {
   const dwordNameBuf = create_unicode_buffer("TestDword");
   const dwordValue = new c_uint32(0x12345678); // <-- Create with value!
 
-  const rcSetDword = RegSetValueExW(
+  const rcSetDword = advapi32.RegSetValueExW(
     openedKey,
     dwordNameBuf,
     0,
@@ -125,20 +136,20 @@ async function main() {
   const sizeDword = new c_uint32(4);
   const typeDword = new c_uint32();
 
-  let rcGetD = RegGetValueW(openedKey, null, dwordNameBuf, RRF_RT_REG_DWORD, byref(typeDword), byref(outDword), byref(sizeDword));
+  let rcGetD = advapi32.RegGetValueW(openedKey, null, dwordNameBuf, RRF_RT_REG_DWORD, byref(typeDword), byref(outDword), byref(sizeDword));
   checkRc(rcGetD, "RegGetValueW(REG_DWORD)");
   console.log(`Read back DWORD: 0x${outDword.value.toString(16)}`);
 
   // Cleanup
-  RegDeleteValueW(openedKey, dwordNameBuf);
-  const rcDelVal = RegDeleteValueW(openedKey, lpValueName);
+  advapi32.RegDeleteValueW(openedKey, dwordNameBuf);
+  const rcDelVal = advapi32.RegDeleteValueW(openedKey, lpValueName);
   checkRc(rcDelVal, "RegDeleteValueW");
   console.log(`Deleted value '${valueName}'`);
 
-  const rcClose = RegCloseKey(openedKey);
+  const rcClose = advapi32.RegCloseKey(openedKey);
   checkRc(rcClose, "RegCloseKey");
 
-  const rcDelKey = RegDeleteKeyW(HKEY_CURRENT_USER, lpSubKey);
+  const rcDelKey = advapi32.RegDeleteKeyW(HKEY_CURRENT_USER, lpSubKey);
   if (rcDelKey === 0) {
     console.log(`Deleted key HKCU\\${subKey}`);
   } else {

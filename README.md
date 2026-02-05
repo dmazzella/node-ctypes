@@ -221,15 +221,15 @@ console.log(u.f);  // 42 reinterpreted as float
 ### Bit Fields - Compact Data Structures
 
 ```javascript
-import { Structure, bitfield, c_uint32 } from 'node-ctypes';
+import { Structure, c_uint32 } from 'node-ctypes';
 
-// Bit fields for flags and compact data
+// Bit fields using Python-style syntax: [name, type, bits]
 class Flags extends Structure {
     static _fields_ = [
-        ["enabled", bitfield(c_uint32, 1)],   // 1 bit
-        ["mode", bitfield(c_uint32, 3)],      // 3 bits
-        ["priority", bitfield(c_uint32, 4)],  // 4 bits
-        ["reserved", bitfield(c_uint32, 24)]  // 24 bits
+        ["enabled", c_uint32, 1],   // 1 bit
+        ["mode", c_uint32, 3],      // 3 bits
+        ["priority", c_uint32, 4],  // 4 bits
+        ["reserved", c_uint32, 24]  // 24 bits
     ];
 }
 
@@ -242,6 +242,19 @@ flags.priority = 12;
 console.log(flags.enabled);   // 1
 console.log(flags.mode);      // 5
 console.log(flags.priority);  // 12
+```
+
+**Alternative syntax with `bitfield()` helper:**
+
+```javascript
+import { Structure, bitfield, c_uint32 } from 'node-ctypes';
+
+class Flags extends Structure {
+    static _fields_ = [
+        ["enabled", bitfield(c_uint32, 1)],
+        ["mode", bitfield(c_uint32, 3)],
+    ];
+}
 ```
 
 ### Arrays - Fixed-size and Dynamic
@@ -508,8 +521,32 @@ Benchmarked on Windows with Node.js v24.11.0:
 **Key Insights:**
 - koffi excels at simple operations and struct access
 - node-ctypes competitive on complex argument handling
-- **Struct performance gap**: koffi 15x faster due to direct object manipulation
+- **Struct performance gap**: koffi ~13x faster due to plain object vs Proxy+N-API
+- **Workaround**: Use `toObject()` for repeated struct reads (see below)
 - **Callback overhead**: koffi 1.5x faster at callback creation
+
+### Struct Performance Tip
+
+When reading struct fields repeatedly (e.g., in a tight loop), use `toObject()` to convert to a plain JavaScript object:
+
+```javascript
+const point = Point.create({ x: 10, y: 20 });
+
+// ❌ Slow: Each access goes through Proxy → N-API → buffer read
+for (let i = 0; i < 1000000; i++) {
+  const x = point.x;  // ~80ns per access
+}
+
+// ✅ Fast: Convert once, then use plain object access
+const obj = point.toObject();  // { x: 10, y: 20 }
+for (let i = 0; i < 1000000; i++) {
+  const x = obj.x;  // ~6ns per access (same as koffi!)
+}
+```
+
+**When to use direct access vs toObject():**
+- **Direct access (`point.x`)**: Always synchronized with underlying buffer; required when C code modifies the buffer
+- **`toObject()`**: Snapshot copy; use for read-only loops or when passing data to JS-only code
 
 **Transparent API overhead**: Only **3.5%** for auto `._buffer` extraction!
 
@@ -623,7 +660,8 @@ puts(s);
 
 **Types and helpers**
 - `sizeof(type)` → `number` : size in bytes of a type.
-- `POINTER(baseType)` : creates a pointer type with helpers `create()`, `fromBuffer()`, `deref()`, `set()`.
+- `POINTER(baseType)` : creates a pointer type factory (see [POINTER and pointer() API](#pointer-and-pointer-api) below).
+- `pointer(obj)` : creates a pointer to an existing ctypes instance (Python-compatible).
 - `byref(buffer)` : passes a buffer by reference (Python ctypes compatibility).
 - `cast(ptr, targetType)` : interprets a pointer as another type (returns wrapper for struct).
 
@@ -700,6 +738,82 @@ Write a value to memory.
 #### `sizeof(type)` → `number`
 Get the size of a type in bytes.
 
+#### POINTER and pointer() API
+
+`node-ctypes` provides a Python ctypes-compatible pointer API:
+
+```javascript
+import { POINTER, pointer, c_int32, Structure } from 'node-ctypes';
+
+// Create a pointer type
+const IntPtr = POINTER(c_int32);
+
+// Create NULL pointer
+const p1 = IntPtr.create();
+console.log(p1.isNull); // true
+
+// Create pointer from buffer
+const buf = Buffer.alloc(12);
+buf.writeInt32LE(10, 0);
+buf.writeInt32LE(20, 4);
+buf.writeInt32LE(30, 8);
+
+const p2 = IntPtr.fromBuffer(buf);
+
+// .contents property (Python-compatible)
+console.log(p2.contents); // 10
+p2.contents = 100;
+console.log(buf.readInt32LE(0)); // 100
+
+// Pointer indexing (Python-compatible)
+console.log(p2[0]); // 100
+console.log(p2[1]); // 20
+console.log(p2[2]); // 30
+
+p2[1] = 200;
+console.log(buf.readInt32LE(4)); // 200
+
+// pointer() function - create pointer to existing object
+const x = new c_int32(42);
+const px = pointer(x);
+console.log(px.contents); // 42
+px.contents = 100;
+console.log(x.value); // 100
+
+// Works with structures too
+class Point extends Structure {
+  static _fields_ = [["x", c_int32], ["y", c_int32]];
+}
+const pt = new Point({ x: 10, y: 20 });
+const ppt = pointer(pt);
+```
+
+**POINTER type methods:**
+- `POINTER(baseType)` - creates a pointer type factory
+- `PointerType.create()` - creates a NULL pointer instance
+- `PointerType.fromBuffer(buf)` - creates pointer to buffer
+- `PointerType.fromAddress(addr)` - creates pointer from address
+
+**Pointer instance properties:**
+- `.contents` - get/set dereferenced value (Python-compatible)
+- `.address` - get raw address as BigInt
+- `.isNull` - check if pointer is NULL
+- `[n]` - array-style indexing with pointer arithmetic
+- `.deref()` - alias for `.contents` getter
+- `.set(value)` - update pointer target
+
+**Using POINTER in function definitions:**
+```javascript
+// POINTER types can be used as argtypes and restype
+const IntPtr = POINTER(c_int32);
+
+// As argument type
+const memset = msvcrt.func("memset", c_void_p, [IntPtr, c_int32, c_size_t]);
+
+// As return type
+const memchr = msvcrt.func("memchr", IntPtr, [c_void_p, c_int32, c_size_t]);
+```
+
 #### `struct(fields)` → `StructDefinition`
 Create a simple struct definition.
 
@@ -720,10 +834,11 @@ Base class for Python-like union definitions. Subclasses should define `static _
 | **Structs** | `class Point(Structure):`<br>&nbsp;&nbsp;`_fields_ = [("x", c_int)]` | `class Point extends Structure`<br>&nbsp;&nbsp;`{ static _fields_ = [["x", c_int]] }` |
 | **Unions** | `class U(Union):`<br>&nbsp;&nbsp;`_fields_ = [("i", c_int)]` | `class U extends Union`<br>&nbsp;&nbsp;`{ static _fields_ = [["i", c_int]] }` |
 | **Arrays** | `c_int * 5` | `array(c_int, 5)` |
-| **Bit fields** | `("flags", c_uint, 3)` | `bitfield(c_uint32, 3)` |
+| **Bit fields** | `("flags", c_uint, 3)` | `["flags", c_uint32, 3]`<br>**or** `bitfield(c_uint32, 3)` |
 | **Callbacks** | `CFUNCTYPE(c_int, c_int)` | `callback(fn, c_int, [c_int])` |
 | **Strings** | `c_char_p(b"hello")` | `create_string_buffer("hello")`<br>**or**<br>`new c_char_p(b"hello")` |
-| **Pointers** | `POINTER(c_int)` | `c_void_p` |
+| **Pointers** | `POINTER(c_int)`<br>`p.contents`<br>`p[0]` | `POINTER(c_int)`<br>`p.contents`<br>`p[0]` |
+| **pointer()** | `pointer(obj)` | `pointer(obj)` |
 | **Variadic** | `sprintf(buf, b"%d", 42)` | `sprintf(buf, fmt, 42)` (auto) |
 | **Sizeof** | `sizeof(c_int)` | `sizeof(c_int)` |
 
