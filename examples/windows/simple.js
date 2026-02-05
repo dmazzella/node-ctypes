@@ -7,6 +7,10 @@ import { WinDLL, Structure, create_unicode_buffer, byref, GetLastError, c_int, c
 
 // Windows API constants
 const WS_OVERLAPPEDWINDOW = 0x00cf0000;
+const WS_MINIMIZEBOX = 0x00020000;
+const WS_MAXIMIZEBOX = 0x00010000;
+const WS_THICKFRAME = 0x00040000;
+const WS_SYSMENU = 0x00080000;
 const WS_VISIBLE = 0x10000000;
 const WS_CHILD = 0x40000000;
 const WS_TABSTOP = 0x00010000;
@@ -25,15 +29,6 @@ class POINT extends Structure {
   static _fields_ = [
     ["x", c_long],
     ["y", c_long],
-  ];
-}
-
-class RECT extends Structure {
-  static _fields_ = [
-    ["left", c_long],
-    ["top", c_long],
-    ["right", c_long],
-    ["bottom", c_long],
   ];
 }
 
@@ -113,27 +108,21 @@ kernel32.GetModuleHandleW.restype = c_void_p;
 let windowProcCallback = null;
 
 function WindowProc(hwnd, msg, wParam, lParam) {
-  console.log(`WindowProc called: msg=${msg}, wParam=${wParam}, lParam=${lParam}`);
   switch (msg) {
     case WM_COMMAND:
       const controlId = Number(wParam) & 0xffff; // Extract low 16 bits for control ID
-      console.log(`WM_COMMAND: controlId=${controlId}`);
       if (controlId === IDOK) {
-        console.log("OK button clicked");
         user32.MessageBoxW(null, create_unicode_buffer("Hello from node-ctypes GUI!"), create_unicode_buffer("Button Clicked"), 0);
       } else if (controlId === IDCANCEL) {
-        console.log("Cancel button clicked");
         user32.PostQuitMessage(0);
       }
       return 0n; // Return BigInt 0
 
     case WM_CLOSE:
-      console.log("WM_CLOSE received");
       user32.DestroyWindow(hwnd);
       return 0n;
 
     case WM_DESTROY:
-      console.log("WM_DESTROY received");
       user32.PostQuitMessage(0);
       return 0n;
 
@@ -143,12 +132,9 @@ function WindowProc(hwnd, msg, wParam, lParam) {
 }
 
 async function createGUI() {
-  console.log("Creating Windows GUI with node-ctypes...");
-
   try {
     // Get module handle
     const hInstance = kernel32.GetModuleHandleW(null);
-    console.log("Using hInstance:", hInstance);
 
     // Load cursor
     const hCursor = user32.LoadCursorW(null, 32512); // IDC_ARROW
@@ -174,7 +160,6 @@ async function createGUI() {
 
     // Register window class
     const atom = user32.RegisterClassExW(byref(windowClass));
-    console.log("RegisterClassExW result:", atom);
     if (!atom) {
       const error = GetLastError();
       throw new Error("Failed to register window class, error: " + error);
@@ -182,13 +167,12 @@ async function createGUI() {
 
     // Create main window
     const windowTitle = create_unicode_buffer("node-ctypes GUI Example");
-    console.log("Creating window...");
 
     const hwnd = user32.CreateWindowExW(
       0, // dwExStyle
       className, // lpClassName
       windowTitle, // lpWindowName
-      WS_OVERLAPPEDWINDOW, // dwStyle
+      (WS_OVERLAPPEDWINDOW | WS_SYSMENU) & ~(WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME), // dwStyle
       CW_USEDEFAULT, // x
       CW_USEDEFAULT, // y
       400, // nWidth
@@ -201,11 +185,8 @@ async function createGUI() {
 
     if (!hwnd) {
       const error = GetLastError();
-      console.log("CreateWindowExW failed with error:", error);
       throw new Error("Failed to create window, error: " + error);
     }
-
-    console.log("Window created successfully, handle:", hwnd);
 
     // Create OK button
     const buttonText = create_unicode_buffer("Click Me!");
@@ -225,9 +206,7 @@ async function createGUI() {
     );
 
     if (!hwndButton) {
-      console.log("Failed to create OK button");
-    } else {
-      console.log("OK button created");
+      throw new Error("Failed to create OK button");
     }
 
     // Create Cancel button
@@ -248,16 +227,12 @@ async function createGUI() {
     );
 
     if (!hwndCancel) {
-      console.log("Failed to create Cancel button");
-    } else {
-      console.log("Cancel button created");
+      throw new Error("Failed to create Cancel button");
     }
 
     // Show window
     user32.ShowWindow(hwnd, SW_SHOW);
     user32.UpdateWindow(hwnd);
-
-    console.log("Window shown. Running message loop...");
 
     // Message loop
     const msg = new MSG();
@@ -266,14 +241,11 @@ async function createGUI() {
 
     while ((result = user32.GetMessageW(byref(msg), null, 0, 0)) > 0) {
       messageCount++;
-      console.log(`Processing message ${messageCount}: ${msg.message}`);
       user32.TranslateMessage(byref(msg));
       user32.DispatchMessageW(byref(msg));
     }
-
-    console.log("Message loop ended, total messages processed:", messageCount);
   } catch (error) {
-    console.error("Error creating GUI:", error);
+    throw error;
   } finally {
     // Cleanup
     if (windowProcCallback) {
@@ -285,4 +257,4 @@ async function createGUI() {
 }
 
 // Run the GUI example
-createGUI().catch(console.error);
+createGUI().catch(() => {});
