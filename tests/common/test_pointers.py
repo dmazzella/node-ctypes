@@ -183,15 +183,31 @@ class TestPOINTERAddressOf(unittest.TestCase):
 class TestPOINTERInFunctionDefinitions(unittest.TestCase):
     """Test POINTER types in function definitions"""
 
+    @classmethod
+    def setUpClass(cls):
+        """Load the C library in a cross-platform way"""
+        from ctypes import CDLL
+        import sys
+        
+        if sys.platform == "win32":
+            cls.libc = CDLL("msvcrt")
+        elif sys.platform == "darwin":
+            cls.libc = CDLL("libSystem.B.dylib")
+        else:
+            # Linux
+            try:
+                cls.libc = CDLL("libc.so.6")
+            except OSError:
+                cls.libc = CDLL(None)
+
     def test_pointer_as_argument_type(self):
         """POINTER type can be used as function argument type"""
-        from ctypes import CDLL, c_void_p, c_size_t
+        from ctypes import c_void_p, c_size_t
         
         IntPtr = POINTER(c_int32)
         
-        # Load msvcrt and define memset with pointer argument
-        msvcrt = CDLL("msvcrt")
-        memset = msvcrt.memset
+        # Define memset with pointer argument
+        memset = self.libc.memset
         memset.argtypes = [IntPtr, c_int32, c_size_t]
         memset.restype = c_void_p
         
@@ -205,13 +221,12 @@ class TestPOINTERInFunctionDefinitions(unittest.TestCase):
 
     def test_pointer_as_return_type(self):
         """POINTER type can be used as return type"""
-        from ctypes import CDLL, c_void_p, c_size_t
+        from ctypes import c_void_p, c_size_t
         
         CharPtr = POINTER(c_char)
         
         # memchr returns a pointer
-        msvcrt = CDLL("msvcrt")
-        memchr = msvcrt.memchr
+        memchr = self.libc.memchr
         memchr.argtypes = [c_void_p, c_int32, c_size_t]
         memchr.restype = CharPtr
         

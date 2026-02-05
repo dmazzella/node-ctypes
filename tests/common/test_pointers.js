@@ -253,12 +253,26 @@ test("POINTER in function definitions", async (t) => {
   // Import CDLL for function tests
   const { CDLL, c_void_p, c_size_t } = await import("../../lib/index.js");
 
+  // Platform-specific C library
+  let libc;
+  if (process.platform === "win32") {
+    libc = new CDLL("msvcrt");
+  } else if (process.platform === "darwin") {
+    libc = new CDLL("libSystem.B.dylib");
+  } else {
+    // Linux: try libc.so.6, fallback to null
+    try {
+      libc = new CDLL("libc.so.6");
+    } catch {
+      libc = new CDLL(null);
+    }
+  }
+
   await t.test("POINTER type can be used as function argument type", () => {
     const IntPtr = POINTER(c_int32);
 
-    // Load msvcrt and define memset with pointer argument
-    const msvcrt = new CDLL("msvcrt");
-    const memset = msvcrt.func("memset", c_void_p, [IntPtr, c_int32, c_size_t]);
+    // Define memset with pointer argument
+    const memset = libc.func("memset", c_void_p, [IntPtr, c_int32, c_size_t]);
 
     // Create buffer and call memset
     const buf = Buffer.alloc(10);
@@ -273,8 +287,7 @@ test("POINTER in function definitions", async (t) => {
     const IntPtr = POINTER(c_int32);
 
     // memchr returns a pointer
-    const msvcrt = new CDLL("msvcrt");
-    const memchr = msvcrt.func("memchr", IntPtr, [c_void_p, c_int32, c_size_t]);
+    const memchr = libc.func("memchr", IntPtr, [c_void_p, c_int32, c_size_t]);
 
     const buf = Buffer.from("Hello World");
     const result = memchr(buf, "W".charCodeAt(0), buf.length);
