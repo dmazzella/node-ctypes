@@ -272,4 +272,12 @@ describe("Functions and Callbacks", function () {
       assert(strlen.address !== 0n);
     });
   });
+
+  describe("Function async", function () {
+    it("should call function asynchronously", async function () {
+      const strlen = libc.func("strlen", ctypes.c_size_t, [ctypes.c_char_p]);
+      const result = await strlen.callAsync("hello");
+      assert.strictEqual(result, 5n);
+    });
+  });
 });

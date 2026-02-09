@@ -217,8 +217,7 @@ namespace ctypes
             }
             catch (const std::exception &e)
             {
-                Napi::Error::New(env, std::string("Invalid argument type at index ") +
-                                          std::to_string(i) + ": " + e.what())
+                Napi::Error::New(env, std::format("Invalid argument type at index {}: {}", i, e.what()))
                     .ThrowAsJavaScriptException();
                 return;
             }
@@ -631,7 +630,7 @@ namespace ctypes
                 // Salva errore senza logging - l'utente può controllare last_error
                 {
                     std::lock_guard<std::mutex> lock(data->result_mutex);
-                    data->last_error = "Failed to queue callback (napi_status: " + std::to_string(status) + ")";
+                    data->last_error = std::format("Failed to queue callback (napi_status: {})", static_cast<int>(status));
                 }
 
                 if (data->return_type != CType::CTYPES_VOID)
@@ -747,8 +746,7 @@ namespace ctypes
             }
             catch (const std::exception &e)
             {
-                Napi::Error::New(env, std::string("Invalid argument type at index ") +
-                                          std::to_string(i) + ": " + e.what())
+                Napi::Error::New(env, std::format("Invalid argument type at index {}: {}", i, e.what()))
                     .ThrowAsJavaScriptException();
                 return;
             }

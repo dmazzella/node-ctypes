@@ -185,7 +185,7 @@ namespace ctypes
                             {
                                 DWORD err = GetLastError();
                                 std::string errMsg = GetErrorMessage(err);
-                                throw std::runtime_error("AddDllDirectory failed: " + errMsg);
+                                throw std::runtime_error(std::format("AddDllDirectory failed: {}", errMsg));
                             }
                             else
                             {
@@ -209,12 +209,8 @@ namespace ctypes
 
         if (!handle_)
         {
-            std::string msg = "Failed to load library";
-            if (!path_.empty())
-                msg += " '" + path_ + "'";
-            if (!error.empty())
-                msg += ": " + error;
-            Napi::Error::New(env, msg).ThrowAsJavaScriptException();
+            Napi::Error::New(env, std::format("Failed to load library{}{}", path_.empty() ? "" : std::format(" '{}'", path_), error.empty() ? "" : std::format(": {}", error)))
+                .ThrowAsJavaScriptException();
             return;
         }
 
@@ -262,10 +258,8 @@ namespace ctypes
 
         if (!fn_ptr)
         {
-            std::string msg = "Symbol '" + name + "' not found";
-            if (!error.empty())
-                msg += ": " + error;
-            Napi::Error::New(env, msg).ThrowAsJavaScriptException();
+            Napi::Error::New(env, std::format("Symbol '{}' not found{}", name, error.empty() ? "" : std::format(": {}", error)))
+                .ThrowAsJavaScriptException();
             return env.Undefined();
         }
 
@@ -328,10 +322,8 @@ namespace ctypes
 
         if (!sym_ptr)
         {
-            std::string msg = "Symbol '" + name + "' not found";
-            if (!error.empty())
-                msg += ": " + error;
-            Napi::Error::New(env, msg).ThrowAsJavaScriptException();
+            Napi::Error::New(env, std::format("Symbol '{}' not found{}", name, error.empty() ? "" : std::format(": {}", error)))
+                .ThrowAsJavaScriptException();
             return env.Undefined();
         }
 

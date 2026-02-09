@@ -232,7 +232,7 @@ namespace ctypes
                     Napi::Value value = obj.Get(field.name);
                     if (!value.IsObject())
                     {
-                        Napi::TypeError::New(env, "Field " + field.name + " must be an object").ThrowAsJavaScriptException();
+                        Napi::TypeError::New(env, std::format("Field {} must be an object", field.name)).ThrowAsJavaScriptException();
                         return false;
                     }
                     if (!field.struct_type->JSToStruct(env, value.As<Napi::Object>(), field_ptr, field.size))

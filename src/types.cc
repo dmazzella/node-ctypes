@@ -7,7 +7,7 @@ namespace ctypes
     {
         if (!IsValidCType(value))
         {
-            throw std::runtime_error("Invalid CType value: " + std::to_string(value));
+            throw std::runtime_error(std::format("Invalid CType value: {}", value));
         }
         return static_cast<CType>(value);
     }

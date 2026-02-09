@@ -79,6 +79,8 @@ export type ErrcheckCallback = (result: any, func: CallableFunction, args: any[]
 /** FFI function wrapper */
 export interface FFIFunction {
   (...args: any[]): any;
+  /** Async version: executes the native call on a worker thread, returns a Promise */
+  callAsync(...args: any[]): Promise<any>;
   readonly funcName: string;
   readonly address: bigint;
   errcheck: ErrcheckCallback | null;
@@ -87,7 +89,7 @@ export interface FFIFunction {
 /** CDLL - C calling convention library */
 export class CDLL {
   constructor(path: string | null);
-  func(name: string, returnType: AnyType, argTypes?: AnyType[], options?: FunctionOptions): CallableFunction & { errcheck: ErrcheckCallback | null };
+  func(name: string, returnType: AnyType, argTypes?: AnyType[], options?: FunctionOptions): CallableFunction & { callAsync(...args: any[]): Promise<any>; errcheck: ErrcheckCallback | null };
   symbol(name: string): bigint;
   close(): void;
   readonly path: string;
@@ -99,6 +101,8 @@ export class CDLL {
 /** FunctionWrapper for Python-like argtypes/restype syntax */
 export interface FunctionWrapper {
   (...args: any[]): any;
+  /** Async version: executes the native call on a worker thread, returns a Promise */
+  callAsync(...args: any[]): Promise<any>;
   argtypes: AnyType[];
   restype: AnyType;
   errcheck: ErrcheckCallback | null;
