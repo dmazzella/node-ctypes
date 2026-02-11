@@ -902,8 +902,10 @@ npm run bench:koffi        # Benchmark vs koffi
 
 For practical GUI application examples using the Windows API:
 
-- **Simple GUI Demo**: [examples/windows/simple.js](examples/windows/simple.js) - Message boxes and basic Windows API GUI elements
-- **Windows Controls Showcase Demo**: [examples/windows/windows_controls.js](examples/windows/windows_controls.js) - Comprehensive demo with a wide set of common Win32 controls
+- **Windows Controls Showcase Demo**: [examples/windows/demo_controls.js](examples/windows/demo_controls.js) - Comprehensive demo with a wide set of common Win32 controls
+- **Windows Registry Demo**: [examples/windows/demo_registry](examples/windows/demo_registry) - Comprehensive demo with setValue, getValue, openKey, deleteValue, deleteKey
+- **Windows Tray Demo**: [examples/windows/demo_tray.js](examples/windows/demo_tray.js) - Comprehensive demo for tray menu inspired by [pit-ray/fluent-tray](https://github.com/pit-ray/fluent-tray)
+- **WinScard - PC/SC Smart Card**: [examples/demo_scard.js](examples/demo_scard.js) - Comprehensive demo for Windows Smart Card API on Windows and PC/SC Lite (pcsclite) on macOS and Linux
 
 ## License
 
