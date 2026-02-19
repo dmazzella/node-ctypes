@@ -69,14 +69,23 @@ namespace ctypes
             return;
         }
 
-        // 1. Function pointer
-        if (!info[0].IsExternal())
+        // 1. Function pointer (External from Library::GetFunction, or BigInt raw address)
+        if (info[0].IsExternal())
         {
-            Napi::TypeError::New(env, "First argument must be a function pointer")
+            fn_ptr_ = info[0].As<Napi::External<void>>().Data();
+        }
+        else if (info[0].IsBigInt())
+        {
+            bool lossless;
+            uint64_t addr = info[0].As<Napi::BigInt>().Uint64Value(&lossless);
+            fn_ptr_ = reinterpret_cast<void *>(addr);
+        }
+        else
+        {
+            Napi::TypeError::New(env, "First argument must be a function pointer (External or BigInt address)")
                 .ThrowAsJavaScriptException();
             return;
         }
-        fn_ptr_ = info[0].As<Napi::External<void>>().Data();
 
         // CRITICAL: Valida che il puntatore non sia NULL
         if (fn_ptr_ == nullptr)
@@ -86,14 +95,24 @@ namespace ctypes
             return;
         }
 
-        // 2. Name
-        if (!info[1].IsString())
+        // 2. Name (string or null for raw function pointers)
+        if (info[1].IsString())
         {
-            Napi::TypeError::New(env, "Second argument must be function name")
+            name_ = info[1].As<Napi::String>().Utf8Value();
+        }
+        else if (info[1].IsNull() || info[1].IsUndefined())
+        {
+            // Raw function pointer — use hex address as name for error messages
+            char buf[32];
+            snprintf(buf, sizeof(buf), "0x%llx", reinterpret_cast<unsigned long long>(fn_ptr_));
+            name_ = buf;
+        }
+        else
+        {
+            Napi::TypeError::New(env, "Second argument must be function name (string) or null")
                 .ThrowAsJavaScriptException();
             return;
         }
-        name_ = info[1].As<Napi::String>().Utf8Value();
 
         // 3. Return type
         try

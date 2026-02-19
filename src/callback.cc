@@ -1,4 +1,5 @@
 #include "callback.h"
+#include "function.h" // For StringToCallConv, CallConvToFFI
 
 namespace ctypes
 {
@@ -223,6 +224,14 @@ namespace ctypes
             }
         }
 
+        // Parse optional 4th argument: calling convention string
+        ffi_abi abi = FFI_DEFAULT_ABI;
+        if (info.Length() > 3 && info[3].IsString())
+        {
+            abi = CallConvToFFI(StringToCallConv(
+                info[3].As<Napi::String>().Utf8Value()));
+        }
+
         // Prepara FFI types
         data_->ffi_return_type = CTypeToFFI(data_->return_type);
         for (const auto &type : data_->arg_types)
@@ -233,7 +242,7 @@ namespace ctypes
         // Prepara CIF
         ffi_status status = ffi_prep_cif(
             &data_->cif,
-            FFI_DEFAULT_ABI,
+            abi,
             static_cast<unsigned int>(data_->ffi_arg_types.size()),
             data_->ffi_return_type,
             data_->ffi_arg_types.empty() ? nullptr : data_->ffi_arg_types.data());
@@ -752,6 +761,14 @@ namespace ctypes
             }
         }
 
+        // Parse optional 4th argument: calling convention string
+        ffi_abi abi = FFI_DEFAULT_ABI;
+        if (info.Length() > 3 && info[3].IsString())
+        {
+            abi = CallConvToFFI(StringToCallConv(
+                info[3].As<Napi::String>().Utf8Value()));
+        }
+
         // Prepara FFI types
         data_->ffi_return_type = CTypeToFFI(data_->return_type);
         for (const auto &type : data_->arg_types)
@@ -762,7 +779,7 @@ namespace ctypes
         // Prepara CIF
         ffi_status status = ffi_prep_cif(
             &data_->cif,
-            FFI_DEFAULT_ABI,
+            abi,
             static_cast<unsigned int>(data_->ffi_arg_types.size()),
             data_->ffi_return_type,
             data_->ffi_arg_types.empty() ? nullptr : data_->ffi_arg_types.data());
