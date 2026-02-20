@@ -280,4 +280,16 @@ describe("Functions and Callbacks", function () {
       assert.strictEqual(result, 5n);
     });
   });
+
+  describe("CFUNCTYPE", function () {
+    it("should create callable function pointer with CFUNCTYPE", function () {
+      const addr = libc.symbol("strlen");
+      assert(typeof addr === "bigint" && addr !== 0n, "strlen address obtained");
+
+      const StrlenProto = ctypes.CFUNCTYPE(ctypes.c_size_t, ctypes.c_char_p);
+      const myStrlen = StrlenProto(addr);
+      const len = myStrlen("Hello, World!");
+      assert.strictEqual(len, 13n, `strlen("Hello, World!") = ${len}`);
+    });
+  });
 });

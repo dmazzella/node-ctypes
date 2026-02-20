@@ -835,7 +835,7 @@ Base class for Python-like union definitions. Subclasses should define `static _
 | **Unions** | `class U(Union):`<br>&nbsp;&nbsp;`_fields_ = [("i", c_int)]` | `class U extends Union`<br>&nbsp;&nbsp;`{ static _fields_ = [["i", c_int]] }` |
 | **Arrays** | `c_int * 5` | `array(c_int, 5)` |
 | **Bit fields** | `("flags", c_uint, 3)` | `["flags", c_uint32, 3]`<br>**or** `bitfield(c_uint32, 3)` |
-| **Callbacks** | `CFUNCTYPE(c_int, c_int)` | `callback(fn, c_int, [c_int])` |
+| **Callbacks** | `CFUNCTYPE(c_int, c_int)` | `CFUNCTYPE(c_int, c_int)`<br>**or** ` callback(fn, c_int, [c_int])` |
 | **Strings** | `c_char_p(b"hello")` | `create_string_buffer("hello")`<br>**or**<br>`new c_char_p(b"hello")` |
 | **Pointers** | `POINTER(c_int)`<br>`p.contents`<br>`p[0]` | `POINTER(c_int)`<br>`p.contents`<br>`p[0]` |
 | **pointer()** | `pointer(obj)` | `pointer(obj)` |
