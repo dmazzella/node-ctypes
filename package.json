@@ -29,11 +29,15 @@
     "build:debug": "cmake-js compile --target ctypes --debug",
     "rebuild": "cmake-js rebuild --target ctypes",
     "clean": "cmake-js clean",
-    "generate-ffi-headers": "node third-party/libffi_cmake/generate-headers.js"
+    "generate-ffi-headers": "node third-party/libffi_cmake/generate-headers.js",
+    "docs": "typedoc",
+    "docs:serve": "typedoc && npx serve docs"
   },
   "devDependencies": {
+    "@types/node": "^25.3.0",
     "cmake-js": "^8.0.0",
-    "node-addon-api": "^8.5.0"
+    "node-addon-api": "^8.5.0",
+    "typedoc": "^0.28.17"
   },
   "engines": {
     "node": ">=16.0.0"

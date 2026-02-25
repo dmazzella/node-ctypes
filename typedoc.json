@@ -1,0 +1,30 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["lib/index.d.ts"],
+  "out": "docs",
+  "name": "node-ctypes",
+  "readme": "README.md",
+  "includeVersion": true,
+  "categorizeByGroup": true,
+  "categoryOrder": [
+    "Library Loading",
+    "Structures",
+    "Callbacks",
+    "Pointers",
+    "Memory",
+    "Types",
+    "Error Handling",
+    "Constants",
+    "*"
+  ],
+  "sort": ["source-order"],
+  "projectDocuments": ["examples/README.md"],
+  "navigationLinks": {
+    "GitHub": "https://github.com/dmazzella/node-ctypes",
+    "npm": "https://www.npmjs.com/package/node-ctypes"
+  },
+  "exclude": ["**/node_modules/**", "**/tests/**"],
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "highlightLanguages": ["javascript", "typescript", "python", "bash", "json"]
+}

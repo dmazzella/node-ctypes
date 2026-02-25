@@ -256,6 +256,20 @@ npm run test
 
 See [tests/common/](tests/common/) for working examples including parallel Python implementations.
 
+## Documentation
+
+Generate the API docs locally:
+
+```bash
+npm run docs
+```
+
+This produces a browsable site in `docs/` using [TypeDoc](https://typedoc.org/). To preview it:
+
+```bash
+npm run docs:serve
+```
+
 ## License
 
 MIT
