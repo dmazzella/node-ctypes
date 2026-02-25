@@ -14,9 +14,9 @@
     "bench:python": "python benchmarks/benchmark_python.py"
   },
   "dependencies": {
-    "node-ctypes": ".."
+    "node-ctypes": "file:.."
   },
   "devDependencies": {
-    "koffi": "^2.15.0"
+    "koffi": "^2.15.1"
   }
 }
