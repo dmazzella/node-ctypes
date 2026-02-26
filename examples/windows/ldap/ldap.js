@@ -387,7 +387,7 @@ function interpretValue(attrName, rawBuffer) {
   }
 
   // ── SID (2.5.5.17) ──
-  if (syntax === AD_SYNTAX.SID) {
+  if (syntax === AD_SYNTAX.SID || lower === "objectsid") {
     return sidToString(rawBuffer) || rawBuffer.toString("hex");
   }
 
