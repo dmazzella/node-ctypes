@@ -119,13 +119,22 @@ const buf = Buffer.alloc(4);
 buf.writeInt32LE(42, 0);
 
 const p = IntPtr.fromBuffer(buf);
-console.log(p.contents);  // 42
-console.log(p[0]);         // 42
+console.log(p.contents);  // 42 (like *p in C)
+console.log(p[0]);        // 42 (like p[0] in C)
 
 // pointer() function
 const x = new c_int32(42);
 const px = pointer(x);
 console.log(px.contents);  // 42
+
+// fromAddress() — typed access to native memory
+const pValues = POINTER(MyStruct).fromAddress(nativeAddr);
+console.log(pValues[0].field);  // pointer arithmetic (like pValues[0] in C)
+console.log(pValues[5].field);  // pValues + 5 * sizeof(MyStruct)
+
+// cast() to POINTER — Python: cast(c_void_p(addr), POINTER(MyStruct))
+const pData = cast(rawAddr, POINTER(MyStruct));
+console.log(pData[0].field);  // same result as fromAddress()
 ```
 
 ### Callbacks
@@ -194,11 +203,12 @@ console.log(`${st.wYear}-${st.wMonth}-${st.wDay}`);
 | Callbacks | `CFUNCTYPE(c_int, c_int)` | `CFUNCTYPE(c_int, c_int)` |
 | Pointers | `POINTER(c_int)` / `pointer(obj)` | `POINTER(c_int)` / `pointer(obj)` |
 | Sizeof | `sizeof(c_int)` | `sizeof(c_int)` |
+| Alignment | `alignment(c_int)` | `alignment(c_int)` |
 | Strings | `c_char_p(b"hello")` | `create_string_buffer("hello")` |
 | Variadic | `sprintf(buf, b"%d", 42)` | `sprintf(buf, "%d", 42)` |
 | Errno | `get_errno()` | `get_errno()` |
 | byref | `byref(obj)` | `byref(obj)` |
-| cast | `cast(ptr, type)` | `cast(ptr, type)` |
+| cast | `cast(ptr, type)` | `cast(ptr, type)` (supports `POINTER()` target) |
 
 ## Supported Types
 
@@ -219,6 +229,7 @@ console.log(`${st.wYear}-${st.wMonth}-${st.wDay}`);
 | `c_wchar_p` | wide string | pointer |
 | `c_bool` | | 1 |
 | `c_size_t` | | platform |
+| `c_ssize_t` | | platform |
 
 ## Key Differences from Python ctypes
 
@@ -233,6 +244,7 @@ console.log(`${st.wYear}-${st.wMonth}-${st.wDay}`);
 - `string_at(address, size)` / `wstring_at(address, size)` — read strings from memory
 - `readValue(ptr, type, offset)` / `writeValue(ptr, type, value, offset)` — direct memory access
 - `sizeof(type)` — type size in bytes
+- `alignment(type)` — type alignment in bytes
 - `addressof(ptr)` — get address as BigInt
 - `memmove(dst, src, count)` / `memset(dst, value, count)` — memory operations
 - `GetLastError()` / `FormatError(code)` — Windows error helpers

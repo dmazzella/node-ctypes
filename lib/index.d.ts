@@ -373,7 +373,7 @@ export class ThreadSafeCallback extends Callback {}
  */
 export interface FieldDef {
   name: string;
-  type: AnyType | StructDef | ArrayTypeDef | BitFieldDef;
+  type: AnyType | StructDef | ArrayTypeDef | BitFieldDef | PointerTypeDef;
   offset: number;
   size: number;
   alignment: number;
@@ -419,7 +419,7 @@ export interface StructDef {
 }
 
 /** @category Structures */
-export type FieldSpec = AnyType | StructDef | ArrayTypeDef | BitFieldDef | AnonymousField;
+export type FieldSpec = AnyType | StructDef | ArrayTypeDef | BitFieldDef | AnonymousField | PointerTypeDef;
 
 type JsFromCType<T> = T extends "int64" | "uint64" | "size_t"
   ? bigint
@@ -545,13 +545,108 @@ export interface AnonymousField {
 // =============================================================================
 
 /**
- * A pointer type created by {@link POINTER}.
+ * A pointer instance created by {@link PointerTypeDef.create}, {@link PointerTypeDef.fromBuffer},
+ * or {@link PointerTypeDef.fromAddress}.
+ *
+ * Supports Python ctypes-compatible `.contents` property and C-like `[index]` pointer arithmetic.
  *
  * @example
  * ```javascript
  * const IntPtr = POINTER(c_int32);
  * const p = IntPtr.fromBuffer(buf);
- * console.log(p.contents);  // dereferenced value
+ * console.log(p.contents);  // dereferenced value (like *p in C)
+ * console.log(p[0]);        // same as p.contents
+ * console.log(p[5]);        // pointer arithmetic (like p[5] in C)
+ * ```
+ *
+ * @example Access a native array via pointer from a struct field
+ * ```javascript
+ * // When a struct has a c_void_p field pointing to an array of structs:
+ * const pValues = POINTER(ADSVALUE).fromAddress(col.pADsValues);
+ * for (let i = 0; i < col.dwNumValues; i++) {
+ *   console.log(pValues[i].dwType);  // struct view at pValues + i * sizeof(ADSVALUE)
+ * }
+ * ```
+ *
+ * @category Pointers
+ */
+export interface PointerInstance {
+  /** The pointer type definition this instance was created from. */
+  readonly _pointerType: PointerTypeDef;
+  /** The base type this pointer points to. */
+  readonly _baseType: AnyType | StructDef;
+  /** Size of the pointed-to type in bytes. */
+  readonly _baseSize: number;
+
+  /** Raw memory address as BigInt. */
+  readonly address: bigint;
+
+  /**
+   * Dereference the pointer — read/write the value at the pointed location.
+   *
+   * Python equivalent: `p.contents`
+   *
+   * @example
+   * ```javascript
+   * const p = POINTER(c_int32).fromBuffer(buf);
+   * console.log(p.contents);  // read value
+   * p.contents = 42;          // write value
+   * ```
+   */
+  contents: any;
+
+  /** The underlying buffer (if created from a buffer), or null. */
+  readonly _buffer: Buffer | null;
+
+  /** Alias for contents getter. */
+  deref(): any;
+
+  /**
+   * Set pointer to a new target (buffer or address).
+   * @param value - Buffer to point to, or BigInt/number address
+   */
+  set(value: Buffer | bigint | number): void;
+
+  /** Check if this is a NULL pointer. */
+  readonly isNull: boolean;
+
+  /** Get pointer as an 8-byte buffer containing the address. */
+  toBuffer(): Buffer;
+
+  toString(): string;
+
+  /**
+   * Pointer arithmetic — access elements at offset from the pointer.
+   *
+   * `p[i]` reads `sizeof(baseType)` bytes at `address + i * sizeof(baseType)`,
+   * exactly like C pointer indexing.
+   *
+   * @example
+   * ```javascript
+   * const arr = POINTER(c_int32).fromAddress(arrayAddr);
+   * arr[0]       // first element
+   * arr[5]       // sixth element
+   * arr[2] = 99; // write to third element
+   * ```
+   */
+  [index: number]: any;
+}
+
+/**
+ * A pointer type created by {@link POINTER}.
+ *
+ * @example
+ * ```javascript
+ * const IntPtr = POINTER(c_int32);
+ *
+ * // From existing buffer
+ * const p = IntPtr.fromBuffer(buf);
+ * console.log(p.contents);  // 42
+ * console.log(p[0]);        // 42
+ *
+ * // From raw address (e.g., from a struct's c_void_p field)
+ * const pValues = POINTER(MyStruct).fromAddress(someStruct.pData);
+ * console.log(pValues[0].field1);
  * ```
  *
  * @category Pointers
@@ -564,14 +659,63 @@ export interface PointerTypeDef {
   /** Pointer size (always 8 on 64-bit). */
   readonly size: number;
 
-  /** Create a NULL pointer. */
-  create(): Buffer;
-  /** Create a pointer to an existing buffer. */
-  fromBuffer(targetBuf: Buffer): Buffer;
-  /** Dereference the pointer, returning the target address or null. */
+  /**
+   * Create a NULL pointer instance.
+   *
+   * @example
+   * ```javascript
+   * const p = POINTER(c_int32).create();
+   * console.log(p.isNull);  // true
+   * ```
+   */
+  create(value?: Buffer | bigint | number): PointerInstance;
+
+  /**
+   * Create a pointer from an existing buffer (points to that buffer's memory).
+   *
+   * @param targetBuf - Buffer to point to
+   *
+   * @example
+   * ```javascript
+   * const buf = Buffer.alloc(4);
+   * buf.writeInt32LE(42, 0);
+   * const p = POINTER(c_int32).fromBuffer(buf);
+   * console.log(p.contents);  // 42
+   * ```
+   */
+  fromBuffer(targetBuf: Buffer): PointerInstance;
+
+  /**
+   * Create a pointer from a raw memory address.
+   *
+   * Use this to create typed access to native memory, especially useful with
+   * `c_void_p` struct fields that point to arrays of structs.
+   *
+   * @param address - Memory address as BigInt or number
+   *
+   * @example
+   * ```javascript
+   * // Access array of structs from a c_void_p field
+   * const pValues = POINTER(ADSVALUE).fromAddress(col.pADsValues);
+   * for (let i = 0; i < col.dwNumValues; i++) {
+   *   console.log(pValues[i].dwType);
+   * }
+   * ```
+   */
+  fromAddress(address: bigint | number): PointerInstance;
+
+  /**
+   * @deprecated Use pointer instance `.contents` instead.
+   * Legacy API: Dereferences a pointer buffer.
+   */
   deref(ptrBuf: Buffer): bigint | null;
-  /** Update the pointer target. */
+
+  /**
+   * @deprecated Use pointer instance `.set()` instead.
+   * Legacy API: Sets pointer buffer value.
+   */
   set(ptrBuf: Buffer, value: Buffer | bigint): void;
+
   toString(): string;
 }
 
@@ -944,6 +1088,22 @@ export function writeValue(ptr: Buffer | bigint | number, type: AnyType, value: 
 export function sizeof(type: AnyType | StructDef | ArrayTypeDef): number;
 
 /**
+ * Get the alignment requirement of a type in bytes.
+ *
+ * Python equivalent: `ctypes.alignment`
+ *
+ * @example
+ * ```javascript
+ * alignment(c_int32)    // 4
+ * alignment(c_double)   // 8
+ * alignment(MyStruct)   // max field alignment
+ * ```
+ *
+ * @category Memory
+ */
+export function alignment(type: AnyType | StructDef | ArrayTypeDef | typeof Structure | typeof Union): number;
+
+/**
  * Create a Buffer view of native memory at a given address.
  *
  * **Warning:** Use with caution — the buffer is not bounds-checked.
@@ -1059,12 +1219,31 @@ export function byref(obj: Buffer | SimpleCDataInstance | { _buffer: Buffer }): 
  *
  * Python equivalent: `ctypes.cast`
  *
- * @param ptr - Buffer or BigInt address to cast
- * @param targetType - The target type
+ * When the target is a {@link PointerTypeDef}, returns a {@link PointerInstance} with
+ * `.contents` and `[index]` access — equivalent to Python's
+ * `cast(c_void_p(addr), POINTER(MyStruct))`.
+ *
+ * @param ptr - Buffer, BigInt address, number, or SimpleCData instance (e.g., `c_void_p`)
+ * @param targetType - The target type (primitive, struct, or POINTER type)
+ *
+ * @example Cast to POINTER for typed array access
+ * ```javascript
+ * // Python: cast(c_void_p(addr), POINTER(MyStruct))
+ * const pValues = cast(col.pADsValues, POINTER(ADSVALUE));
+ * for (let i = 0; i < col.dwNumValues; i++) {
+ *   console.log(pValues[i].dwType);
+ * }
+ * ```
+ *
+ * @example Cast to primitive type
+ * ```javascript
+ * const floatVal = cast(intBuf, c_float);
+ * ```
  *
  * @category Pointers
  */
-export function cast(ptr: Buffer | bigint, targetType: AnyType | StructDef): Buffer | { [key: string]: any };
+export function cast(ptr: Buffer | bigint | number | SimpleCDataInstance, targetType: PointerTypeDef): PointerInstance;
+export function cast(ptr: Buffer | bigint | number | SimpleCDataInstance, targetType: AnyType | StructDef): any;
 
 /**
  * Create a pointer type for a given base type.
@@ -1074,7 +1253,7 @@ export function cast(ptr: Buffer | bigint, targetType: AnyType | StructDef): Buf
  * @param baseType - The type to point to
  * @returns A pointer type with `create()`, `fromBuffer()`, etc.
  *
- * @example
+ * @example Basic pointer
  * ```javascript
  * const IntPtr = POINTER(c_int32);
  * const buf = Buffer.alloc(4);
@@ -1082,7 +1261,20 @@ export function cast(ptr: Buffer | bigint, targetType: AnyType | StructDef): Buf
  *
  * const p = IntPtr.fromBuffer(buf);
  * console.log(p.contents);  // 42
- * console.log(p[0]);         // 42
+ * console.log(p[0]);        // 42
+ * ```
+ *
+ * @example Typed access to native array via c_void_p struct field
+ * ```javascript
+ * // Structure fields don't accept POINTER() types directly — use c_void_p,
+ * // then wrap with POINTER().fromAddress() for typed indexed access:
+ * class Column extends Structure {
+ *   static _fields_ = [["pValues", c_void_p], ["count", c_uint32]];
+ * }
+ * const pValues = POINTER(ValueStruct).fromAddress(col.pValues);
+ * for (let i = 0; i < col.count; i++) {
+ *   console.log(pValues[i].field);  // struct view at offset i
+ * }
  * ```
  *
  * @category Pointers
@@ -1108,7 +1300,7 @@ export function POINTER(baseType: AnyType | StructDef): PointerTypeDef;
  *
  * @category Pointers
  */
-export function pointer(obj: SimpleCDataInstance | { _buffer: Buffer }): SimpleCDataInstance & { contents: any; [index: number]: any };
+export function pointer(obj: SimpleCDataInstance | { _buffer: Buffer }): PointerInstance;
 
 /**
  * Get the C library errno value.
@@ -1264,8 +1456,10 @@ export const c_wchar_p: SimpleCDataConstructor;
 export const c_void_p: SimpleCDataConstructor;
 /** Boolean (1 byte). Python: `ctypes.c_bool` @category Types */
 export const c_bool: SimpleCDataConstructor;
-/** Platform-dependent size type (BigInt). Python: `ctypes.c_size_t` @category Types */
+/** Platform-dependent unsigned size type (BigInt). Python: `ctypes.c_size_t` @category Types */
 export const c_size_t: SimpleCDataConstructor;
+/** Platform-dependent signed size type (BigInt). Python: `ctypes.c_ssize_t` @category Types */
+export const c_ssize_t: SimpleCDataConstructor;
 /** Platform-dependent signed long. Python: `ctypes.c_long` @category Types */
 export const c_long: SimpleCDataConstructor;
 /** Platform-dependent unsigned long. Python: `ctypes.c_ulong` @category Types */
