@@ -8,12 +8,17 @@ from ctypes import (
     POINTER,
     pointer,
     c_int32,
+    c_uint32,
     c_double,
+    c_float,
     c_char,
+    c_void_p,
     Structure,
+    Union,
     cast,
     sizeof,
     addressof,
+    byref,
 )
 
 
@@ -236,6 +241,106 @@ class TestPOINTERInFunctionDefinitions(unittest.TestCase):
         # memchr should return a pointer (non-null since 'W' exists)
         self.assertTrue(bool(result))
         self.assertEqual(result[0], b'W')
+
+
+
+# ─── cast() with POINTER target ───
+
+class TestCastWithPOINTER(unittest.TestCase):
+    """Test cast() with POINTER target"""
+
+    def test_cast_array_to_pointer(self):
+        """Python: cast(arr, POINTER(c_int32))"""
+        arr = (c_int32 * 3)(100, 200, 300)
+        p = cast(arr, POINTER(c_int32))
+        self.assertEqual(p[0], 100)
+        self.assertEqual(p[1], 200)
+        self.assertEqual(p[2], 300)
+
+    def test_cast_c_void_p_to_pointer(self):
+        """Python: cast(c_void_p(addr), POINTER(c_int32))"""
+        val = c_int32(12345)
+        addr = addressof(val)
+        voidP = c_void_p(addr)
+        p = cast(voidP, POINTER(c_int32))
+        self.assertEqual(p[0], 12345)
+
+    def test_cast_preserves_type(self):
+        """cast returns correctly typed pointer"""
+        val = c_double(3.14)
+        p = pointer(val)
+        p2 = cast(p, POINTER(c_double))
+        self.assertAlmostEqual(p2[0], 3.14, places=2)
+
+    def test_cast_pointer_to_different_type(self):
+        """cast reinterprets memory as different type"""
+        val = c_float(1.0)
+        p = pointer(val)
+        p2 = cast(p, POINTER(c_uint32))
+        # IEEE 754: float 1.0 = 0x3F800000
+        self.assertEqual(p2[0], 0x3F800000)
+
+    def test_cast_write_through(self):
+        """cast pointer allows write-through"""
+        arr = (c_int32 * 2)(0, 0)
+        p = cast(arr, POINTER(c_int32))
+        p[0] = 111
+        p[1] = 222
+        self.assertEqual(arr[0], 111)
+        self.assertEqual(arr[1], 222)
+
+
+# ─── Additional addressof() tests ───
+
+class TestAddressofExtras(unittest.TestCase):
+    """Additional addressof() tests"""
+
+    def test_struct_addressof(self):
+        class Point(Structure):
+            _fields_ = [("x", c_int32), ("y", c_int32)]
+        pt = Point(10, 20)
+        addr = addressof(pt)
+        self.assertIsInstance(addr, int)
+        self.assertGreater(addr, 0)
+
+    def test_addressof_roundtrip(self):
+        """addressof -> cast -> read back"""
+        x = c_int32(42)
+        addr = addressof(x)
+        p = cast(c_void_p(addr), POINTER(c_int32))
+        self.assertEqual(p[0], 42)
+
+
+# ─── Double array walk ───
+
+class TestPointerDoubleArrayWalk(unittest.TestCase):
+    """Test pointer walk on double arrays"""
+
+    def test_double_array_walk(self):
+        arr = (c_double * 3)(1.1, 2.2, 3.3)
+        p = cast(arr, POINTER(c_double))
+        self.assertAlmostEqual(p[0], 1.1, places=1)
+        self.assertAlmostEqual(p[1], 2.2, places=1)
+        self.assertAlmostEqual(p[2], 3.3, places=1)
+
+
+# ─── byref() ───
+
+class TestByref(unittest.TestCase):
+    """Test byref() function"""
+
+    def test_byref_returns_reference(self):
+        """byref is lightweight alternative to pointer"""
+        x = c_int32(42)
+        ref = byref(x)
+        self.assertIsNotNone(ref)
+
+    def test_byref_struct(self):
+        class Point(Structure):
+            _fields_ = [("x", c_int32), ("y", c_int32)]
+        pt = Point(10, 20)
+        ref = byref(pt)
+        self.assertIsNotNone(ref)
 
 
 if __name__ == '__main__':

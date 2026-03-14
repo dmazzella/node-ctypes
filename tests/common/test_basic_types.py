@@ -4,12 +4,13 @@ Tests all basic C types supported by ctypes
 """
 
 import unittest
+import struct
 from ctypes import (
     c_int8, c_uint8, c_int16, c_uint16, c_int32, c_uint32,
     c_int64, c_uint64, c_float, c_double, c_bool, c_void_p, c_size_t,
     c_long, c_ulong, c_byte, c_ubyte, c_short, c_ushort, c_int, c_uint,
     c_longlong, c_ulonglong, sizeof, create_string_buffer, byref, memmove,
-    c_char_p, c_wchar_p
+    c_char_p, c_wchar_p, c_ssize_t, alignment, Structure
 )
 
 class TestBasicTypes(unittest.TestCase):
@@ -181,6 +182,87 @@ class TestBasicTypes(unittest.TestCase):
         self.assertEqual(sizeof(c_double), 8)
         self.assertEqual(sizeof(c_bool), 1)
         self.assertEqual(sizeof(c_void_p), sizeof(c_size_t))
+
+
+# ─── c_ssize_t ───
+
+class TestCSsizeT(unittest.TestCase):
+    """Test c_ssize_t type"""
+
+    def test_stores_positive_values(self):
+        v = c_ssize_t(42)
+        self.assertEqual(v.value, 42)
+
+    def test_stores_negative_values(self):
+        v = c_ssize_t(-42)
+        self.assertEqual(v.value, -42)
+
+    def test_same_size_as_c_size_t(self):
+        self.assertEqual(sizeof(c_ssize_t), sizeof(c_size_t))
+
+    def test_same_size_as_pointer(self):
+        self.assertEqual(sizeof(c_ssize_t), sizeof(c_void_p))
+
+    def test_large_positive_value(self):
+        v = c_ssize_t(2**31 - 1)
+        self.assertEqual(v.value, 2**31 - 1)
+
+    def test_large_negative_value(self):
+        v = c_ssize_t(-(2**31))
+        self.assertEqual(v.value, -(2**31))
+
+    def test_in_struct_field(self):
+        """c_ssize_t works as a struct field"""
+        class S(Structure):
+            _fields_ = [("len", c_ssize_t)]
+        s = S(-100)
+        self.assertEqual(s.len, -100)
+
+
+# ─── alignment() ───
+
+class TestAlignment(unittest.TestCase):
+    """Test alignment() function"""
+
+    def test_primitive_types(self):
+        self.assertEqual(alignment(c_uint8), 1)
+        self.assertEqual(alignment(c_int32), 4)
+        self.assertEqual(alignment(c_double), 8)
+
+    def test_pointer_type(self):
+        expected = 8 if struct.calcsize("P") == 8 else 4
+        self.assertEqual(alignment(c_void_p), expected)
+
+    def test_structure(self):
+        class Point(Structure):
+            _fields_ = [("x", c_int32), ("y", c_int32)]
+        self.assertEqual(alignment(Point), 4)
+
+    def test_structure_mixed_types(self):
+        class Mixed(Structure):
+            _fields_ = [("a", c_uint8), ("b", c_double)]
+        self.assertEqual(alignment(Mixed), 8)
+
+    def test_array_type(self):
+        self.assertEqual(alignment(c_int32 * 4), 4)
+
+    def test_alignment_of_instance(self):
+        """alignment() works on instances too"""
+        v = c_int32(42)
+        self.assertEqual(alignment(v), 4)
+
+    def test_alignment_of_struct_instance(self):
+        class Point(Structure):
+            _fields_ = [("x", c_int32), ("y", c_int32)]
+        p = Point(1, 2)
+        self.assertEqual(alignment(p), 4)
+
+    def test_throws_for_invalid(self):
+        with self.assertRaises(TypeError):
+            alignment(42)
+        with self.assertRaises(TypeError):
+            alignment("string")
+
 
 if __name__ == '__main__':
     unittest.main()

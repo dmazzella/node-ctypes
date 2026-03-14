@@ -176,7 +176,7 @@ describe("Functions and Callbacks", function () {
     it("should create and use callback with qsort", function () {
       const qsort = libc.func("qsort", ctypes.c_void, [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_void_p]);
 
-      // Create comparison function
+      // Python: CMPFUNC = CFUNCTYPE(c_int, POINTER(c_int), POINTER(c_int))
       const compare = ctypes.callback(
         (a, b) => {
           const valA = ctypes.readValue(a, ctypes.c_int32);
@@ -187,18 +187,16 @@ describe("Functions and Callbacks", function () {
         [ctypes.c_void_p, ctypes.c_void_p],
       );
 
-      // Create array to sort
-      const arr = ctypes.create_string_buffer(5 * 4);
-      const values = [5, 2, 8, 1, 9];
-      values.forEach((v, i) => ctypes.writeValue(arr, ctypes.c_int32, v, i * 4));
+      // Python: arr = (c_int * 5)(5, 2, 8, 1, 9)
+      const arr = ctypes.array(ctypes.c_int32, 5).create([5, 2, 8, 1, 9]);
 
-      // Sort
-      qsort(arr, 5, 4, compare.pointer);
+      // Python: libc.qsort(arr, len(arr), sizeof(c_int), compare)
+      qsort(ctypes.byref(arr), 5, ctypes.sizeof(ctypes.c_int32), compare.pointer);
 
-      // Verify sorted
+      // Python: [arr[i] for i in range(5)]
       const sorted = [];
       for (let i = 0; i < 5; i++) {
-        sorted.push(ctypes.readValue(arr, ctypes.c_int32, i * 4));
+        sorted.push(arr[i]);
       }
       assert.deepStrictEqual(sorted, [1, 2, 5, 8, 9]);
 

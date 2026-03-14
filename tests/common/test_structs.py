@@ -4,7 +4,10 @@ Tests struct/union creation, nested structs, bit fields, anonymous fields
 """
 
 import unittest
-from ctypes import Structure, Union, c_int32, c_uint32, c_int16, sizeof, c_uint8, c_float, c_double
+from ctypes import (
+    Structure, Union, c_int32, c_uint32, c_int16, sizeof, c_uint8, c_float, c_double,
+    c_void_p, POINTER, pointer,
+)
 
 class TestStructsAndUnions(unittest.TestCase):
     def test_basic_struct(self):
@@ -206,6 +209,93 @@ class TestStructsAndUnions(unittest.TestCase):
         self.assertEqual(data.count, 3)
         self.assertEqual(data.values[0], 1)
         self.assertEqual(data.values[9], 10)
+
+
+# ─── POINTER() in Structure _fields_ ───
+
+class TestPOINTERInStructFields(unittest.TestCase):
+    """Test POINTER() in Structure _fields_"""
+
+    def test_pointer_field_null(self):
+        class S(Structure):
+            _fields_ = [("pData", POINTER(c_int32))]
+        s = S()
+        self.assertFalse(bool(s.pData))
+
+    def test_pointer_field_struct_size(self):
+        class S(Structure):
+            _fields_ = [("value", c_int32), ("pData", POINTER(c_int32))]
+        ptr_size = sizeof(c_void_p)
+        expected = 16 if ptr_size == 8 else 8
+        self.assertEqual(sizeof(S), expected)
+
+    def test_pointer_field_assign_via_pointer(self):
+        """Python: s.pData = pointer(val)"""
+        class S(Structure):
+            _fields_ = [("pData", POINTER(c_int32))]
+        val = c_int32(999)
+        s = S()
+        s.pData = pointer(val)
+        self.assertEqual(s.pData[0], 999)
+
+    def test_pointer_field_contents(self):
+        """Python: s.pData.contents.value"""
+        class S(Structure):
+            _fields_ = [("pData", POINTER(c_int32))]
+        val = c_int32(42)
+        s = S()
+        s.pData = pointer(val)
+        self.assertEqual(s.pData.contents.value, 42)
+
+    def test_pointer_field_modify_through_pointer(self):
+        """Modifying via pointer field changes original"""
+        class S(Structure):
+            _fields_ = [("pData", POINTER(c_int32))]
+        val = c_int32(10)
+        s = S()
+        s.pData = pointer(val)
+        s.pData[0] = 99
+        self.assertEqual(val.value, 99)
+
+    def test_multiple_pointer_fields(self):
+        """Struct with multiple POINTER fields"""
+        class S(Structure):
+            _fields_ = [
+                ("pInt", POINTER(c_int32)),
+                ("pDbl", POINTER(c_double)),
+            ]
+        iv = c_int32(10)
+        dv = c_double(3.14)
+        s = S()
+        s.pInt = pointer(iv)
+        s.pDbl = pointer(dv)
+        self.assertEqual(s.pInt[0], 10)
+        self.assertAlmostEqual(s.pDbl[0], 3.14, places=2)
+
+    def test_pointer_field_with_struct_pointer(self):
+        """POINTER to struct in _fields_"""
+        class Inner(Structure):
+            _fields_ = [("x", c_int32), ("y", c_int32)]
+        class Outer(Structure):
+            _fields_ = [("pInner", POINTER(Inner))]
+        inner = Inner(100, 200)
+        outer = Outer()
+        outer.pInner = pointer(inner)
+        self.assertEqual(outer.pInner.contents.x, 100)
+        self.assertEqual(outer.pInner.contents.y, 200)
+
+
+class TestPOINTERInUnionFields(unittest.TestCase):
+    """Test POINTER() in Union _fields_"""
+
+    def test_pointer_field_in_union(self):
+        class U(Union):
+            _fields_ = [("asInt", c_uint32), ("asPtr", POINTER(c_int32))]
+        u = U()
+        self.assertFalse(bool(u.asPtr))
+        expected = 8 if sizeof(c_void_p) == 8 else 4
+        self.assertEqual(sizeof(U), expected)
+
 
 if __name__ == '__main__':
     unittest.main()

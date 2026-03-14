@@ -323,4 +323,114 @@ describe("Structs and Unions", function () {
       assert.ok(u.i !== undefined);
     });
   });
+
+  // ─── POINTER() in Structure _fields_ ───
+  // Python: class S(Structure): _fields_ = [("pData", POINTER(c_int32))]
+
+  describe("POINTER in Structure _fields_", function () {
+    it("should store and read NULL pointer field", function () {
+      // Python: s = S(); assertFalse(bool(s.pData))
+      const IntPtr = ctypes.POINTER(ctypes.c_int32);
+      class S extends ctypes.Structure {
+        static _fields_ = [["pData", IntPtr]];
+      }
+      const s = new S();
+      assert.strictEqual(s.pData.isNull, true);
+      assert.strictEqual(s.pData.address, 0n);
+    });
+
+    it("should have correct struct size with POINTER field", function () {
+      // Python: assertEqual(sizeof(S), 16 if ptr==8 else 8)
+      const IntPtr = ctypes.POINTER(ctypes.c_int32);
+      class S extends ctypes.Structure {
+        static _fields_ = [["value", ctypes.c_int32], ["pData", IntPtr]];
+      }
+      const expected = process.arch === "x64" ? 16 : 8;
+      assert.strictEqual(ctypes.sizeof(S), expected);
+    });
+
+    it("should assign via pointer() and read back", function () {
+      // Python: val = c_int32(999); s.pData = pointer(val); assertEqual(s.pData[0], 999)
+      const IntPtr = ctypes.POINTER(ctypes.c_int32);
+      class S extends ctypes.Structure {
+        static _fields_ = [["pData", IntPtr]];
+      }
+      const val = new ctypes.c_int32(999);
+      const s = new S();
+      const p = ctypes.pointer(val);
+      s.pData = p;
+      assert.strictEqual(s.pData[0], 999);
+    });
+
+    it("should read .contents value", function () {
+      // Python: assertEqual(s.pData.contents.value, 42)
+      const IntPtr = ctypes.POINTER(ctypes.c_int32);
+      class S extends ctypes.Structure {
+        static _fields_ = [["pData", IntPtr]];
+      }
+      const val = new ctypes.c_int32(42);
+      const s = new S();
+      s.pData = ctypes.pointer(val);
+      assert.strictEqual(s.pData.contents, 42);
+    });
+
+    it("should modify through pointer field changes original", function () {
+      // Python: s.pData[0] = 99; assertEqual(val.value, 99)
+      const IntPtr = ctypes.POINTER(ctypes.c_int32);
+      class S extends ctypes.Structure {
+        static _fields_ = [["pData", IntPtr]];
+      }
+      const val = new ctypes.c_int32(10);
+      const s = new S();
+      s.pData = ctypes.pointer(val);
+      s.pData[0] = 99;
+      assert.strictEqual(val.value, 99);
+    });
+
+    it("should support multiple POINTER fields", function () {
+      // Python: struct with pInt and pDbl
+      const IntPtr = ctypes.POINTER(ctypes.c_int32);
+      const DblPtr = ctypes.POINTER(ctypes.c_double);
+      class S extends ctypes.Structure {
+        static _fields_ = [["pInt", IntPtr], ["pDbl", DblPtr]];
+      }
+      const iv = new ctypes.c_int32(10);
+      const dv = new ctypes.c_double(3.14);
+      const s = new S();
+      s.pInt = ctypes.pointer(iv);
+      s.pDbl = ctypes.pointer(dv);
+      assert.strictEqual(s.pInt[0], 10);
+      assert.ok(Math.abs(s.pDbl[0] - 3.14) < 0.01);
+    });
+
+    it("should support POINTER to struct in _fields_", function () {
+      // Python: outer.pInner = pointer(inner); outer.pInner.contents.x
+      class Inner extends ctypes.Structure {
+        static _fields_ = [["x", ctypes.c_int32], ["y", ctypes.c_int32]];
+      }
+      const InnerPtr = ctypes.POINTER(Inner);
+      class Outer extends ctypes.Structure {
+        static _fields_ = [["pInner", InnerPtr]];
+      }
+      const inner = new Inner(100, 200);
+      const outer = new Outer();
+      outer.pInner = ctypes.pointer(inner);
+      assert.strictEqual(outer.pInner.contents.x, 100);
+      assert.strictEqual(outer.pInner.contents.y, 200);
+    });
+  });
+
+  describe("POINTER in Union _fields_", function () {
+    it("should support POINTER field in Union", function () {
+      // Python: class U(Union): _fields_ = [("asInt", c_uint32), ("asPtr", POINTER(c_int32))]
+      const IntPtr = ctypes.POINTER(ctypes.c_int32);
+      class U extends ctypes.Union {
+        static _fields_ = [["asInt", ctypes.c_uint32], ["asPtr", IntPtr]];
+      }
+      const u = new U();
+      assert.strictEqual(u.asPtr.isNull, true);
+      const expected = process.arch === "x64" ? 8 : 4;
+      assert.strictEqual(ctypes.sizeof(U), expected);
+    });
+  });
 });

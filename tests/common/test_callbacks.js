@@ -28,12 +28,10 @@ describe("Callbacks", function () {
 
   describe("Callback with qsort", function () {
     it("should sort array using callback", function () {
-      // Create array of integers using create_string_buffer like the working test
-      const arr = ctypes.create_string_buffer(5 * 4);
-      const values = [5, 2, 8, 1, 9];
-      values.forEach((v, i) => ctypes.writeValue(arr, ctypes.c_int32, v, i * 4));
+      // Python: arr = (c_int32 * 5)(5, 2, 8, 1, 9)
+      const arr = ctypes.array(ctypes.c_int32, 5).create([5, 2, 8, 1, 9]);
 
-      // Create comparison callback
+      // Python: CMPFUNC = CFUNCTYPE(c_int, POINTER(c_int), POINTER(c_int))
       const compare = libc.callback(
         (a, b) => {
           const aVal = ctypes.readValue(a, ctypes.c_int32);
@@ -44,31 +42,27 @@ describe("Callbacks", function () {
         [ctypes.c_void_p, ctypes.c_void_p],
       );
 
-      // Get qsort function
+      // Python: libc.qsort(arr, len(arr), sizeof(c_int), compare)
       let qsort = libc.func("qsort", ctypes.c_void, [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_void_p]);
       if (!qsort || qsort.pointer === 0n) {
         qsort = libc.func("_qsort", ctypes.c_void, [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_void_p]);
       }
 
-      // Sort the array
-      qsort(arr, 5, 4, compare.pointer);
+      qsort(ctypes.byref(arr), 5, ctypes.sizeof(ctypes.c_int32), compare.pointer);
 
-      // Verify sorted order
+      // Python: [arr[i] for i in range(5)]
       const sorted = [];
       for (let i = 0; i < 5; i++) {
-        sorted.push(ctypes.readValue(arr, ctypes.c_int32, i * 4));
+        sorted.push(arr[i]);
       }
 
       assert.deepStrictEqual(sorted, [1, 2, 5, 8, 9]);
     });
 
     it("should sort array in reverse order", function () {
-      // Create array of integers using create_string_buffer
-      const arr = ctypes.create_string_buffer(4 * 4);
-      const values = [3, 1, 4, 2];
-      values.forEach((v, i) => ctypes.writeValue(arr, ctypes.c_int32, v, i * 4));
+      // Python: arr = (c_int32 * 4)(3, 1, 4, 2)
+      const arr = ctypes.array(ctypes.c_int32, 4).create([3, 1, 4, 2]);
 
-      // Create reverse comparison callback
       const compareReverse = libc.callback(
         (a, b) => {
           const aVal = ctypes.readValue(a, ctypes.c_int32);
@@ -79,26 +73,21 @@ describe("Callbacks", function () {
         [ctypes.c_void_p, ctypes.c_void_p],
       );
 
-      // Get qsort function
       const qsort = libc.func("qsort", ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_void_p]);
+      qsort(ctypes.byref(arr), 4, ctypes.sizeof(ctypes.c_int32), compareReverse.pointer);
 
-      // Sort the array in reverse
-      qsort(arr, 4, 4, compareReverse.pointer);
-
-      // Verify reverse sorted order
+      // Python: [arr[i] for i in range(4)]
       const sorted = [];
       for (let i = 0; i < 4; i++) {
-        sorted.push(ctypes.readValue(arr, ctypes.c_int32, i * 4));
+        sorted.push(arr[i]);
       }
 
       assert.deepStrictEqual(sorted, [4, 3, 2, 1]);
     });
 
     it("should handle callback with different types", function () {
-      // Test callback with float comparison
-      const arr = ctypes.create_string_buffer(3 * 4);
-      const values = [3.14, 1.41, 2.71];
-      values.forEach((v, i) => ctypes.writeValue(arr, ctypes.c_float, v, i * 4));
+      // Python: arr = (c_float * 3)(3.14, 1.41, 2.71)
+      const arr = ctypes.array(ctypes.c_float, 3).create([3.14, 1.41, 2.71]);
 
       const compareFloat = libc.callback(
         (a, b) => {
@@ -113,17 +102,12 @@ describe("Callbacks", function () {
       );
 
       const qsort = libc.func("qsort", ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_void_p]);
-      qsort(arr, 3, 4, compareFloat.pointer);
+      qsort(ctypes.byref(arr), 3, ctypes.sizeof(ctypes.c_float), compareFloat.pointer);
 
-      const sorted = [];
-      for (let i = 0; i < 3; i++) {
-        sorted.push(ctypes.readValue(arr, ctypes.c_float, i * 4));
-      }
-
-      // Should be sorted: [1.41, 2.71, 3.14]
-      assert(Math.abs(sorted[0] - 1.41) < 0.001);
-      assert(Math.abs(sorted[1] - 2.71) < 0.001);
-      assert(Math.abs(sorted[2] - 3.14) < 0.001);
+      // Python: [arr[i] for i in range(3)] → [1.41, 2.71, 3.14]
+      assert(Math.abs(arr[0] - 1.41) < 0.001);
+      assert(Math.abs(arr[1] - 2.71) < 0.001);
+      assert(Math.abs(arr[2] - 3.14) < 0.001);
     });
   });
 
