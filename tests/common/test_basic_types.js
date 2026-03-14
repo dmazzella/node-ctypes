@@ -356,13 +356,13 @@ describe("Basic Types", function () {
     it("should store positive values", function () {
       // Python: v = c_ssize_t(42); assertEqual(v.value, 42)
       const v = new ctypes.c_ssize_t(42);
-      assert.strictEqual(v.value, process.arch === "x64" ? 42n : 42);
+      assert.strictEqual(v.value, ctypes.POINTER_SIZE === 8 ? 42n : 42);
     });
 
     it("should store negative values", function () {
       // Python: v = c_ssize_t(-42); assertEqual(v.value, -42)
       const v = new ctypes.c_ssize_t(-42);
-      assert.strictEqual(v.value, process.arch === "x64" ? -42n : -42);
+      assert.strictEqual(v.value, ctypes.POINTER_SIZE === 8 ? -42n : -42);
     });
 
     it("should have same size as c_size_t", function () {
@@ -377,12 +377,12 @@ describe("Basic Types", function () {
 
     it("should handle large positive value", function () {
       const v = new ctypes.c_ssize_t(2 ** 31 - 1);
-      assert.strictEqual(v.value, process.arch === "x64" ? BigInt(2 ** 31 - 1) : 2 ** 31 - 1);
+      assert.strictEqual(v.value, ctypes.POINTER_SIZE === 8 ? BigInt(2 ** 31 - 1) : 2 ** 31 - 1);
     });
 
     it("should handle large negative value", function () {
       const v = new ctypes.c_ssize_t(-(2 ** 31));
-      assert.strictEqual(v.value, process.arch === "x64" ? BigInt(-(2 ** 31)) : -(2 ** 31));
+      assert.strictEqual(v.value, ctypes.POINTER_SIZE === 8 ? BigInt(-(2 ** 31)) : -(2 ** 31));
     });
 
     it("should work in struct field", function () {
@@ -391,7 +391,7 @@ describe("Basic Types", function () {
         static _fields_ = [["len", ctypes.c_ssize_t]];
       }
       const s = new S(-100);
-      assert.strictEqual(s.len, process.arch === "x64" ? -100n : -100);
+      assert.strictEqual(s.len, ctypes.POINTER_SIZE === 8 ? -100n : -100);
     });
   });
 
@@ -408,7 +408,7 @@ describe("Basic Types", function () {
 
     it("should return correct alignment for pointer type", function () {
       // Python: expected = 8 if struct.calcsize("P") == 8 else 4
-      assert.strictEqual(ctypes.alignment(ctypes.c_void_p), process.arch === "x64" ? 8 : 4);
+      assert.strictEqual(ctypes.alignment(ctypes.c_void_p), ctypes.POINTER_SIZE === 8 ? 8 : 4);
     });
 
     it("should return correct alignment for Structure", function () {

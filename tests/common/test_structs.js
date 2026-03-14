@@ -345,7 +345,7 @@ describe("Structs and Unions", function () {
       class S extends ctypes.Structure {
         static _fields_ = [["value", ctypes.c_int32], ["pData", IntPtr]];
       }
-      const expected = process.arch === "x64" ? 16 : 8;
+      const expected = ctypes.POINTER_SIZE === 8 ? 16 : 8;
       assert.strictEqual(ctypes.sizeof(S), expected);
     });
 
@@ -429,7 +429,7 @@ describe("Structs and Unions", function () {
       }
       const u = new U();
       assert.strictEqual(u.asPtr.isNull, true);
-      const expected = process.arch === "x64" ? 8 : 4;
+      const expected = ctypes.POINTER_SIZE === 8 ? 8 : 4;
       assert.strictEqual(ctypes.sizeof(U), expected);
     });
   });
