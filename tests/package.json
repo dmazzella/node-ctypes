@@ -17,6 +17,6 @@
     "node-ctypes": "file:.."
   },
   "devDependencies": {
-    "koffi": "^2.15.1"
+    "koffi": "^2.16.1"
   }
 }
