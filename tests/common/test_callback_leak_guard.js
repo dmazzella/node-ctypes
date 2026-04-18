@@ -5,11 +5,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const nodeCtypesEntry = resolve(__dirname, "../../lib/index.js");
+const nodeCtypesEntry = pathToFileURL(resolve(__dirname, "../../lib/index.js")).href;
 
 function runSubprocess(envDebug, withRelease) {
   const script = `
