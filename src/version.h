@@ -1,5 +1,5 @@
 #pragma once
 
 #define CTYPES_MAJOR_VERSION 1
-#define CTYPES_MINOR_VERSION 8
+#define CTYPES_MINOR_VERSION 9
 #define CTYPES_PATCH_VERSION 0

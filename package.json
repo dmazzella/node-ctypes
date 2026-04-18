@@ -1,6 +1,6 @@
 {
   "name": "node-ctypes",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "Python ctypes-like FFI for Node.js using libffi",
   "author": "Damiano Mazzella",
   "license": "MIT",
@@ -34,10 +34,10 @@
     "docs:serve": "typedoc && npx serve docs"
   },
   "devDependencies": {
-    "@types/node": "^25.3.3",
+    "@types/node": "^25.6.0",
     "cmake-js": "^8.0.0",
-    "node-addon-api": "^8.6.0",
-    "typedoc": "^0.28.17"
+    "node-addon-api": "^8.7.0",
+    "typedoc": "^0.28.19"
   },
   "engines": {
     "node": ">=16.0.0"

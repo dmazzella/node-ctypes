@@ -137,6 +137,8 @@ export class Version {
  */
 export class Library {
   constructor(path: string | null);
+  /** Typed overload: narrows args/return when argTypes is a literal tuple. */
+  func<TRet extends AnyType, const TArgs extends readonly AnyType[]>(name: string, returnType: TRet, argTypes: TArgs, options?: FunctionOptions): TypedFFIFunction<TArgs, TRet>;
   func(name: string, returnType: AnyType, argTypes?: AnyType[], options?: FunctionOptions): FFIFunction;
 
   /**
@@ -204,6 +206,23 @@ export interface FFIFunction {
 }
 
 /**
+ * Strongly-typed FFI function returned by `CDLL.func`/`Library.func` when the
+ * argument types and return type are given as a literal tuple and constant respectively.
+ *
+ * Args and return are narrowed from the supplied CType constructors.
+ * Falls back to the untyped `FFIFunction` when types cannot be inferred.
+ *
+ * @category Library Loading
+ */
+export interface TypedFFIFunction<TArgs extends readonly AnyType[], TRet extends AnyType> {
+  (...args: ArgsFromCTypes<TArgs>): JsFromCType<TRet>;
+  callAsync(...args: ArgsFromCTypes<TArgs>): Promise<JsFromCType<TRet>>;
+  readonly funcName: string;
+  readonly address: bigint;
+  errcheck: ErrcheckCallback | null;
+}
+
+/**
  * Load a shared library using the C calling convention (cdecl).
  *
  * This is the primary way to load and call functions from shared libraries.
@@ -246,6 +265,8 @@ export class CDLL {
    * @param options - Calling convention options
    * @returns A callable function
    */
+  /** Typed overload: narrows args/return when argTypes is a literal tuple. */
+  func<TRet extends AnyType, const TArgs extends readonly AnyType[]>(name: string, returnType: TRet, argTypes: TArgs, options?: FunctionOptions): TypedFFIFunction<TArgs, TRet>;
   func(name: string, returnType: AnyType, argTypes?: AnyType[], options?: FunctionOptions): CallableFunction & { callAsync(...args: any[]): Promise<any>; errcheck: ErrcheckCallback | null };
 
   /**
@@ -421,26 +442,42 @@ export interface StructDef {
 /** @category Structures */
 export type FieldSpec = AnyType | StructDef | ArrayTypeDef | BitFieldDef | AnonymousField | PointerTypeDef;
 
-type JsFromCType<T> = T extends "int64" | "uint64" | "size_t"
-  ? bigint
-  : T extends "int8" | "uint8" | "int16" | "uint16" | "int32" | "uint32" | "int" | "uint" | "short" | "ushort" | "char" | "uchar" | "float" | "double"
-    ? number
-    : T extends "bool"
-      ? boolean
-      : T extends "string" | "c_char_p" | "c_char"
-        ? string | Buffer
-        : T extends "wstring" | "c_wchar_p"
-          ? string
-          : T extends StructDef
-            ? any
+/**
+ * Map a field/arg type (CType constructor, struct, array, bitfield, pointer) to its
+ * JavaScript **return** representation (what a read produces).
+ *
+ * @category Types
+ */
+export type JsFromCType<T> =
+  T extends SimpleCDataConstructor<infer Tag> ? JsFromTag<Tag> : T extends BitFieldDef ? number : T extends PointerTypeDef ? PointerInstance : T extends StructDef ? any : T extends UnionDef ? any : T extends ArrayTypeDef ? any : any;
+
+/**
+ * Map a field/arg type to accepted JavaScript **input** types (for writes / function args).
+ * Superset of `JsFromCType` (e.g. accepts struct-proxy objects with `_buffer`).
+ *
+ * @category Types
+ */
+export type JsArgFromCType<T> =
+  T extends SimpleCDataConstructor<infer Tag>
+    ? JsArgFromTag<Tag>
+    : T extends BitFieldDef
+      ? number
+      : T extends PointerTypeDef
+        ? PointerInstance | Buffer | bigint | null
+        : T extends StructDef
+          ? Buffer | { _buffer: Buffer } | Record<string, any>
+          : T extends UnionDef
+            ? Buffer | { _buffer: Buffer } | Record<string, any>
             : T extends ArrayTypeDef
-              ? any
-              : T extends BitFieldDef
-                ? number
-                : any;
+              ? Buffer | ReadonlyArray<any>
+              : any;
 
 type FieldsToInstance<F extends Record<string, FieldSpec>> = {
   [K in keyof F]: JsFromCType<F[K]>;
+};
+
+type ArgsFromCTypes<TArgs extends readonly any[]> = {
+  [K in keyof TArgs]: JsArgFromCType<TArgs[K]>;
 };
 
 /**
@@ -1057,6 +1094,7 @@ export function memset(dst: Buffer, value: number, count: number): void;
  *
  * @category Memory
  */
+export function readValue<T extends AnyType>(ptr: Buffer | bigint | number, type: T, offset?: number): JsFromCType<T>;
 export function readValue(ptr: Buffer | bigint | number, type: AnyType, offset?: number): any;
 
 /**
@@ -1069,6 +1107,7 @@ export function readValue(ptr: Buffer | bigint | number, type: AnyType, offset?:
  *
  * @category Memory
  */
+export function writeValue<T extends AnyType>(ptr: Buffer | bigint | number, type: T, value: JsArgFromCType<T>, offset?: number): number | void;
 export function writeValue(ptr: Buffer | bigint | number, type: AnyType, value: any, offset?: number): number | void;
 
 /**
@@ -1153,7 +1192,7 @@ export function union(fields: Record<string, FieldSpec>): UnionDef;
  *
  * @category Structures
  */
-export function defineStruct<F extends Record<string, FieldSpec>>(fields: F, options?: StructOptions): new (...args: any[]) => Structure<F>;
+export function defineStruct<F extends Record<string, FieldSpec>>(fields: F, options?: StructOptions): new (values?: Partial<FieldsToInstance<F>> | Buffer) => Structure<F> & FieldsToInstance<F>;
 
 /**
  * Factory that returns a Union subclass with typed fields.
@@ -1162,7 +1201,7 @@ export function defineStruct<F extends Record<string, FieldSpec>>(fields: F, opt
  *
  * @category Structures
  */
-export function defineUnion<F extends Record<string, FieldSpec>>(fields: F): new (...args: any[]) => Union<F>;
+export function defineUnion<F extends Record<string, FieldSpec>>(fields: F): new (values?: Partial<FieldsToInstance<F>> | Buffer) => Union<F> & FieldsToInstance<F>;
 
 /**
  * Define a fixed-size array type.
@@ -1371,19 +1410,64 @@ export function WinError(code?: number): Error & { winerror: number };
  *
  * @category Types
  */
-export interface SimpleCDataConstructor {
-  new (value?: any): SimpleCDataInstance;
+export interface SimpleCDataConstructor<Tag extends string = string> {
+  new (value?: any): SimpleCDataInstance<JsFromTag<Tag>>;
   /** Size of this type in bytes. */
   readonly _size: number;
   /** CType numeric identifier. */
   readonly _type: number;
   /** @internal */
   readonly _isSimpleCData: true;
+  /** @internal Phantom tag for TS inference (erased at runtime). */
+  readonly _tag?: Tag;
   /** @internal */
-  _reader(buf: Buffer, offset: number): any;
+  _reader(buf: Buffer, offset: number): JsFromTag<Tag>;
   /** @internal */
-  _writer(buf: Buffer, offset: number, value: any): void;
+  _writer(buf: Buffer, offset: number, value: JsArgFromTag<Tag>): void;
 }
+
+/**
+ * Maps a SimpleCData tag to its JavaScript **return** type (what reads produce).
+ *
+ * @category Types
+ */
+export type JsFromTag<Tag extends string> = Tag extends "void"
+  ? void
+  : Tag extends "int8" | "uint8" | "int16" | "uint16" | "int32" | "uint32" | "float" | "double" | "char" | "wchar"
+    ? number
+    : Tag extends "int64" | "uint64" | "size_t" | "ssize_t" | "long" | "ulong"
+      ? bigint
+      : Tag extends "bool"
+        ? boolean
+        : Tag extends "string"
+          ? string | null
+          : Tag extends "wstring"
+            ? string | null
+            : Tag extends "pointer"
+              ? bigint | Buffer | null
+              : any;
+
+/**
+ * Maps a SimpleCData tag to accepted JavaScript **input** types (what writes/args accept).
+ * Generally a superset of `JsFromTag` (e.g. strings accept Buffer too, ints accept bigint).
+ *
+ * @category Types
+ */
+export type JsArgFromTag<Tag extends string> = Tag extends "void"
+  ? never
+  : Tag extends "int8" | "uint8" | "int16" | "uint16" | "int32" | "uint32" | "float" | "double" | "char" | "wchar"
+    ? number
+    : Tag extends "int64" | "uint64" | "size_t" | "ssize_t" | "long" | "ulong"
+      ? bigint | number
+      : Tag extends "bool"
+        ? boolean | number
+        : Tag extends "string"
+          ? string | Buffer | null
+          : Tag extends "wstring"
+            ? string | Buffer | null
+            : Tag extends "pointer"
+              ? bigint | Buffer | number | null
+              : any;
 
 /**
  * Instance of a simple C data type.
@@ -1397,14 +1481,14 @@ export interface SimpleCDataConstructor {
  *
  * @category Types
  */
-export interface SimpleCDataInstance {
+export interface SimpleCDataInstance<T = any> {
   /** The current value. */
-  value: any;
+  value: T;
   /** The underlying memory buffer. */
   _buffer: Buffer;
   toString(): string;
-  toJSON(): any;
-  valueOf(): any;
+  toJSON(): T;
+  valueOf(): T;
 }
 
 // =============================================================================
@@ -1418,65 +1502,65 @@ export interface SimpleCDataInstance {
  *
  * @category Types
  */
-export const c_void: SimpleCDataConstructor;
+export const c_void: SimpleCDataConstructor<"void">;
 
 /** 32-bit signed integer. Python: `ctypes.c_int` @category Types */
-export const c_int: SimpleCDataConstructor;
+export const c_int: SimpleCDataConstructor<"int32">;
 /** 32-bit unsigned integer. Python: `ctypes.c_uint` @category Types */
-export const c_uint: SimpleCDataConstructor;
+export const c_uint: SimpleCDataConstructor<"uint32">;
 /** 8-bit signed integer. Python: `ctypes.c_int8` @category Types */
-export const c_int8: SimpleCDataConstructor;
+export const c_int8: SimpleCDataConstructor<"int8">;
 /** 8-bit unsigned integer. Python: `ctypes.c_uint8` @category Types */
-export const c_uint8: SimpleCDataConstructor;
+export const c_uint8: SimpleCDataConstructor<"uint8">;
 /** 16-bit signed integer. Python: `ctypes.c_int16` @category Types */
-export const c_int16: SimpleCDataConstructor;
+export const c_int16: SimpleCDataConstructor<"int16">;
 /** 16-bit unsigned integer. Python: `ctypes.c_uint16` @category Types */
-export const c_uint16: SimpleCDataConstructor;
+export const c_uint16: SimpleCDataConstructor<"uint16">;
 /** 32-bit signed integer. Python: `ctypes.c_int32` @category Types */
-export const c_int32: SimpleCDataConstructor;
+export const c_int32: SimpleCDataConstructor<"int32">;
 /** 32-bit unsigned integer. Python: `ctypes.c_uint32` @category Types */
-export const c_uint32: SimpleCDataConstructor;
+export const c_uint32: SimpleCDataConstructor<"uint32">;
 /** 64-bit signed integer (BigInt). Python: `ctypes.c_int64` @category Types */
-export const c_int64: SimpleCDataConstructor;
+export const c_int64: SimpleCDataConstructor<"int64">;
 /** 64-bit unsigned integer (BigInt). Python: `ctypes.c_uint64` @category Types */
-export const c_uint64: SimpleCDataConstructor;
+export const c_uint64: SimpleCDataConstructor<"uint64">;
 /** 32-bit float. Python: `ctypes.c_float` @category Types */
-export const c_float: SimpleCDataConstructor;
+export const c_float: SimpleCDataConstructor<"float">;
 /** 64-bit double. Python: `ctypes.c_double` @category Types */
-export const c_double: SimpleCDataConstructor;
+export const c_double: SimpleCDataConstructor<"double">;
 /** 8-bit character. Python: `ctypes.c_char` @category Types */
-export const c_char: SimpleCDataConstructor;
+export const c_char: SimpleCDataConstructor<"char">;
 /** Pointer to null-terminated string. Python: `ctypes.c_char_p` @category Types */
-export const c_char_p: SimpleCDataConstructor;
+export const c_char_p: SimpleCDataConstructor<"string">;
 /** Wide character. Python: `ctypes.c_wchar` @category Types */
-export const c_wchar: SimpleCDataConstructor;
+export const c_wchar: SimpleCDataConstructor<"wchar">;
 /** Pointer to null-terminated wide string. Python: `ctypes.c_wchar_p` @category Types */
-export const c_wchar_p: SimpleCDataConstructor;
+export const c_wchar_p: SimpleCDataConstructor<"wstring">;
 /** Void pointer. Python: `ctypes.c_void_p` @category Types */
-export const c_void_p: SimpleCDataConstructor;
+export const c_void_p: SimpleCDataConstructor<"pointer">;
 /** Boolean (1 byte). Python: `ctypes.c_bool` @category Types */
-export const c_bool: SimpleCDataConstructor;
+export const c_bool: SimpleCDataConstructor<"bool">;
 /** Platform-dependent unsigned size type (BigInt). Python: `ctypes.c_size_t` @category Types */
-export const c_size_t: SimpleCDataConstructor;
+export const c_size_t: SimpleCDataConstructor<"size_t">;
 /** Platform-dependent signed size type (BigInt). Python: `ctypes.c_ssize_t` @category Types */
-export const c_ssize_t: SimpleCDataConstructor;
+export const c_ssize_t: SimpleCDataConstructor<"ssize_t">;
 /** Platform-dependent signed long. Python: `ctypes.c_long` @category Types */
-export const c_long: SimpleCDataConstructor;
+export const c_long: SimpleCDataConstructor<"long">;
 /** Platform-dependent unsigned long. Python: `ctypes.c_ulong` @category Types */
-export const c_ulong: SimpleCDataConstructor;
+export const c_ulong: SimpleCDataConstructor<"ulong">;
 
 /** Alias for `c_int8`. Python: `ctypes.c_byte` @category Types */
-export const c_byte: SimpleCDataConstructor;
+export const c_byte: SimpleCDataConstructor<"int8">;
 /** Alias for `c_uint8`. Python: `ctypes.c_ubyte` @category Types */
-export const c_ubyte: SimpleCDataConstructor;
+export const c_ubyte: SimpleCDataConstructor<"uint8">;
 /** Alias for `c_int16`. Python: `ctypes.c_short` @category Types */
-export const c_short: SimpleCDataConstructor;
+export const c_short: SimpleCDataConstructor<"int16">;
 /** Alias for `c_uint16`. Python: `ctypes.c_ushort` @category Types */
-export const c_ushort: SimpleCDataConstructor;
+export const c_ushort: SimpleCDataConstructor<"uint16">;
 /** Alias for `c_int64`. Python: `ctypes.c_longlong` @category Types */
-export const c_longlong: SimpleCDataConstructor;
+export const c_longlong: SimpleCDataConstructor<"int64">;
 /** Alias for `c_uint64`. Python: `ctypes.c_ulonglong` @category Types */
-export const c_ulonglong: SimpleCDataConstructor;
+export const c_ulonglong: SimpleCDataConstructor<"uint64">;
 
 /**
  * Base class for creating custom simple C data types.

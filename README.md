@@ -238,6 +238,43 @@ console.log(`${st.wYear}-${st.wMonth}-${st.wDay}`);
 - Both `class extends Structure` (Python-like) and `struct({...})` (functional) syntaxes available
 - Only type classes (`c_int32`) are accepted, not string literals (`"int32"`) — same as Python
 
+### Debugging callback leaks
+
+Forgetting `.release()` leaks the libffi trampoline and, if C code retains the pointer,
+can cause use-after-free. To catch this in development, set
+`NODE_CTYPES_DEBUG_CALLBACKS=1`:
+
+```bash
+NODE_CTYPES_DEBUG_CALLBACKS=1 node my-app.js
+```
+
+Every callback garbage-collected without `.release()` prints a warning with the creation
+stack trace. Zero overhead when the variable is unset (default).
+
+### TypeScript
+
+Argument/return types are narrowed when `argTypes` is passed as a literal tuple
+(`as const`) and `returnType` is a CType constant:
+
+```ts
+import { CDLL, c_int, c_char_p, c_int64 } from "node-ctypes";
+
+const libc = new CDLL(null);
+const strlen = libc.func("strlen", c_int64, [c_char_p] as const);
+const n: bigint = strlen("hello");   // typed as bigint, not any
+```
+
+For typed struct fields use `defineStruct` instead of the class-extension syntax:
+
+```ts
+import { defineStruct, c_int32 } from "node-ctypes";
+
+class Point extends defineStruct({ x: c_int32, y: c_int32 }) {
+  distance(): number { return Math.sqrt(this.x ** 2 + this.y ** 2); }
+}
+const p = new Point({ x: 3, y: 4 });  // p.x, p.y typed as number
+```
+
 ## Utility Functions
 
 - `create_string_buffer(init)` / `create_unicode_buffer(init)` — create C string buffers
