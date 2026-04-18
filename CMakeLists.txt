@@ -11,6 +11,26 @@ add_definitions(-DNAPI_VERSION=9)
 add_definitions(-DNAPI_CPP_EXCEPTIONS)
 
 # ============================================================================
+# Release optimization: LTO/IPO (cross-file inlining).
+# Applied only in Release / RelWithDebInfo (default for cmake-js).
+# ============================================================================
+
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "" FORCE)
+endif()
+
+if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT CTYPES_IPO_OK OUTPUT CTYPES_IPO_MSG)
+    if(CTYPES_IPO_OK)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+        message(STATUS "[ctypes] LTO/IPO enabled")
+    else()
+        message(STATUS "[ctypes] LTO/IPO not supported: ${CTYPES_IPO_MSG}")
+    endif()
+endif()
+
+# ============================================================================
 # Determina architettura
 # ============================================================================
 
