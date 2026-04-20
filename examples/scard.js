@@ -4,7 +4,7 @@
  * This module provides a JavaScript interface to the PC/SC smart card API
  */
 
-import { CDLL, Structure, WinDLL, array, byref, c_char_p, c_long, c_ubyte, c_uint, c_void_p, create_string_buffer, ptrToBuffer, sizeof } from "node-ctypes";
+import { CDLL, POINTER, Structure, WinDLL, array, byref, c_char_p, c_long, c_ubyte, c_uint, c_void_p, create_string_buffer, ptrToBuffer, sizeof } from "node-ctypes";
 import { platform } from "node:os";
 
 // Platform detection
@@ -123,7 +123,8 @@ if (PLATFORM === "win32") {
 }
 
 const SCardEstablishContext = winscard.SCardEstablishContext;
-SCardEstablishContext.argtypes = [c_uint, c_void_p, c_void_p, c_void_p];
+// LONG SCardEstablishContext(DWORD dwScope, LPCVOID pvRes1, LPCVOID pvRes2, LPSCARDCONTEXT phContext)
+SCardEstablishContext.argtypes = [c_uint, c_void_p, c_void_p, POINTER(c_scardcontext)];
 SCardEstablishContext.restype = c_long;
 SCardEstablishContext.errcheck = function (rv, func, args) {
   if (rv != E_SUCCESS) {
@@ -133,7 +134,8 @@ SCardEstablishContext.errcheck = function (rv, func, args) {
 };
 
 let SCardListReaders = PLATFORM === "win32" ? winscard.SCardListReadersA : winscard.SCardListReaders;
-SCardListReaders.argtypes = [c_void_p, c_char_p, c_char_p, c_void_p];
+// LONG SCardListReaders(SCARDCONTEXT hContext, LPCSTR mszGroups, LPSTR mszReaders, LPDWORD pcchReaders)
+SCardListReaders.argtypes = [c_void_p, c_char_p, c_char_p, POINTER(c_uint)];
 SCardListReaders.restype = c_long;
 SCardListReaders.errcheck = function (rv, func, args) {
   if (rv != E_SUCCESS) {
@@ -153,7 +155,8 @@ SCardReleaseContext.errcheck = function (rv, func, args) {
 };
 
 let SCardGetStatusChange = PLATFORM === "win32" ? winscard.SCardGetStatusChangeA : winscard.SCardGetStatusChange;
-SCardGetStatusChange.argtypes = [c_void_p, c_uint, c_void_p, c_uint];
+// LONG SCardGetStatusChange(SCARDCONTEXT hContext, DWORD dwTimeout, LPSCARD_READERSTATE rgReaderStates, DWORD cReaders)
+SCardGetStatusChange.argtypes = [c_void_p, c_uint, POINTER(READER_STATE), c_uint];
 SCardGetStatusChange.restype = c_long;
 SCardGetStatusChange.errcheck = function (rv, func, args) {
   // E_TIMEOUT e E_UNEXPECTED sono casi validi, non errori
@@ -165,7 +168,8 @@ SCardGetStatusChange.errcheck = function (rv, func, args) {
 };
 
 let SCardConnect = PLATFORM === "win32" ? winscard.SCardConnectA : winscard.SCardConnect;
-SCardConnect.argtypes = [c_void_p, c_char_p, c_uint, c_uint, c_void_p, c_void_p];
+// LONG SCardConnect(SCARDCONTEXT, LPCSTR, DWORD, DWORD, LPSCARDHANDLE, LPDWORD)
+SCardConnect.argtypes = [c_void_p, c_char_p, c_uint, c_uint, POINTER(c_scardhandle), POINTER(c_uint)];
 SCardConnect.restype = c_long;
 SCardConnect.errcheck = function (rv, func, args) {
   if (rv != E_SUCCESS) {
@@ -175,7 +179,8 @@ SCardConnect.errcheck = function (rv, func, args) {
 };
 
 const SCardReconnect = winscard.SCardReconnect;
-SCardReconnect.argtypes = [c_void_p, c_uint, c_uint, c_uint, c_void_p];
+// LONG SCardReconnect(SCARDHANDLE, DWORD, DWORD, DWORD, LPDWORD pdwActiveProtocol)
+SCardReconnect.argtypes = [c_void_p, c_uint, c_uint, c_uint, POINTER(c_uint)];
 SCardReconnect.restype = c_long;
 SCardReconnect.errcheck = function (rv, func, args) {
   if (rv != E_SUCCESS) {
@@ -215,7 +220,8 @@ SCardEndTransaction.errcheck = function (rv, func, args) {
 };
 
 const SCardTransmit = winscard.SCardTransmit;
-SCardTransmit.argtypes = [c_void_p, c_void_p, c_void_p, c_uint, c_void_p, c_void_p, c_void_p];
+// LONG SCardTransmit(SCARDHANDLE, LPCSCARD_IO_REQUEST, LPCBYTE, DWORD, LPSCARD_IO_REQUEST, LPBYTE, LPDWORD)
+SCardTransmit.argtypes = [c_void_p, POINTER(SCARD_IO_REQUEST), c_void_p, c_uint, POINTER(SCARD_IO_REQUEST), c_void_p, POINTER(c_uint)];
 SCardTransmit.restype = c_long;
 SCardTransmit.errcheck = function (rv, func, args) {
   if (rv != E_SUCCESS) {
@@ -225,7 +231,8 @@ SCardTransmit.errcheck = function (rv, func, args) {
 };
 
 const SCardGetAttrib = winscard.SCardGetAttrib;
-SCardGetAttrib.argtypes = [c_void_p, c_uint, c_void_p, c_void_p];
+// LONG SCardGetAttrib(SCARDHANDLE, DWORD dwAttrId, LPBYTE pbAttr, LPDWORD pcbAttrLen)
+SCardGetAttrib.argtypes = [c_void_p, c_uint, c_void_p, POINTER(c_uint)];
 SCardGetAttrib.restype = c_long;
 SCardGetAttrib.errcheck = function (rv, func, args) {
   if (rv != E_SUCCESS) {
@@ -235,7 +242,8 @@ SCardGetAttrib.errcheck = function (rv, func, args) {
 };
 
 let SCardStatus = PLATFORM === "win32" ? winscard.SCardStatusA : winscard.SCardStatus;
-SCardStatus.argtypes = [c_void_p, c_char_p, c_void_p, c_void_p, c_void_p, c_char_p, c_void_p];
+// LONG SCardStatus(SCARDHANDLE, LPSTR szReaderName, LPDWORD pcchReaderLen, LPDWORD pdwState, LPDWORD pdwProtocol, LPBYTE pbAtr, LPDWORD pcbAtrLen)
+SCardStatus.argtypes = [c_void_p, c_char_p, POINTER(c_uint), POINTER(c_uint), POINTER(c_uint), c_char_p, POINTER(c_uint)];
 SCardStatus.restype = c_long;
 SCardStatus.errcheck = function (rv, func, args) {
   if (rv != E_SUCCESS) {
@@ -245,7 +253,8 @@ SCardStatus.errcheck = function (rv, func, args) {
 };
 
 const SCardControl = winscard.SCardControl;
-SCardControl.argtypes = [c_void_p, c_uint, c_void_p, c_uint, c_void_p, c_uint, c_void_p];
+// LONG SCardControl(SCARDHANDLE, DWORD dwControlCode, LPCVOID pbSendBuffer, DWORD cbSendLength, LPVOID pbRecvBuffer, DWORD cbRecvLength, LPDWORD lpBytesReturned)
+SCardControl.argtypes = [c_void_p, c_uint, c_void_p, c_uint, c_void_p, c_uint, POINTER(c_uint)];
 SCardControl.restype = c_long;
 SCardControl.errcheck = function (rv, func, args) {
   if (rv != E_SUCCESS) {

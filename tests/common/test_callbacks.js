@@ -111,6 +111,51 @@ describe("Callbacks", function () {
     });
   });
 
+  describe("Regression: Buffer → c_size_t / c_ssize_t argtype", function () {
+    // Regression for a bug where FFIFunction::Call's MarshalPrimitive fast path
+    // for CTYPES_SIZE_T / CTYPES_SSIZE_T handled only BigInt/Number, leaving the
+    // arg slot uninitialized when a Buffer was passed (e.g. SendMessageW's LPARAM).
+    // That leaked stack garbage into the 8-byte slot and crashed Win32 APIs.
+    it("c_size_t argtype should accept Buffer (treat as pointer address)", function () {
+      const echo = ctypes.CFUNCTYPE(ctypes.c_size_t, ctypes.c_size_t)((x) => x);
+      const call = ctypes.CFUNCTYPE(ctypes.c_size_t, ctypes.c_size_t)(echo.pointer);
+
+      const buf = Buffer.alloc(16);
+      const r1 = call(buf);
+      const r2 = call(buf);
+
+      assert.strictEqual(typeof r1, "bigint");
+      assert.notStrictEqual(r1, 0n, "Buffer address must be non-zero");
+      assert.strictEqual(r1, r2, "Same Buffer must yield same address on repeated calls");
+
+      echo.release();
+    });
+
+    it("c_ssize_t argtype should accept Buffer", function () {
+      const echo = ctypes.CFUNCTYPE(ctypes.c_ssize_t, ctypes.c_ssize_t)((x) => x);
+      const call = ctypes.CFUNCTYPE(ctypes.c_ssize_t, ctypes.c_ssize_t)(echo.pointer);
+
+      const buf = Buffer.alloc(16);
+      const r1 = call(buf);
+      const r2 = call(buf);
+
+      assert.strictEqual(typeof r1, "bigint");
+      assert.notStrictEqual(r1, 0n);
+      assert.strictEqual(r1, r2);
+
+      echo.release();
+    });
+
+    it("c_size_t argtype should accept null (=> 0)", function () {
+      const echo = ctypes.CFUNCTYPE(ctypes.c_size_t, ctypes.c_size_t)((x) => x);
+      const call = ctypes.CFUNCTYPE(ctypes.c_size_t, ctypes.c_size_t)(echo.pointer);
+
+      assert.strictEqual(call(null), 0n);
+
+      echo.release();
+    });
+  });
+
   describe("Callback Properties", function () {
     it("should have pointer property", function () {
       const callback = libc.callback(() => 42, ctypes.c_int32, []);

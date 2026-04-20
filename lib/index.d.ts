@@ -250,11 +250,41 @@ export interface TypedFFIFunction<TArgs extends readonly AnyType[], TRet extends
  *
  * @category Library Loading
  */
+/**
+ * Options passed to the CDLL/WinDLL/OleDLL constructor.
+ *
+ * @category Library Loading
+ */
+export interface LibraryOptions {
+  /**
+   * Maximum size of the internal function cache. Default: 1000.
+   */
+  cacheSize?: number;
+
+  /**
+   * If true, each call through this library snapshots `GetLastError()`
+   * immediately after `ffi_call` returns, so subsequent JS code cannot
+   * clobber it before the user reads it via {@link CDLL.get_last_error}.
+   *
+   * Python ctypes parity: `use_last_error=True` on CDLL/WinDLL.
+   */
+  use_last_error?: boolean;
+
+  /**
+   * If true, each call through this library snapshots `errno` immediately
+   * after `ffi_call` returns. Read back via {@link CDLL.get_errno}.
+   *
+   * Python ctypes parity: `use_errno=True` on CDLL.
+   */
+  use_errno?: boolean;
+}
+
 export class CDLL {
   /**
    * @param path - Path to the shared library, or `null` to load the current process
+   * @param options - Optional library settings (cache size, use_last_error, use_errno)
    */
-  constructor(path: string | null);
+  constructor(path: string | null, options?: LibraryOptions);
 
   /**
    * Get a callable function from the library.
@@ -278,6 +308,23 @@ export class CDLL {
 
   /** Close the library and clear the function cache. */
   close(): void;
+
+  /**
+   * Read the snapshotted `GetLastError()` (Windows) or `errno` from the most
+   * recent call on this library. Requires `use_last_error: true` at
+   * construction.
+   *
+   * Python ctypes parity: `ctypes.get_last_error()` (library-scoped variant).
+   */
+  get_last_error(): number;
+
+  /**
+   * Read the snapshotted `errno` from the most recent call on this library.
+   * Requires `use_errno: true` at construction.
+   *
+   * Python ctypes parity: `ctypes.get_errno()` (library-scoped variant).
+   */
+  get_errno(): number;
 
   /** Library file path. */
   readonly path: string;
@@ -342,8 +389,77 @@ export interface FunctionWrapper {
  * @category Library Loading
  */
 export class WinDLL extends CDLL {
-  constructor(path: string);
+  constructor(path: string, options?: LibraryOptions);
 }
+
+/**
+ * Load a Windows library whose functions return `HRESULT`. Any function with
+ * `restype = HRESULT` is automatically wrapped so that a negative return value
+ * throws an Error with `.hresult` / `.winerror` attached.
+ *
+ * Python equivalent: `ctypes.OleDLL`
+ *
+ * @example
+ * ```javascript
+ * import { OleDLL, HRESULT, c_wchar_p, c_void_p } from 'node-ctypes';
+ *
+ * const ole32 = new OleDLL('ole32.dll');
+ * const CLSIDFromString = ole32.func('CLSIDFromString', HRESULT, [c_wchar_p, c_void_p]);
+ * // Throws automatically on HRESULT < 0
+ * CLSIDFromString('{00000000-0000-0000-0000-000000000000}', Buffer.alloc(16));
+ * ```
+ *
+ * @category Library Loading
+ */
+export class OleDLL extends WinDLL {
+  constructor(path: string, options?: LibraryOptions);
+}
+
+/**
+ * `HRESULT` return type marker. Use as `restype` on an OleDLL function to
+ * enable automatic throw-on-failure behavior.
+ *
+ * Python equivalent: `ctypes.HRESULT`
+ *
+ * @category Windows API
+ */
+export const HRESULT: SimpleCDataConstructor<"int32"> & { _isHResult: true };
+
+/**
+ * Lazy-loading namespace for CDLL libraries. Attribute access auto-loads on
+ * first use and caches the instance.
+ *
+ * Python equivalent: `ctypes.cdll`
+ *
+ * @example
+ * ```javascript
+ * import { cdll, c_uint32 } from 'node-ctypes';
+ * const strlen = cdll.msvcrt.func('strlen', c_uint32, [c_void_p]);
+ * ```
+ *
+ * @category Library Loading
+ */
+export const cdll: { [libName: string]: CDLL };
+
+/**
+ * Lazy-loading namespace for WinDLL libraries (Windows only).
+ * Undefined on non-Windows platforms.
+ *
+ * Python equivalent: `ctypes.windll`
+ *
+ * @category Library Loading
+ */
+export const windll: { [libName: string]: WinDLL } | undefined;
+
+/**
+ * Lazy-loading namespace for OleDLL libraries (Windows only).
+ * Undefined on non-Windows platforms.
+ *
+ * Python equivalent: `ctypes.oledll`
+ *
+ * @category Library Loading
+ */
+export const oledll: { [libName: string]: OleDLL } | undefined;
 
 // =============================================================================
 // Callbacks
@@ -667,6 +783,18 @@ export interface PointerInstance {
    * ```
    */
   [index: number]: any;
+
+  /**
+   * Return a new pointer offset by `n` elements (not bytes), matching C's
+   * `ptr + n`. The pointer keeps the same element type.
+   */
+  add(n: number): PointerInstance;
+
+  /**
+   * Read `end - start` consecutive elements into a JS array, analogous to
+   * Python's `p[start:end]` on a POINTER(T).
+   */
+  slice(start: number, end: number): any[];
 }
 
 /**
@@ -849,6 +977,38 @@ export class Structure<F extends Record<string, FieldSpec> = Record<string, any>
   /** Convert a buffer or instance to a plain object. */
   static toObject<ThisT extends Structure<F>>(this: new (...args: any[]) => ThisT, bufOrInstance: Buffer | Structure<F>): FieldsToInstance<F>;
 
+  /**
+   * Create an instance that aliases memory inside an existing Buffer.
+   * Writes through the instance propagate to the source Buffer.
+   *
+   * Python ctypes parity: `Structure.from_buffer(source, offset=0)`.
+   */
+  static from_buffer<ThisT extends Structure<F>>(this: new (...args: any[]) => ThisT, source: Buffer, offset?: number): ThisT;
+
+  /**
+   * Create an instance whose buffer is an independent copy of the source bytes.
+   *
+   * Python ctypes parity: `Structure.from_buffer_copy(source, offset=0)`.
+   */
+  static from_buffer_copy<ThisT extends Structure<F>>(this: new (...args: any[]) => ThisT, source: Buffer | Uint8Array, offset?: number): ThisT;
+
+  /**
+   * Create an instance that views raw memory at `address`. Caller is
+   * responsible for ensuring the memory stays valid and is at least
+   * `sizeof(this)` bytes.
+   *
+   * Python ctypes parity: `Structure.from_address(address)`.
+   */
+  static from_address<ThisT extends Structure<F>>(this: new (...args: any[]) => ThisT, address: bigint | number): ThisT;
+
+  /**
+   * Bind the Structure to an exported global variable in a shared library.
+   * Reads/writes through the returned instance go to/from the DLL's memory.
+   *
+   * Python ctypes parity: `Structure.in_dll(library, name)`.
+   */
+  static in_dll<ThisT extends Structure<F>>(this: new (...args: any[]) => ThisT, library: CDLL | Library, name: string): ThisT;
+
   /** The underlying memory buffer. Passed automatically to native functions. */
   _buffer: Buffer;
 
@@ -891,6 +1051,62 @@ export class Structure<F extends Record<string, FieldSpec> = Record<string, any>
  * @category Structures
  */
 export class Union<F extends Record<string, FieldSpec> = Record<string, any>> extends Structure<F> {}
+
+/**
+ * Structure subclass that lays out scalar fields in big-endian byte order.
+ *
+ * Scalar primitive fields (int*, uint*, float, double, size_t/ssize_t, wchar)
+ * are byte-swapped transparently on read/write. 1-byte fields (int8, uint8,
+ * bool, char) and pointers keep native layout. Bitfields follow the
+ * underlying integer's endianness and currently match Python's LE layout.
+ *
+ * Python equivalent: `ctypes.BigEndianStructure`
+ *
+ * @example
+ * ```javascript
+ * class NetHeader extends BigEndianStructure {
+ *   static _fields_ = [
+ *     ['magic', c_uint32],
+ *     ['length', c_uint32],
+ *   ];
+ * }
+ * const h = new NetHeader();
+ * h.magic = 0x12345678;   // stored as 12 34 56 78 on the wire
+ * ```
+ *
+ * @category Structures
+ */
+export class BigEndianStructure<F extends Record<string, FieldSpec> = Record<string, any>> extends Structure<F> {}
+
+/**
+ * Structure subclass with explicit little-endian layout. On the LE hosts we
+ * officially support this is identical to plain {@link Structure}; it exists
+ * for API symmetry with {@link BigEndianStructure} and to document intent.
+ *
+ * Python equivalent: `ctypes.LittleEndianStructure`
+ *
+ * @category Structures
+ */
+export class LittleEndianStructure<F extends Record<string, FieldSpec> = Record<string, any>> extends Structure<F> {}
+
+/**
+ * Union subclass with big-endian primitive fields.
+ *
+ * Python equivalent: `ctypes.BigEndianUnion`
+ *
+ * @category Structures
+ */
+export class BigEndianUnion<F extends Record<string, FieldSpec> = Record<string, any>> extends Union<F> {}
+
+/**
+ * Union subclass with explicit little-endian layout (same as plain {@link Union}
+ * on LE hosts).
+ *
+ * Python equivalent: `ctypes.LittleEndianUnion`
+ *
+ * @category Structures
+ */
+export class LittleEndianUnion<F extends Record<string, FieldSpec> = Record<string, any>> extends Union<F> {}
 
 // =============================================================================
 // Functions
@@ -977,7 +1193,61 @@ export function threadSafeCallback(fn: Function, returnType: AnyType, argTypes?:
  *
  * @category Callbacks
  */
-export function CFUNCTYPE(restype: AnyType, ...argtypes: AnyType[]): (address: bigint) => (...args: any[]) => any;
+/**
+ * Single entry in a paramflags array: describes direction (in/out), parameter
+ * name, and optional default value for that slot.
+ *
+ * Python ctypes parity: the tuple form `(flag, name[, default])` used with
+ * `prototype((name, lib), paramflags)`.
+ *
+ * @category Function Pointers
+ */
+export interface ParamFlag {
+  /** `"in"` for input params (default), `"out"` for output params (POINTER(T) argtype). */
+  dir: "in" | "out";
+  /** Parameter name, used for the named-call form `fn({ name: value, ... })`. */
+  name: string;
+  /** Optional default value; applied when the caller omits this `in` param. */
+  default?: any;
+}
+
+/**
+ * Factory returned by {@link CFUNCTYPE} / {@link WINFUNCTYPE}.
+ *
+ * @category Function Pointers
+ */
+export interface FuncPtrFactory {
+  /** Call with a raw address to produce a caller. */
+  (address: bigint): (...args: any[]) => any;
+  /** Call with a JS function to produce a C-callable callback closure. */
+  (fn: (...args: any[]) => any): { pointer: bigint; release(): void };
+
+  restype: AnyType;
+  argtypes: AnyType[];
+  readonly _isFuncPtr: true;
+
+  /**
+   * Bind the factory to a library export with Python-style paramflags.
+   * Out params are allocated automatically and returned as part of the tuple.
+   *
+   * Python ctypes parity: `prototype((name, lib), paramflags)`.
+   *
+   * @example
+   * ```javascript
+   * const proto = WINFUNCTYPE(BOOL, HWND, POINTER(DWORD), POINTER(DWORD));
+   * const fn = proto.bind(user32, "GetWindowThreadProcessId", [
+   *   { dir: "in", name: "hWnd" },
+   *   { dir: "out", name: "pid" },
+   *   { dir: "out", name: "tid" },
+   * ]);
+   * const [ok, pid, tid] = fn(hwnd);             // positional
+   * const [ok2, pid2, tid2] = fn({ hWnd: hwnd }); // named
+   * ```
+   */
+  bind(library: CDLL, symbolName: string, paramflags: ParamFlag[]): (...args: any[]) => any;
+}
+
+export function CFUNCTYPE(restype: AnyType, ...argtypes: AnyType[]): FuncPtrFactory;
 
 /**
  * Create a function pointer type with stdcall calling convention (Windows).
@@ -992,7 +1262,7 @@ export function CFUNCTYPE(restype: AnyType, ...argtypes: AnyType[]): (address: b
  *
  * @category Callbacks
  */
-export function WINFUNCTYPE(restype: AnyType, ...argtypes: AnyType[]): (address: bigint) => (...args: any[]) => any;
+export function WINFUNCTYPE(restype: AnyType, ...argtypes: AnyType[]): FuncPtrFactory;
 
 /**
  * Create a C string buffer (null-terminated).
@@ -1424,6 +1694,15 @@ export interface SimpleCDataConstructor<Tag extends string = string> {
   _reader(buf: Buffer, offset: number): JsFromTag<Tag>;
   /** @internal */
   _writer(buf: Buffer, offset: number, value: JsArgFromTag<Tag>): void;
+
+  /** Create an instance that aliases an existing Buffer (zero-copy). */
+  from_buffer(buffer: Buffer, offset?: number): SimpleCDataInstance<JsFromTag<Tag>>;
+  /** Create an instance whose buffer is a copy of the source bytes. */
+  from_buffer_copy(buffer: Buffer, offset?: number): SimpleCDataInstance<JsFromTag<Tag>>;
+  /** Create an instance viewing raw memory at the given address. */
+  from_address(address: bigint | number): SimpleCDataInstance<JsFromTag<Tag>>;
+  /** Bind this type to an exported global variable in a shared library. */
+  in_dll(library: CDLL | Library, name: string): SimpleCDataInstance<JsFromTag<Tag>>;
 }
 
 /**
@@ -1589,3 +1868,29 @@ export const WCHAR_SIZE: number;
  * @category Constants
  */
 export const NULL: null;
+
+/**
+ * Resolve a library name to a platform-specific filename or path.
+ *
+ * Python equivalent: `ctypes.util.find_library(name)`
+ *
+ * - On Windows, bare names get `.dll` appended, and a few universal aliases
+ *   are provided (e.g. `"c"` → `"msvcrt.dll"`).
+ * - On Linux, the `ldconfig` cache and common library directories are
+ *   searched for the best-matching `libNAME.so.VERSION`.
+ * - On macOS, `/usr/lib`, `/usr/local/lib`, Homebrew prefixes and framework
+ *   bundles are searched.
+ *
+ * Returns `null` if the input is invalid. Returns a best-effort fallback
+ * (bare soname) if nothing is found, so the loader can still try its own
+ * search path.
+ *
+ * @example
+ * ```javascript
+ * import { find_library, CDLL } from 'node-ctypes';
+ * const libc = new CDLL(find_library('c'));
+ * ```
+ *
+ * @category Library Loading
+ */
+export function find_library(name: string): string | null;

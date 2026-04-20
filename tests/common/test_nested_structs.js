@@ -273,4 +273,45 @@ describe("Complex Nested Structures", function () {
       assert.strictEqual(outer.byte3, 3);
     });
   });
+
+  describe("Array of Structs within Struct", function () {
+    // Parity with CPython ctypes test_array_of_structs_within_struct (Polygon).
+    it("should hold an array of Point structs as a field (Polygon)", function () {
+      class Point extends Structure {
+        static _fields_ = [
+          ["x", c_int32],
+          ["y", c_int32],
+        ];
+      }
+
+      class Polygon extends Structure {
+        static _fields_ = [
+          ["count", c_int32],
+          ["vertices", array(Point, 4)],
+        ];
+      }
+
+      const poly = new Polygon();
+      poly.count = 4;
+      poly.vertices[0].x = 0;
+      poly.vertices[0].y = 0;
+      poly.vertices[1].x = 10;
+      poly.vertices[1].y = 0;
+      poly.vertices[2].x = 10;
+      poly.vertices[2].y = 10;
+      poly.vertices[3].x = 0;
+      poly.vertices[3].y = 10;
+
+      assert.strictEqual(poly.count, 4);
+      assert.strictEqual(poly.vertices[0].x, 0);
+      assert.strictEqual(poly.vertices[0].y, 0);
+      assert.strictEqual(poly.vertices[1].x, 10);
+      assert.strictEqual(poly.vertices[2].x, 10);
+      assert.strictEqual(poly.vertices[2].y, 10);
+      assert.strictEqual(poly.vertices[3].y, 10);
+
+      // Size: count (4 bytes, 4-aligned) + 4 * Point(8) = 36, rounded to alignment 4 → 36
+      assert.strictEqual(sizeof(Polygon), 4 + 4 * sizeof(Point));
+    });
+  });
 });

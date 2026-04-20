@@ -236,6 +236,20 @@ namespace ctypes
 
         // Helper per applicare errcheck callback
         Napi::Value ApplyErrcheck(Napi::Env env, Napi::Value result, const Napi::CallbackInfo &info);
+
+        // ============================================================
+        // Last-error / errno capture (Python use_last_error / use_errno)
+        // Snapshotted immediately after ffi_call so subsequent code cannot
+        // overwrite them before the user reads them back.
+        // ============================================================
+        bool capture_last_error_;  // snapshot GetLastError after each call
+        bool capture_errno_;       // snapshot errno after each call
+        int last_error_;
+        int last_errno_;
+
+    public:
+        Napi::Value GetLastErrorCaptured(const Napi::CallbackInfo &info);
+        Napi::Value GetErrnoCaptured(const Napi::CallbackInfo &info);
     };
 
 } // namespace ctypes

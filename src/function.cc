@@ -44,9 +44,21 @@ namespace ctypes
                 InstanceMethod("call", &FFIFunction::Call),
                 InstanceMethod("callAsync", &FFIFunction::CallAsync),
                 InstanceMethod("setErrcheck", &FFIFunction::SetErrcheck),
+                InstanceMethod("getCapturedLastError", &FFIFunction::GetLastErrorCaptured),
+                InstanceMethod("getCapturedErrno", &FFIFunction::GetErrnoCaptured),
                 InstanceAccessor("name", &FFIFunction::GetName, nullptr),
                 InstanceAccessor("address", &FFIFunction::GetAddress, nullptr),
             });
+    }
+
+    Napi::Value FFIFunction::GetLastErrorCaptured(const Napi::CallbackInfo &info)
+    {
+        return Napi::Number::New(info.Env(), last_error_);
+    }
+
+    Napi::Value FFIFunction::GetErrnoCaptured(const Napi::CallbackInfo &info)
+    {
+        return Napi::Number::New(info.Env(), last_errno_);
     }
 
     FFIFunction::FFIFunction(const Napi::CallbackInfo &info)
@@ -58,7 +70,11 @@ namespace ctypes
           ffi_return_type_(nullptr),
           inline_string_offset_(0),
           use_inline_storage_(true),
-          next_cache_slot_(0)
+          next_cache_slot_(0),
+          capture_last_error_(false),
+          capture_errno_(false),
+          last_error_(0),
+          last_errno_(0)
     {
         Napi::Env env = info.Env();
 
@@ -217,6 +233,14 @@ namespace ctypes
             {
                 abi_ = CallConvToFFI(StringToCallConv(
                     opts.Get("abi").As<Napi::String>().Utf8Value()));
+            }
+            if (opts.Has("use_last_error"))
+            {
+                capture_last_error_ = opts.Get("use_last_error").ToBoolean().Value();
+            }
+            if (opts.Has("use_errno"))
+            {
+                capture_errno_ = opts.Get("use_errno").ToBoolean().Value();
             }
         }
 
@@ -531,10 +555,27 @@ namespace ctypes
                 bool lossless;
                 v = val.As<Napi::BigInt>().Int64Value(&lossless);
             }
+            else if (val.IsNull() || val.IsUndefined())
+            {
+                v = 0;
+            }
+            else if (val.IsBuffer())
+            {
+                void *ptr = val.As<Napi::Buffer<uint8_t>>().Data();
+                v = static_cast<int64_t>(reinterpret_cast<intptr_t>(ptr));
+            }
+            else if (val.IsArrayBuffer())
+            {
+                void *ptr = val.As<Napi::ArrayBuffer>().Data();
+                v = static_cast<int64_t>(reinterpret_cast<intptr_t>(ptr));
+            }
             else
             {
                 napi_value nv = val;
-                napi_get_value_int64(env, nv, &v);
+                if (napi_get_value_int64(env, nv, &v) != napi_ok)
+                {
+                    v = 0;
+                }
             }
             memcpy(slot, &v, sizeof(v));
             return true;
@@ -986,6 +1027,43 @@ namespace ctypes
             string_buffer_.shrink_to_fit();
         }
 
+        // Pre-reserve string_buffer_ so later resize() calls never reallocate the
+        // underlying storage. If a reallocation happened mid-loop, previously
+        // stored (char*) or (wchar_t*) pointers in arg slots would dangle and
+        // crash the native call. We make a single cheap pass to sum the UTF-16
+        // lengths of all STRING/WSTRING args (both fixed and variadic-inferred),
+        // padding generously for SBO misses and alignment slack.
+        {
+            size_t reserve_bytes = 0;
+            for (size_t i = 0; i < argc; i++)
+            {
+                CType t;
+                if (i < expected_argc)
+                    t = arg_types_[i];
+                else if (cache_entry)
+                    t = cache_entry->extra_types[i - expected_argc];
+                else
+                {
+                    size_t extra_idx = i - expected_argc;
+                    t = (num_extra <= MAX_VARIADIC_EXTRA_ARGS) ? extra_types_stack[extra_idx] : extra_types_heap[extra_idx];
+                }
+                if ((t == CType::CTYPES_STRING || t == CType::CTYPES_WSTRING) && info[i].IsString())
+                {
+                    size_t len = 0;
+                    napi_get_value_string_utf16(env, info[i], nullptr, 0, &len);
+                    // UTF-16 units → bytes: * sizeof(wchar_t) for WSTRING (2 on Win, 4 on Unix),
+                    // * 4 for worst-case UTF-8 per UTF-16 unit for STRING. +alignof(wchar_t)
+                    // slack per string for alignment padding.
+                    const size_t per_unit = (t == CType::CTYPES_WSTRING) ? sizeof(wchar_t) : 4;
+                    reserve_bytes += (len + 1) * per_unit + alignof(wchar_t);
+                }
+            }
+            if (reserve_bytes > string_buffer_.capacity())
+            {
+                string_buffer_.reserve(reserve_bytes);
+            }
+        }
+
         // Converti argomenti (usa tipi inferiti per argomenti extra variadic)
         for (size_t i = 0; i < argc; i++)
         {
@@ -1206,6 +1284,21 @@ namespace ctypes
 
         // Effettua la chiamata con il CIF appropriato (cached o appena creato)
         ffi_call(active_cif, FFI_FN(fn_ptr_), return_ptr, arg_values);
+
+        // Snapshot errno / GetLastError immediately before any other code can
+        // clobber them (Python ctypes use_last_error / use_errno parity).
+        if (capture_last_error_)
+        {
+#ifdef _WIN32
+            last_error_ = static_cast<int>(::GetLastError());
+#else
+            last_error_ = errno;
+#endif
+        }
+        if (capture_errno_)
+        {
+            last_errno_ = errno;
+        }
 
         // Converti il return value e applica errcheck se presente
         Napi::Value result = ConvertReturn(env, return_ptr, return_type_,
