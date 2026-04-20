@@ -273,9 +273,16 @@ import { find_library, cdll, windll, CDLL, OleDLL, HRESULT } from "node-ctypes";
 // Cross-platform name resolution
 const libc = new CDLL(find_library("c"));
 
-// Lazy namespaces (Python: ctypes.cdll / ctypes.windll)
+// Lazy namespaces (Python: ctypes.cdll / ctypes.windll). Unlike Python,
+// node-ctypes does NOT default restype to c_int — set it explicitly or use
+// the one-shot .func() form.
+const GetTickCount = windll.kernel32.func("GetTickCount", c_uint32, []);
+GetTickCount();
+
+// Attribute-style (requires restype/argtypes to be set):
+cdll.msvcrt.printf.argtypes = [c_char_p];
+cdll.msvcrt.printf.restype = c_int;
 cdll.msvcrt.printf("Hi\n");
-windll.kernel32.GetTickCount();
 
 // Auto-throw on negative HRESULT (Python: OleDLL)
 const ole32 = new OleDLL("ole32.dll");
