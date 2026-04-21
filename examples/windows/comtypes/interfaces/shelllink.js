@@ -4,11 +4,12 @@
 //   https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-ishelllinkw
 //   https://learn.microsoft.com/en-us/windows/win32/api/objidl/nn-objidl-ipersistfile
 
-import { c_int32, c_uint32, c_void_p, c_wchar_p } from "node-ctypes";
-import { COMInterface, STDMETHOD, HRESULT, IUnknown, IPersist, IPersistFile } from "../comtypes.js";
+import { INT, DWORD, LPVOID, LPCWSTR } from "../../wintypes.js";
+import { COMInterface, STDMETHOD, HRESULT, IUnknown } from "../comtypes.js";
 
-// Re-export IPersistFile (already defined in comtypes.js since it's common)
-export { IPersist, IPersistFile };
+// Re-export IPersist/IPersistFile from their dedicated module for convenience
+// when importing everything shell-link-related from a single entry point.
+export { IPersist, IPersistFile } from "./persist.js";
 
 // ═══════════════════════════════════════════════════════════════════════
 // IShellLinkW — Shell Link (Unicode)
@@ -21,41 +22,41 @@ export const IShellLinkW = COMInterface({
   extends: IUnknown,
   methods: [
     // slot 3: GetPath(pszFile, cch, pfd, fFlags)
-    STDMETHOD(HRESULT, "GetPath", [c_wchar_p, c_int32, c_void_p, c_uint32]),
+    STDMETHOD(HRESULT, "GetPath", [LPCWSTR, INT, LPVOID, DWORD]),
     // slot 4: GetIDList(ppidl)
-    STDMETHOD(HRESULT, "GetIDList", [c_void_p]),
+    STDMETHOD(HRESULT, "GetIDList", [LPVOID]),
     // slot 5: SetIDList(pidl)
-    STDMETHOD(HRESULT, "SetIDList", [c_void_p]),
+    STDMETHOD(HRESULT, "SetIDList", [LPVOID]),
     // slot 6: GetDescription(pszName, cch)
-    STDMETHOD(HRESULT, "GetDescription", [c_void_p, c_int32]),
+    STDMETHOD(HRESULT, "GetDescription", [LPVOID, INT]),
     // slot 7: SetDescription(pszName)
-    STDMETHOD(HRESULT, "SetDescription", [c_wchar_p]),
+    STDMETHOD(HRESULT, "SetDescription", [LPCWSTR]),
     // slot 8: GetWorkingDirectory(pszDir, cch)
-    STDMETHOD(HRESULT, "GetWorkingDirectory", [c_void_p, c_int32]),
+    STDMETHOD(HRESULT, "GetWorkingDirectory", [LPVOID, INT]),
     // slot 9: SetWorkingDirectory(pszDir)
-    STDMETHOD(HRESULT, "SetWorkingDirectory", [c_wchar_p]),
+    STDMETHOD(HRESULT, "SetWorkingDirectory", [LPCWSTR]),
     // slot 10: GetArguments(pszArgs, cch)
-    STDMETHOD(HRESULT, "GetArguments", [c_void_p, c_int32]),
+    STDMETHOD(HRESULT, "GetArguments", [LPVOID, INT]),
     // slot 11: SetArguments(pszArgs)
-    STDMETHOD(HRESULT, "SetArguments", [c_wchar_p]),
+    STDMETHOD(HRESULT, "SetArguments", [LPCWSTR]),
     // slot 12: GetHotkey(pwHotkey)
-    STDMETHOD(HRESULT, "GetHotkey", [c_void_p]),
+    STDMETHOD(HRESULT, "GetHotkey", [LPVOID]),
     // slot 13: SetHotkey(wHotkey)
-    STDMETHOD(HRESULT, "SetHotkey", [c_uint32]),
+    STDMETHOD(HRESULT, "SetHotkey", [DWORD]),
     // slot 14: GetShowCmd(piShowCmd)
-    STDMETHOD(HRESULT, "GetShowCmd", [c_void_p]),
+    STDMETHOD(HRESULT, "GetShowCmd", [LPVOID]),
     // slot 15: SetShowCmd(iShowCmd)
-    STDMETHOD(HRESULT, "SetShowCmd", [c_int32]),
+    STDMETHOD(HRESULT, "SetShowCmd", [INT]),
     // slot 16: GetIconLocation(pszIconPath, cch, piIcon)
-    STDMETHOD(HRESULT, "GetIconLocation", [c_void_p, c_int32, c_void_p]),
+    STDMETHOD(HRESULT, "GetIconLocation", [LPVOID, INT, LPVOID]),
     // slot 17: SetIconLocation(pszIconPath, iIcon)
-    STDMETHOD(HRESULT, "SetIconLocation", [c_wchar_p, c_int32]),
+    STDMETHOD(HRESULT, "SetIconLocation", [LPCWSTR, INT]),
     // slot 18: SetRelativePath(pszPathRel, dwReserved)
-    STDMETHOD(HRESULT, "SetRelativePath", [c_wchar_p, c_uint32]),
+    STDMETHOD(HRESULT, "SetRelativePath", [LPCWSTR, DWORD]),
     // slot 19: Resolve(hwnd, fFlags)
-    STDMETHOD(HRESULT, "Resolve", [c_void_p, c_uint32]),
+    STDMETHOD(HRESULT, "Resolve", [LPVOID, DWORD]),
     // slot 20: SetPath(pszFile)
-    STDMETHOD(HRESULT, "SetPath", [c_wchar_p]),
+    STDMETHOD(HRESULT, "SetPath", [LPCWSTR]),
   ],
 });
 

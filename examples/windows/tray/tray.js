@@ -2,7 +2,8 @@
 // Inspired by pit-ray/fluent-tray (https://github.com/pit-ray/fluent-tray)
 // API mirrors the C++ reference: create_tray, add_menu, add_separator, update_with_loop, stop
 
-import { WinDLL, Structure, array, create_unicode_buffer, byref, c_byte, c_short, c_int, c_uint, c_long, c_void, c_void_p, c_wchar } from "node-ctypes";
+import { WinDLL, WINFUNCTYPE, Structure, array, sizeof, byref, c_void, c_wchar } from "node-ctypes";
+import { ATOM, BOOL, BYTE, COLORREF, DWORD, HBITMAP, HBRUSH, HCURSOR, HDC, HFONT, HGDIOBJ, HICON, HINSTANCE, HMODULE, HWND, INT, LONG, LPCWSTR, LPVOID, LPARAM, LRESULT, UINT, WORD, WPARAM } from "../wintypes.js";
 import { Registry, HKEY } from "../registry/registry.js";
 
 // ─── Win32 Constants ────────────────────────────────────────────────
@@ -97,105 +98,110 @@ try {
   dwmapi = null;
 }
 
+// WNDPROC — standard Win32 window procedure signature
+// Python: WNDPROC = WINFUNCTYPE(LRESULT, HWND, UINT, WPARAM, LPARAM)
+const WNDPROC = WINFUNCTYPE(LRESULT, HWND, UINT, WPARAM, LPARAM);
+
 // kernel32
-kernel32.GetModuleHandleW.argtypes = [c_void_p];
-kernel32.GetModuleHandleW.restype = c_void_p;
+kernel32.GetModuleHandleW.argtypes = [LPCWSTR];
+kernel32.GetModuleHandleW.restype = HMODULE;
 
 // user32 — window management
-user32.RegisterClassExW.argtypes = [c_void_p];
-user32.RegisterClassExW.restype = c_short;
-user32.CreateWindowExW.argtypes = [c_uint, c_void_p, c_void_p, c_uint, c_int, c_int, c_int, c_int, c_void_p, c_void_p, c_void_p, c_void_p];
-user32.CreateWindowExW.restype = c_void_p;
-user32.DefWindowProcW.argtypes = [c_void_p, c_uint, c_void_p, c_void_p];
-user32.DefWindowProcW.restype = c_void_p;
-user32.ShowWindow.argtypes = [c_void_p, c_int];
-user32.ShowWindow.restype = c_int;
-user32.SetWindowPos.argtypes = [c_void_p, c_void_p, c_int, c_int, c_int, c_int, c_uint];
-user32.SetWindowPos.restype = c_int;
-user32.SetForegroundWindow.argtypes = [c_void_p];
-user32.SetForegroundWindow.restype = c_int;
+user32.RegisterClassExW.argtypes = [LPVOID];
+user32.RegisterClassExW.restype = ATOM;
+user32.CreateWindowExW.argtypes = [DWORD, LPCWSTR, LPCWSTR, DWORD, INT, INT, INT, INT, HWND, LPVOID, HINSTANCE, LPVOID];
+user32.CreateWindowExW.restype = HWND;
+user32.DefWindowProcW.argtypes = [HWND, UINT, WPARAM, LPARAM];
+user32.DefWindowProcW.restype = LRESULT;
+user32.ShowWindow.argtypes = [HWND, INT];
+user32.ShowWindow.restype = BOOL;
+user32.SetWindowPos.argtypes = [HWND, HWND, INT, INT, INT, INT, UINT];
+user32.SetWindowPos.restype = BOOL;
+user32.SetForegroundWindow.argtypes = [HWND];
+user32.SetForegroundWindow.restype = BOOL;
 user32.GetForegroundWindow.argtypes = [];
-user32.GetForegroundWindow.restype = c_void_p;
-user32.InvalidateRect.argtypes = [c_void_p, c_void_p, c_int];
-user32.InvalidateRect.restype = c_int;
-user32.GetClientRect.argtypes = [c_void_p, c_void_p];
-user32.GetClientRect.restype = c_int;
-user32.PostQuitMessage.argtypes = [c_int];
+user32.GetForegroundWindow.restype = HWND;
+user32.InvalidateRect.argtypes = [HWND, LPVOID, BOOL];
+user32.InvalidateRect.restype = BOOL;
+user32.GetClientRect.argtypes = [HWND, LPVOID];
+user32.GetClientRect.restype = BOOL;
+user32.PostQuitMessage.argtypes = [INT];
 user32.PostQuitMessage.restype = c_void;
-user32.PostMessageW.argtypes = [c_void_p, c_uint, c_void_p, c_void_p];
-user32.PostMessageW.restype = c_int;
+user32.PostMessageW.argtypes = [HWND, UINT, WPARAM, LPARAM];
+user32.PostMessageW.restype = BOOL;
 
 // user32 — message loop
-user32.PeekMessageW.argtypes = [c_void_p, c_void_p, c_uint, c_uint, c_uint];
-user32.PeekMessageW.restype = c_int;
-user32.DispatchMessageW.argtypes = [c_void_p];
-user32.DispatchMessageW.restype = c_void_p;
+user32.PeekMessageW.argtypes = [LPVOID, HWND, UINT, UINT, UINT];
+user32.PeekMessageW.restype = BOOL;
+user32.DispatchMessageW.argtypes = [LPVOID];
+user32.DispatchMessageW.restype = LRESULT;
 
 // user32 — resources
-user32.LoadCursorW.argtypes = [c_void_p, c_uint];
-user32.LoadCursorW.restype = c_void_p;
-user32.LoadIconW.argtypes = [c_void_p, c_uint];
-user32.LoadIconW.restype = c_void_p;
-user32.LoadImageW.argtypes = [c_void_p, c_void_p, c_uint, c_int, c_int, c_uint];
-user32.LoadImageW.restype = c_void_p;
+user32.LoadCursorW.argtypes = [HINSTANCE, LPVOID];
+user32.LoadCursorW.restype = HCURSOR;
+user32.LoadIconW.argtypes = [HINSTANCE, LPVOID];
+user32.LoadIconW.restype = HICON;
+user32.LoadImageW.argtypes = [HINSTANCE, LPCWSTR, UINT, INT, INT, UINT];
+user32.LoadImageW.restype = LPVOID;
 
 // user32 — painting
-user32.BeginPaint.argtypes = [c_void_p, c_void_p];
-user32.BeginPaint.restype = c_void_p;
-user32.EndPaint.argtypes = [c_void_p, c_void_p];
-user32.EndPaint.restype = c_int;
-user32.FillRect.argtypes = [c_void_p, c_void_p, c_void_p];
-user32.FillRect.restype = c_int;
-user32.DrawIconEx.argtypes = [c_void_p, c_int, c_int, c_void_p, c_int, c_int, c_uint, c_void_p, c_uint];
-user32.DrawIconEx.restype = c_int;
-user32.DrawTextW.argtypes = [c_void_p, c_void_p, c_int, c_void_p, c_uint];
-user32.DrawTextW.restype = c_int;
-user32.SetLayeredWindowAttributes.argtypes = [c_void_p, c_uint, c_uint, c_uint];
-user32.SetLayeredWindowAttributes.restype = c_int;
-user32.GetCursorPos.argtypes = [c_void_p];
-user32.GetCursorPos.restype = c_int;
-user32.TrackMouseEvent.argtypes = [c_void_p];
-user32.TrackMouseEvent.restype = c_int;
-user32.GetSystemMetrics.argtypes = [c_int];
-user32.GetSystemMetrics.restype = c_int;
-user32.SystemParametersInfoW.argtypes = [c_uint, c_uint, c_void_p, c_uint];
-user32.SystemParametersInfoW.restype = c_int;
+user32.BeginPaint.argtypes = [HWND, LPVOID];
+user32.BeginPaint.restype = HDC;
+user32.EndPaint.argtypes = [HWND, LPVOID];
+user32.EndPaint.restype = BOOL;
+user32.FillRect.argtypes = [HDC, LPVOID, HBRUSH];
+user32.FillRect.restype = INT;
+user32.DrawIconEx.argtypes = [HDC, INT, INT, HICON, INT, INT, UINT, HBRUSH, UINT];
+user32.DrawIconEx.restype = BOOL;
+user32.DrawTextW.argtypes = [HDC, LPCWSTR, INT, LPVOID, UINT];
+user32.DrawTextW.restype = INT;
+user32.SetLayeredWindowAttributes.argtypes = [HWND, COLORREF, BYTE, DWORD];
+user32.SetLayeredWindowAttributes.restype = BOOL;
+user32.GetCursorPos.argtypes = [LPVOID];
+user32.GetCursorPos.restype = BOOL;
+user32.TrackMouseEvent.argtypes = [LPVOID];
+user32.TrackMouseEvent.restype = BOOL;
+user32.GetSystemMetrics.argtypes = [INT];
+user32.GetSystemMetrics.restype = INT;
+user32.SystemParametersInfoW.argtypes = [UINT, UINT, LPVOID, UINT];
+user32.SystemParametersInfoW.restype = BOOL;
 
 // gdi32
-gdi32.CreateSolidBrush.argtypes = [c_uint];
-gdi32.CreateSolidBrush.restype = c_void_p;
-gdi32.CreatePen.argtypes = [c_int, c_int, c_uint];
-gdi32.CreatePen.restype = c_void_p;
-gdi32.DeleteObject.argtypes = [c_void_p];
-gdi32.DeleteObject.restype = c_int;
-gdi32.SelectObject.argtypes = [c_void_p, c_void_p];
-gdi32.SelectObject.restype = c_void_p;
-gdi32.CreateCompatibleDC.argtypes = [c_void_p];
-gdi32.CreateCompatibleDC.restype = c_void_p;
-gdi32.CreateCompatibleBitmap.argtypes = [c_void_p, c_int, c_int];
-gdi32.CreateCompatibleBitmap.restype = c_void_p;
-gdi32.DeleteDC.argtypes = [c_void_p];
-gdi32.DeleteDC.restype = c_int;
-gdi32.BitBlt.argtypes = [c_void_p, c_int, c_int, c_int, c_int, c_void_p, c_int, c_int, c_uint];
-gdi32.BitBlt.restype = c_int;
-gdi32.SetBkMode.argtypes = [c_void_p, c_int];
-gdi32.SetBkMode.restype = c_int;
-gdi32.SetTextColor.argtypes = [c_void_p, c_uint];
-gdi32.SetTextColor.restype = c_uint;
-gdi32.CreateFontW.argtypes = [c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_void_p];
-gdi32.CreateFontW.restype = c_void_p;
-gdi32.RoundRect.argtypes = [c_void_p, c_int, c_int, c_int, c_int, c_int, c_int];
-gdi32.RoundRect.restype = c_int;
+gdi32.CreateSolidBrush.argtypes = [COLORREF];
+gdi32.CreateSolidBrush.restype = HBRUSH;
+gdi32.CreatePen.argtypes = [INT, INT, COLORREF];
+gdi32.CreatePen.restype = LPVOID;
+gdi32.DeleteObject.argtypes = [HGDIOBJ];
+gdi32.DeleteObject.restype = BOOL;
+gdi32.SelectObject.argtypes = [HDC, HGDIOBJ];
+gdi32.SelectObject.restype = HGDIOBJ;
+gdi32.CreateCompatibleDC.argtypes = [HDC];
+gdi32.CreateCompatibleDC.restype = HDC;
+gdi32.CreateCompatibleBitmap.argtypes = [HDC, INT, INT];
+gdi32.CreateCompatibleBitmap.restype = HBITMAP;
+gdi32.DeleteDC.argtypes = [HDC];
+gdi32.DeleteDC.restype = BOOL;
+gdi32.BitBlt.argtypes = [HDC, INT, INT, INT, INT, HDC, INT, INT, DWORD];
+gdi32.BitBlt.restype = BOOL;
+gdi32.SetBkMode.argtypes = [HDC, INT];
+gdi32.SetBkMode.restype = INT;
+gdi32.SetTextColor.argtypes = [HDC, COLORREF];
+gdi32.SetTextColor.restype = COLORREF;
+gdi32.CreateFontW.argtypes = [INT, INT, INT, INT, INT, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD, LPCWSTR];
+gdi32.CreateFontW.restype = HFONT;
+gdi32.RoundRect.argtypes = [HDC, INT, INT, INT, INT, INT, INT];
+gdi32.RoundRect.restype = BOOL;
 
 // shell32
-shell32.Shell_NotifyIconW.argtypes = [c_uint, c_void_p];
-shell32.Shell_NotifyIconW.restype = c_int;
+shell32.Shell_NotifyIconW.argtypes = [DWORD, LPVOID];
+shell32.Shell_NotifyIconW.restype = BOOL;
 
-// dwmapi
+// dwmapi — DwmSetWindowAttribute returns HRESULT (LONG). We don't need an
+// auto-throw wrapper for this one (the rounded-corner hint is a best-effort).
 if (dwmapi) {
   try {
-    dwmapi.DwmSetWindowAttribute.argtypes = [c_void_p, c_uint, c_void_p, c_uint];
-    dwmapi.DwmSetWindowAttribute.restype = c_long;
+    dwmapi.DwmSetWindowAttribute.argtypes = [HWND, DWORD, LPVOID, DWORD];
+    dwmapi.DwmSetWindowAttribute.restype = LONG;
   } catch {
     dwmapi = null;
   }
@@ -205,93 +211,93 @@ if (dwmapi) {
 
 class POINT extends Structure {
   static _fields_ = [
-    ["x", c_long],
-    ["y", c_long],
+    ["x", LONG],
+    ["y", LONG],
   ];
 }
 class RECT extends Structure {
   static _fields_ = [
-    ["left", c_long],
-    ["top", c_long],
-    ["right", c_long],
-    ["bottom", c_long],
+    ["left", LONG],
+    ["top", LONG],
+    ["right", LONG],
+    ["bottom", LONG],
   ];
 }
 
 class WNDCLASSEX extends Structure {
   static _fields_ = [
-    ["cbSize", c_uint],
-    ["style", c_uint],
-    ["lpfnWndProc", c_void_p],
-    ["cbClsExtra", c_int],
-    ["cbWndExtra", c_int],
-    ["hInstance", c_void_p],
-    ["hIcon", c_void_p],
-    ["hCursor", c_void_p],
-    ["hbrBackground", c_void_p],
-    ["lpszMenuName", c_void_p],
-    ["lpszClassName", c_void_p],
-    ["hIconSm", c_void_p],
+    ["cbSize", UINT],
+    ["style", UINT],
+    ["lpfnWndProc", LPVOID],
+    ["cbClsExtra", INT],
+    ["cbWndExtra", INT],
+    ["hInstance", HINSTANCE],
+    ["hIcon", HICON],
+    ["hCursor", HCURSOR],
+    ["hbrBackground", HBRUSH],
+    ["lpszMenuName", LPCWSTR],
+    ["lpszClassName", LPCWSTR],
+    ["hIconSm", HICON],
   ];
 }
 
 class MSG extends Structure {
   static _fields_ = [
-    ["hwnd", c_void_p],
-    ["message", c_uint],
-    ["wParam", c_void_p],
-    ["lParam", c_void_p],
-    ["time", c_uint],
+    ["hwnd", HWND],
+    ["message", UINT],
+    ["wParam", WPARAM],
+    ["lParam", LPARAM],
+    ["time", DWORD],
     ["pt", POINT],
   ];
 }
 
 class GUID extends Structure {
   static _fields_ = [
-    ["Data1", c_uint],
-    ["Data2", c_short],
-    ["Data3", c_short],
-    ["Data4", array(c_byte, 8)],
+    ["Data1", DWORD],
+    ["Data2", WORD],
+    ["Data3", WORD],
+    ["Data4", array(BYTE, 8)],
   ];
 }
 
 class NOTIFYICONDATA extends Structure {
   static _fields_ = [
-    ["cbSize", c_uint],
-    ["hWnd", c_void_p],
-    ["uID", c_uint],
-    ["uFlags", c_uint],
-    ["uCallbackMessage", c_uint],
-    ["hIcon", c_void_p],
+    ["cbSize", DWORD],
+    ["hWnd", HWND],
+    ["uID", UINT],
+    ["uFlags", UINT],
+    ["uCallbackMessage", UINT],
+    ["hIcon", HICON],
     ["szTip", array(c_wchar, 128)],
-    ["dwState", c_uint],
-    ["dwStateMask", c_uint],
+    ["dwState", DWORD],
+    ["dwStateMask", DWORD],
     ["szInfo", array(c_wchar, 256)],
-    ["uTimeoutOrVersion", c_uint],
+    ["uTimeoutOrVersion", UINT],
     ["szInfoTitle", array(c_wchar, 64)],
-    ["dwInfoFlags", c_uint],
+    ["dwInfoFlags", DWORD],
     ["guidItem", GUID],
-    ["hBalloonIcon", c_void_p],
+    ["hBalloonIcon", HICON],
   ];
 }
 
 class PAINTSTRUCT extends Structure {
   static _fields_ = [
-    ["hdc", c_void_p],
-    ["fErase", c_int],
+    ["hdc", HDC],
+    ["fErase", BOOL],
     ["rcPaint", RECT],
-    ["fRestore", c_int],
-    ["fIncUpdate", c_int],
-    ["rgbReserved", array(c_byte, 32)],
+    ["fRestore", BOOL],
+    ["fIncUpdate", BOOL],
+    ["rgbReserved", array(BYTE, 32)],
   ];
 }
 
 class TRACKMOUSEEVENT extends Structure {
   static _fields_ = [
-    ["cbSize", c_uint],
-    ["dwFlags", c_uint],
-    ["hwndTrack", c_void_p],
-    ["dwHoverTime", c_uint],
+    ["cbSize", DWORD],
+    ["dwFlags", DWORD],
+    ["hwndTrack", HWND],
+    ["dwHoverTime", DWORD],
   ];
 }
 
@@ -397,7 +403,7 @@ export class FluentTray {
     // Load icon
     if (icon_path) {
       try {
-        this.#hTrayIcon = user32.LoadImageW(null, create_unicode_buffer(icon_path), IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
+        this.#hTrayIcon = user32.LoadImageW(null, icon_path, IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
       } catch {}
     }
     if (!this.#hTrayIcon) {
@@ -437,7 +443,7 @@ export class FluentTray {
 
     if (icon_path) {
       try {
-        item.hIcon = user32.LoadImageW(null, create_unicode_buffer(icon_path), IMAGE_ICON, ICON_SIZE, ICON_SIZE, LR_LOADFROMFILE);
+        item.hIcon = user32.LoadImageW(null, icon_path, IMAGE_ICON, ICON_SIZE, ICON_SIZE, LR_LOADFROMFILE);
       } catch {}
     }
 
@@ -521,14 +527,15 @@ export class FluentTray {
   // ── Private: window creation ──────────────────────────────────────
 
   #createWindow(round_corner) {
-    const className = create_unicode_buffer(`FluentTray_${++_instanceCounter}`);
+    const className = `FluentTray_${++_instanceCounter}`;
 
-    // Must bind WndProc to this instance via closure
+    // Bind WndProc to this instance. Python: WNDPROC(fn) wraps a JS function
+    // as a stdcall callback (same signature as Win32 WindowProc).
     const self = this;
-    this.#wndProcCb = user32.callback((hwnd, msg, wParam, lParam) => self.#wndProc(hwnd, msg, wParam, lParam), c_void_p, [c_void_p, c_uint, c_void_p, c_void_p]);
+    this.#wndProcCb = WNDPROC((hwnd, msg, wParam, lParam) => self.#wndProc(hwnd, msg, wParam, lParam));
 
     const wc = new WNDCLASSEX();
-    wc.cbSize = WNDCLASSEX.size;
+    wc.cbSize = sizeof(WNDCLASSEX);
     wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc = this.#wndProcCb.pointer;
     wc.hInstance = this.#hInstance;
@@ -558,7 +565,7 @@ export class FluentTray {
 
   #addNotifyIcon() {
     this.#nid = new NOTIFYICONDATA();
-    this.#nid.cbSize = NOTIFYICONDATA.size;
+    this.#nid.cbSize = sizeof(NOTIFYICONDATA);
     this.#nid.hWnd = this.#hwnd;
     this.#nid.uID = 1;
     this.#nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
@@ -670,7 +677,7 @@ export class FluentTray {
     gdi32.DeleteObject(bgBrush);
 
     // Font
-    const hFont = gdi32.CreateFontW(-14, 0, 0, 0, FW_MEDIUM, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, create_unicode_buffer("Segoe UI"));
+    const hFont = gdi32.CreateFontW(-14, 0, 0, 0, FW_MEDIUM, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, "Segoe UI");
     const oldFont = gdi32.SelectObject(memDC, hFont);
     gdi32.SetBkMode(memDC, TRANSPARENT);
 
@@ -739,7 +746,7 @@ export class FluentTray {
       tr.top = it;
       tr.right = ir - 8;
       tr.bottom = ib;
-      user32.DrawTextW(memDC, create_unicode_buffer(item.label), -1, byref(tr), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+      user32.DrawTextW(memDC, item.label, -1, byref(tr), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 
       currentY += ITEM_HEIGHT;
     }
@@ -767,7 +774,7 @@ export class FluentTray {
           this.#showMenu();
         }
       }
-      return 0n;
+      return 0;
     }
 
     switch (m) {
@@ -780,11 +787,11 @@ export class FluentTray {
           console.error("Paint:", e);
         }
         user32.EndPaint(hwnd, byref(ps));
-        return 0n;
+        return 0;
       }
 
       case WM_ERASEBKGND:
-        return 1n;
+        return 1;
 
       case WM_MOUSEMOVE: {
         const idx = this.#hitTest(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
@@ -794,13 +801,13 @@ export class FluentTray {
         }
         if (!this.#trackingMouse) {
           const tme = new TRACKMOUSEEVENT();
-          tme.cbSize = TRACKMOUSEEVENT.size;
+          tme.cbSize = sizeof(TRACKMOUSEEVENT);
           tme.dwFlags = TME_LEAVE;
           tme.hwndTrack = hwnd;
           user32.TrackMouseEvent(byref(tme));
           this.#trackingMouse = true;
         }
-        return 0n;
+        return 0;
       }
 
       case WM_MOUSELEAVE:
@@ -809,7 +816,7 @@ export class FluentTray {
           this.#hoveredIndex = -1;
           user32.InvalidateRect(hwnd, null, 0);
         }
-        return 0n;
+        return 0;
 
       case WM_LBUTTONUP: {
         const idx = this.#hitTest(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
@@ -821,30 +828,30 @@ export class FluentTray {
               if (!item.checked && item.onUncheck) {
                 if (item.onUncheck() === false) {
                   this.stop();
-                  return 0n;
+                  return 0;
                 }
               } else if (item.onClick) {
                 if (item.onClick() === false) {
                   this.stop();
-                  return 0n;
+                  return 0;
                 }
               }
             } else if (item.onClick) {
               if (item.onClick() === false) {
                 this.stop();
-                return 0n;
+                return 0;
               }
             }
             this.#hideMenu();
           }
         }
-        return 0n;
+        return 0;
       }
 
       case WM_DESTROY:
       case WM_CLOSE:
         this.stop();
-        return 0n;
+        return 0;
     }
 
     return user32.DefWindowProcW(hwnd, msg, wParam, lParam);

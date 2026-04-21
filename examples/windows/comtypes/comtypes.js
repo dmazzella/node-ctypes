@@ -17,7 +17,8 @@
 //   obj.Release();
 //   CoUninitialize();
 
-import { WinDLL, WINFUNCTYPE, Structure, array, sizeof, c_int32, c_uint32, c_uint16, c_uint8, c_void_p, c_wchar_p, ptrToBuffer, POINTER_SIZE } from "node-ctypes";
+import { OleDLL, WINFUNCTYPE, Structure, array, ptrToBuffer, POINTER_SIZE, HRESULT as _HRESULT } from "node-ctypes";
+import { DWORD, WORD, BYTE, LPVOID } from "../wintypes.js";
 
 // ═══════════════════════════════════════════════════════════════════════
 // GUID — COM Globally Unique Identifier (16 bytes)
@@ -25,30 +26,39 @@ import { WinDLL, WINFUNCTYPE, Structure, array, sizeof, c_int32, c_uint32, c_uin
 
 export class GUID extends Structure {
   static _fields_ = [
-    ["Data1", c_uint32],
-    ["Data2", c_uint16],
-    ["Data3", c_uint16],
-    ["Data4", array(c_uint8, 8)],
+    ["Data1", DWORD],
+    ["Data2", WORD],
+    ["Data3", WORD],
+    ["Data4", array(BYTE, 8)],
   ];
 
   /**
-   * Create a GUID from a string.
-   * Accepts: "{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}" or without braces.
+   * Python-comtypes-style construction:
+   *   new GUID("{00000000-0000-0000-C000-000000000046}")
+   *   new GUID()          // empty GUID
+   *   new GUID(buffer)    // wrap an existing 16-byte buffer
    *
-   * @param {string} str
-   * @returns {GUID}
+   * @param {string|Buffer} [init]
    */
-  static from(str) {
-    const s = str.replace(/[{}-]/g, "");
-    if (s.length !== 32) throw new Error(`Invalid GUID: "${str}"`);
-    const guid = new GUID();
-    guid.Data1 = parseInt(s.substring(0, 8), 16);
-    guid.Data2 = parseInt(s.substring(8, 12), 16);
-    guid.Data3 = parseInt(s.substring(12, 16), 16);
-    for (let i = 0; i < 8; i++) {
-      guid.Data4[i] = parseInt(s.substring(16 + i * 2, 18 + i * 2), 16);
+  constructor(init) {
+    if (typeof init === "string") {
+      super();
+      const s = init.replace(/[{}-]/g, "");
+      if (s.length !== 32) throw new Error(`Invalid GUID: "${init}"`);
+      this.Data1 = parseInt(s.substring(0, 8), 16);
+      this.Data2 = parseInt(s.substring(8, 12), 16);
+      this.Data3 = parseInt(s.substring(12, 16), 16);
+      for (let i = 0; i < 8; i++) {
+        this.Data4[i] = parseInt(s.substring(16 + i * 2, 18 + i * 2), 16);
+      }
+      return;
     }
-    return guid;
+    super(init);
+  }
+
+  /** Back-compat alias — prefer `new GUID(str)`. */
+  static from(str) {
+    return new GUID(str);
   }
 
   /**
@@ -65,11 +75,10 @@ export class GUID extends Structure {
   }
 }
 
-// Well-known IIDs
-export const IID_IUnknown = GUID.from("{00000000-0000-0000-C000-000000000046}");
-export const IID_IDispatch = GUID.from("{00020400-0000-0000-C000-000000000046}");
-export const IID_IPersist = GUID.from("{0000010C-0000-0000-C000-000000000046}");
-export const IID_IPersistFile = GUID.from("{0000010B-0000-0000-C000-000000000046}");
+// Well-known IIDs. Interface-specific IIDs (IID_IPersist, IID_IPersistFile, …)
+// live with their interface definition under ./interfaces/.
+export const IID_IUnknown = new GUID("{00000000-0000-0000-C000-000000000046}");
+export const IID_IDispatch = new GUID("{00020400-0000-0000-C000-000000000046}");
 
 // ═══════════════════════════════════════════════════════════════════════
 // HRESULT helpers
@@ -100,9 +109,20 @@ export function FAILED(hr) {
 export function checkHR(hr, methodName) {
   if (FAILED(hr)) {
     const hex = "0x" + (hr >>> 0).toString(16).toUpperCase().padStart(8, "0");
-    throw new Error(`COM error ${hex} in ${methodName || "?"}`);
+    const err = new Error(`COM error ${hex} in ${methodName || "?"}`);
+    err.hresult = hr | 0;
+    throw err;
   }
   return hr;
+}
+
+/**
+ * errcheck callback attached to vtable methods whose restype is HRESULT.
+ * Matches Python's `comtypes.hresult.HRESULT` + ctypes OleDLL semantics:
+ * throws on negative HRESULT, returns the value on S_OK (0) or S_FALSE (1).
+ */
+function _hresultErrcheck(result, func) {
+  return checkHR(Number(result), func?._comLabel || func?.funcName);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -112,7 +132,7 @@ export function checkHR(hr, methodName) {
 /**
  * Describes a COM vtable method slot.
  *
- * @param {*} restype  - Return type (e.g. c_int32 for HRESULT, c_uint32, etc.)
+ * @param {*} restype  - Return type (e.g. LONG for HRESULT, DWORD, etc.)
  * @param {string} name - Method name
  * @param {Array} [argtypes] - Argument types (excluding the implicit `this` pointer)
  * @returns {{ restype, name, argtypes }}
@@ -142,8 +162,10 @@ export function COMMETHOD(idlflags, restype, name, ...argspec) {
   return { restype, name, argtypes, idlflags };
 }
 
-// Convenience: HRESULT type alias (just c_int32, but reads better in interface definitions)
-export const HRESULT = c_int32;
+// HRESULT alias — same class ctypes exports, carries `_isHResult: true` so
+// OleDLL auto-throws on negative values for free functions. For vtable
+// methods we attach our own errcheck (see _hresultErrcheck below).
+export const HRESULT = _HRESULT;
 
 // ═══════════════════════════════════════════════════════════════════════
 // COMInterface — declarative interface definitions
@@ -172,7 +194,7 @@ export function COMInterface(spec) {
 
   return Object.freeze({
     _name: spec.name,
-    _iid: GUID.from(spec.iid),
+    _iid: new GUID(spec.iid),
     _extends: spec.extends || null,
     _ownMethods: ownMethods,
     _allMethods: allMethods,
@@ -188,7 +210,7 @@ export function COMInterface(spec) {
 export const IUnknown = COMInterface({
   name: "IUnknown",
   iid: "{00000000-0000-0000-C000-000000000046}",
-  methods: [STDMETHOD(HRESULT, "QueryInterface", [c_void_p, c_void_p]), STDMETHOD(c_uint32, "AddRef"), STDMETHOD(c_uint32, "Release")],
+  methods: [STDMETHOD(HRESULT, "QueryInterface", [LPVOID, LPVOID]), STDMETHOD(DWORD, "AddRef"), STDMETHOD(DWORD, "Release")],
 });
 
 export const IDispatch = COMInterface({
@@ -196,26 +218,14 @@ export const IDispatch = COMInterface({
   iid: "{00020400-0000-0000-C000-000000000046}",
   extends: IUnknown,
   methods: [
-    STDMETHOD(HRESULT, "GetTypeInfoCount", [c_void_p]),
-    STDMETHOD(HRESULT, "GetTypeInfo", [c_uint32, c_uint32, c_void_p]),
-    STDMETHOD(HRESULT, "GetIDsOfNames", [c_void_p, c_void_p, c_uint32, c_uint32, c_void_p]),
-    STDMETHOD(HRESULT, "Invoke", [c_uint32, c_void_p, c_uint32, c_uint32, c_void_p, c_void_p, c_void_p, c_void_p]),
+    STDMETHOD(HRESULT, "GetTypeInfoCount", [LPVOID]),
+    STDMETHOD(HRESULT, "GetTypeInfo", [DWORD, DWORD, LPVOID]),
+    STDMETHOD(HRESULT, "GetIDsOfNames", [LPVOID, LPVOID, DWORD, DWORD, LPVOID]),
+    STDMETHOD(HRESULT, "Invoke", [DWORD, LPVOID, DWORD, DWORD, LPVOID, LPVOID, LPVOID, LPVOID]),
   ],
 });
 
-export const IPersist = COMInterface({
-  name: "IPersist",
-  iid: "{0000010C-0000-0000-C000-000000000046}",
-  extends: IUnknown,
-  methods: [STDMETHOD(HRESULT, "GetClassID", [c_void_p])],
-});
-
-export const IPersistFile = COMInterface({
-  name: "IPersistFile",
-  iid: "{0000010B-0000-0000-C000-000000000046}",
-  extends: IPersist,
-  methods: [STDMETHOD(HRESULT, "IsDirty"), STDMETHOD(HRESULT, "Load", [c_wchar_p, c_uint32]), STDMETHOD(HRESULT, "Save", [c_wchar_p, c_int32]), STDMETHOD(HRESULT, "SaveCompleted", [c_wchar_p]), STDMETHOD(HRESULT, "GetCurFile", [c_void_p])],
-});
+// IPersist / IPersistFile moved to ./interfaces/persist.js — import from there.
 
 // ═══════════════════════════════════════════════════════════════════════
 // COMPointer — wraps a raw COM pointer with vtable dispatch
@@ -229,8 +239,8 @@ function _getProto(restype, argtypes) {
   const key = [restype, ...argtypes].map((t) => t?.name || String(t)).join("|");
   let proto = _protoCache.get(key);
   if (!proto) {
-    // All COM methods have an implicit `this` (c_void_p) as first arg
-    proto = WINFUNCTYPE(restype, c_void_p, ...argtypes);
+    // All COM methods have an implicit `this` (LPVOID) as first arg
+    proto = WINFUNCTYPE(restype, LPVOID, ...argtypes);
     _protoCache.set(key, proto);
   }
   return proto;
@@ -279,7 +289,16 @@ export class COMPointer {
     this._vtable = methods.map((m, i) => {
       const addr = slotSize === 8 ? vtableBuf.readBigUInt64LE(i * slotSize) : BigInt(vtableBuf.readUInt32LE(i * slotSize));
       const proto = _getProto(m.restype, m.argtypes);
-      return proto(addr);
+      const fn = proto(addr);
+      // Auto-throw on COM-failure HRESULT so callers don't need checkHR everywhere.
+      // Python comtypes does this implicitly via HRESULT restype.
+      if (m.restype === HRESULT) {
+        fn.errcheck = _hresultErrcheck;
+      }
+      // Human-readable label for errcheck messages (funcName is already taken
+      // by the FuncPtr factory as the hex address, and is non-configurable).
+      Object.defineProperty(fn, "_comLabel", { value: `${this._interface._name}::${m.name}`, configurable: true });
+      return fn;
     });
   }
 
@@ -309,8 +328,8 @@ export class COMPointer {
    */
   QueryInterface(targetInterface) {
     const ppOut = Buffer.alloc(POINTER_SIZE);
-    const hr = this.call("QueryInterface", targetInterface._iid, ppOut);
-    checkHR(hr, `${this._interface._name}::QueryInterface(${targetInterface._name})`);
+    // vtable errcheck throws on failure; no manual check needed.
+    this.call("QueryInterface", targetInterface._iid, ppOut);
     const outPtr = POINTER_SIZE === 8 ? ppOut.readBigUInt64LE(0) : BigInt(ppOut.readUInt32LE(0));
     return new COMPointer(outPtr, targetInterface);
   }
@@ -335,16 +354,20 @@ export class COMPointer {
 // COM Runtime — CoInitializeEx, CoUninitialize, CoCreateInstance
 // ═══════════════════════════════════════════════════════════════════════
 
-const _ole32 = new WinDLL("ole32.dll");
+// Use OleDLL so HRESULT-returning functions auto-throw on failure (Python
+// parity: `from ctypes import OleDLL; ole32 = OleDLL("ole32")`).
+const _ole32 = new OleDLL("ole32.dll");
 
-const _CoInitializeEx = _ole32.func("CoInitializeEx", c_int32, [c_void_p, c_uint32]);
-const _CoUninitialize = _ole32.func("CoUninitialize", c_void_p, []);
-const _CoCreateInstance = _ole32.func("CoCreateInstance", c_int32, [
-  c_void_p, // rclsid
-  c_void_p, // pUnkOuter
-  c_uint32, // dwClsContext
-  c_void_p, // riid
-  c_void_p, // ppv (output)
+// CoInitializeEx may legitimately return S_FALSE (1) meaning "already
+// initialized" — OleDLL only throws on NEGATIVE HRESULT, so S_FALSE passes.
+const _CoInitializeEx = _ole32.func("CoInitializeEx", HRESULT, [LPVOID, DWORD]);
+const _CoUninitialize = _ole32.func("CoUninitialize", LPVOID, []);
+const _CoCreateInstance = _ole32.func("CoCreateInstance", HRESULT, [
+  LPVOID, // rclsid
+  LPVOID, // pUnkOuter
+  DWORD, // dwClsContext
+  LPVOID, // riid
+  LPVOID, // ppv (output)
 ]);
 
 // COINIT flags
@@ -362,10 +385,9 @@ export const CLSCTX_ALL = 0x17;
  * @param {number} [flags=COINIT_MULTITHREADED]
  */
 export function CoInitializeEx(flags = COINIT_MULTITHREADED) {
-  const hr = _CoInitializeEx(null, flags);
-  // S_OK=0 and S_FALSE=1 (already initialized) are both acceptable
-  if (FAILED(hr)) checkHR(hr, "CoInitializeEx");
-  return hr;
+  // OleDLL + HRESULT → throws automatically on failure. S_FALSE (1,
+  // "already initialized") is positive and passes through.
+  return Number(_CoInitializeEx(null, flags));
 }
 
 /** Uninitialize COM runtime. */
@@ -382,12 +404,11 @@ export function CoUninitialize() {
  * @returns {COMPointer}
  */
 export function CoCreateInstance(clsid, interfaceDef, clsctx = CLSCTX_INPROC_SERVER) {
-  const clsidGuid = typeof clsid === "string" ? GUID.from(clsid) : clsid;
+  const clsidGuid = typeof clsid === "string" ? new GUID(clsid) : clsid;
   const ppv = Buffer.alloc(POINTER_SIZE);
 
-  const hr = _CoCreateInstance(clsidGuid, null, clsctx, interfaceDef._iid, ppv);
-  const label = typeof clsid === "string" ? clsid : clsidGuid.toString();
-  checkHR(hr, `CoCreateInstance(${label}, ${interfaceDef._name})`);
+  // OleDLL + HRESULT: throws on failure automatically.
+  _CoCreateInstance(clsidGuid, null, clsctx, interfaceDef._iid, ppv);
 
   const ptr = POINTER_SIZE === 8 ? ppv.readBigUInt64LE(0) : BigInt(ppv.readUInt32LE(0));
   return new COMPointer(ptr, interfaceDef);

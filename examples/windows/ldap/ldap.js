@@ -29,6 +29,15 @@
 //   Ldap.close();
 
 import { WinDLL, Structure, byref, sizeof, readValue, ptrToBuffer, addressof, create_unicode_buffer, wstring_at, c_void_p, c_void, c_uint32, c_int32, POINTER_SIZE } from "node-ctypes";
+import { BOOL, DWORD, INT, LONG, ULONG, LPCWSTR, LPVOID, PVOID, HANDLE } from "../wintypes.js";
+
+// LDAP-specific type aliases (all void* at the FFI level; semantic documentation
+// only — keeps argtype tables readable for anyone used to the MSDN headers).
+const LDAP = HANDLE; // LDAP* connection handle
+const LDAPMessage = LPVOID; // LDAPMessage*
+const BerElement = LPVOID; // BerElement*
+const PBERVAL = LPVOID; // berval* (LDAP_BERVAL*)
+const PLDAPMod = LPVOID; // LDAPModW*
 
 // ─── LDAP Constants ─────────────────────────────────────────────────
 
@@ -97,20 +106,20 @@ const LARGE_INT_DATE_ATTRIBUTES = new Set(["accountExpires", "badPasswordTime", 
 
 class LDAP_BERVAL extends Structure {
   static _fields_ = [
-    ["bv_len", c_uint32],
-    ["bv_val", c_void_p],
+    ["bv_len", ULONG],
+    ["bv_val", LPVOID],
   ];
 }
 
 class SEC_WINNT_AUTH_IDENTITY_W extends Structure {
   static _fields_ = [
-    ["User", c_void_p],
-    ["UserLength", c_uint32],
-    ["Domain", c_void_p],
-    ["DomainLength", c_uint32],
-    ["Password", c_void_p],
-    ["PasswordLength", c_uint32],
-    ["Flags", c_uint32],
+    ["User", LPCWSTR],
+    ["UserLength", ULONG],
+    ["Domain", LPCWSTR],
+    ["DomainLength", ULONG],
+    ["Password", LPCWSTR],
+    ["PasswordLength", ULONG],
+    ["Flags", ULONG],
   ];
 }
 
@@ -126,92 +135,93 @@ function wldap32() {
     _wldap32 = new WinDLL("wldap32.dll");
 
     // Connection management
-    _wldap32.ldap_initW.argtypes = [c_void_p, c_uint32];
-    _wldap32.ldap_initW.restype = c_void_p;
+    _wldap32.ldap_initW.argtypes = [LPCWSTR, ULONG];
+    _wldap32.ldap_initW.restype = LDAP;
 
-    _wldap32.ldap_set_optionW.argtypes = [c_void_p, c_uint32, c_void_p];
-    _wldap32.ldap_set_optionW.restype = c_uint32;
+    _wldap32.ldap_set_optionW.argtypes = [LDAP, INT, LPVOID];
+    _wldap32.ldap_set_optionW.restype = ULONG;
 
-    _wldap32.ldap_bind_sW.argtypes = [c_void_p, c_void_p, c_void_p, c_uint32];
-    _wldap32.ldap_bind_sW.restype = c_uint32;
+    // lpCred is either NULL or a pointer to SEC_WINNT_AUTH_IDENTITY_W — LPVOID.
+    _wldap32.ldap_bind_sW.argtypes = [LDAP, LPCWSTR, LPVOID, ULONG];
+    _wldap32.ldap_bind_sW.restype = ULONG;
 
-    _wldap32.ldap_unbind.argtypes = [c_void_p];
-    _wldap32.ldap_unbind.restype = c_uint32;
+    _wldap32.ldap_unbind.argtypes = [LDAP];
+    _wldap32.ldap_unbind.restype = ULONG;
 
     // Search
-    _wldap32.ldap_search_sW.argtypes = [c_void_p, c_void_p, c_uint32, c_void_p, c_void_p, c_uint32, c_void_p];
-    _wldap32.ldap_search_sW.restype = c_uint32;
+    _wldap32.ldap_search_sW.argtypes = [LDAP, LPCWSTR, ULONG, LPCWSTR, LPVOID, ULONG, LPVOID];
+    _wldap32.ldap_search_sW.restype = ULONG;
 
     // Result iteration
-    _wldap32.ldap_count_entries.argtypes = [c_void_p, c_void_p];
-    _wldap32.ldap_count_entries.restype = c_uint32;
+    _wldap32.ldap_count_entries.argtypes = [LDAP, LDAPMessage];
+    _wldap32.ldap_count_entries.restype = ULONG;
 
-    _wldap32.ldap_first_entry.argtypes = [c_void_p, c_void_p];
-    _wldap32.ldap_first_entry.restype = c_void_p;
+    _wldap32.ldap_first_entry.argtypes = [LDAP, LDAPMessage];
+    _wldap32.ldap_first_entry.restype = LDAPMessage;
 
-    _wldap32.ldap_next_entry.argtypes = [c_void_p, c_void_p];
-    _wldap32.ldap_next_entry.restype = c_void_p;
+    _wldap32.ldap_next_entry.argtypes = [LDAP, LDAPMessage];
+    _wldap32.ldap_next_entry.restype = LDAPMessage;
 
     // DN
-    _wldap32.ldap_get_dnW.argtypes = [c_void_p, c_void_p];
-    _wldap32.ldap_get_dnW.restype = c_void_p;
+    _wldap32.ldap_get_dnW.argtypes = [LDAP, LDAPMessage];
+    _wldap32.ldap_get_dnW.restype = LPVOID; // PWSTR caller-freed via ldap_memfreeW
 
     // Attribute iteration
-    _wldap32.ldap_first_attributeW.argtypes = [c_void_p, c_void_p, c_void_p];
-    _wldap32.ldap_first_attributeW.restype = c_void_p;
+    _wldap32.ldap_first_attributeW.argtypes = [LDAP, LDAPMessage, LPVOID];
+    _wldap32.ldap_first_attributeW.restype = LPVOID; // PWSTR
 
-    _wldap32.ldap_next_attributeW.argtypes = [c_void_p, c_void_p, c_void_p];
-    _wldap32.ldap_next_attributeW.restype = c_void_p;
+    _wldap32.ldap_next_attributeW.argtypes = [LDAP, LDAPMessage, BerElement];
+    _wldap32.ldap_next_attributeW.restype = LPVOID; // PWSTR
 
     // Values
-    _wldap32.ldap_get_values_lenW.argtypes = [c_void_p, c_void_p, c_void_p];
-    _wldap32.ldap_get_values_lenW.restype = c_void_p;
+    _wldap32.ldap_get_values_lenW.argtypes = [LDAP, LDAPMessage, LPCWSTR];
+    _wldap32.ldap_get_values_lenW.restype = LPVOID; // berval**
 
-    _wldap32.ldap_count_values_len.argtypes = [c_void_p];
-    _wldap32.ldap_count_values_len.restype = c_uint32;
+    _wldap32.ldap_count_values_len.argtypes = [LPVOID];
+    _wldap32.ldap_count_values_len.restype = ULONG;
 
     // Cleanup
-    _wldap32.ldap_value_free_len.argtypes = [c_void_p];
-    _wldap32.ldap_value_free_len.restype = c_uint32;
+    _wldap32.ldap_value_free_len.argtypes = [LPVOID];
+    _wldap32.ldap_value_free_len.restype = ULONG;
 
-    _wldap32.ldap_memfreeW.argtypes = [c_void_p];
+    _wldap32.ldap_memfreeW.argtypes = [LPVOID];
     _wldap32.ldap_memfreeW.restype = c_void;
 
-    _wldap32.ldap_msgfree.argtypes = [c_void_p];
-    _wldap32.ldap_msgfree.restype = c_uint32;
+    _wldap32.ldap_msgfree.argtypes = [LDAPMessage];
+    _wldap32.ldap_msgfree.restype = ULONG;
 
-    _wldap32.ber_free.argtypes = [c_void_p, c_int32];
+    _wldap32.ber_free.argtypes = [BerElement, INT];
     _wldap32.ber_free.restype = c_void;
 
-    _wldap32.ber_bvfree.argtypes = [c_void_p];
+    _wldap32.ber_bvfree.argtypes = [PBERVAL];
     _wldap32.ber_bvfree.restype = c_void;
 
     // Paged search
-    _wldap32.ldap_search_ext_sW.argtypes = [c_void_p, c_void_p, c_uint32, c_void_p, c_void_p, c_uint32, c_void_p, c_void_p, c_void_p, c_uint32, c_void_p];
-    _wldap32.ldap_search_ext_sW.restype = c_uint32;
+    _wldap32.ldap_search_ext_sW.argtypes = [LDAP, LPCWSTR, ULONG, LPCWSTR, LPVOID, ULONG, LPVOID, LPVOID, LPVOID, ULONG, LPVOID];
+    _wldap32.ldap_search_ext_sW.restype = ULONG;
 
-    _wldap32.ldap_create_page_controlW.argtypes = [c_void_p, c_uint32, c_void_p, c_uint32, c_void_p];
-    _wldap32.ldap_create_page_controlW.restype = c_uint32;
+    _wldap32.ldap_create_page_controlW.argtypes = [LDAP, ULONG, PBERVAL, BOOL, LPVOID];
+    _wldap32.ldap_create_page_controlW.restype = ULONG;
 
-    _wldap32.ldap_parse_resultW.argtypes = [c_void_p, c_void_p, c_void_p, c_void_p, c_void_p, c_void_p, c_void_p, c_int32];
-    _wldap32.ldap_parse_resultW.restype = c_uint32;
+    _wldap32.ldap_parse_resultW.argtypes = [LDAP, LDAPMessage, LPVOID, LPVOID, LPVOID, LPVOID, LPVOID, BOOL];
+    _wldap32.ldap_parse_resultW.restype = ULONG;
 
-    _wldap32.ldap_parse_page_controlW.argtypes = [c_void_p, c_void_p, c_void_p, c_void_p];
-    _wldap32.ldap_parse_page_controlW.restype = c_uint32;
+    _wldap32.ldap_parse_page_controlW.argtypes = [LDAP, LPVOID, LPVOID, LPVOID];
+    _wldap32.ldap_parse_page_controlW.restype = ULONG;
 
-    _wldap32.ldap_control_freeW.argtypes = [c_void_p];
-    _wldap32.ldap_control_freeW.restype = c_uint32;
+    _wldap32.ldap_control_freeW.argtypes = [LPVOID];
+    _wldap32.ldap_control_freeW.restype = ULONG;
 
-    _wldap32.ldap_controls_freeW.argtypes = [c_void_p];
-    _wldap32.ldap_controls_freeW.restype = c_uint32;
+    _wldap32.ldap_controls_freeW.argtypes = [LPVOID];
+    _wldap32.ldap_controls_freeW.restype = ULONG;
 
     // Modify
-    _wldap32.ldap_modify_sW.argtypes = [c_void_p, c_void_p, c_void_p];
-    _wldap32.ldap_modify_sW.restype = c_uint32;
+    _wldap32.ldap_modify_sW.argtypes = [LDAP, LPCWSTR, LPVOID];
+    _wldap32.ldap_modify_sW.restype = ULONG;
 
     // Error
     _wldap32.LdapGetLastError.argtypes = [];
-    _wldap32.LdapGetLastError.restype = c_uint32;
+    _wldap32.LdapGetLastError.restype = ULONG;
   }
   return _wldap32;
 }
@@ -219,8 +229,8 @@ function wldap32() {
 function advapi32() {
   if (!_advapi32) {
     _advapi32 = new WinDLL("advapi32.dll");
-    _advapi32.ConvertSidToStringSidW.argtypes = [c_void_p, c_void_p];
-    _advapi32.ConvertSidToStringSidW.restype = c_int32;
+    _advapi32.ConvertSidToStringSidW.argtypes = [LPVOID, LPVOID];
+    _advapi32.ConvertSidToStringSidW.restype = BOOL;
   }
   return _advapi32;
 }
@@ -228,8 +238,8 @@ function advapi32() {
 function ole32() {
   if (!_ole32) {
     _ole32 = new WinDLL("ole32.dll");
-    _ole32.StringFromGUID2.argtypes = [c_void_p, c_void_p, c_int32];
-    _ole32.StringFromGUID2.restype = c_int32;
+    _ole32.StringFromGUID2.argtypes = [LPVOID, LPVOID, INT];
+    _ole32.StringFromGUID2.restype = INT;
   }
   return _ole32;
 }
@@ -237,8 +247,8 @@ function ole32() {
 function kernel32() {
   if (!_kernel32) {
     _kernel32 = new WinDLL("kernel32.dll");
-    _kernel32.LocalFree.argtypes = [c_void_p];
-    _kernel32.LocalFree.restype = c_void_p;
+    _kernel32.LocalFree.argtypes = [HANDLE];
+    _kernel32.LocalFree.restype = HANDLE;
   }
   return _kernel32;
 }
@@ -246,8 +256,12 @@ function kernel32() {
 // ─── Error helper ───────────────────────────────────────────────────
 
 function check(rc, fn) {
-  if (rc !== LDAP_SUCCESS) {
-    throw new Error(`${fn} failed (LDAP error 0x${rc.toString(16)})`);
+  // ULONG return from LDAP calls comes through as BigInt — normalize before
+  // comparing (0n !== 0 in JS). LDAP error codes fit in uint32 so Number() is
+  // always lossless.
+  const code = Number(rc);
+  if (code !== LDAP_SUCCESS) {
+    throw new Error(`${fn} failed (LDAP error 0x${code.toString(16)})`);
   }
 }
 
@@ -327,7 +341,8 @@ function guidToString(guidBuffer) {
   const len = api.StringFromGUID2(guidBuf, outBuf, 39);
   if (len === 0) return null;
 
-  return wstring_at(outBuf).replace(/\0+$/, "");
+  // wstring_at stops at the first NUL — no manual trim needed.
+  return wstring_at(outBuf);
 }
 
 /** Parse LDAP Generalized Time → ISO 8601 string. */
@@ -641,8 +656,9 @@ export function sortTreeByDN(array) {
 function ldapConnect(host, options = {}) {
   const ldap = wldap32();
 
-  const hostBuf = host ? create_unicode_buffer(host) : null;
-  const ld = ldap.ldap_initW(hostBuf, options.port || LDAP_PORT);
+  // host: plain JS string passes through LPCWSTR argtype via the c_wchar_p
+  // keepalive mechanism; Python-ctypes parity.
+  const ld = ldap.ldap_initW(host || null, options.port || LDAP_PORT);
   if (!ld || ld === 0n) {
     throw new Error(`ldap_initW failed: could not connect to ${host || "default"}`);
   }
@@ -657,26 +673,23 @@ function ldapConnect(host, options = {}) {
     check(rc, "ldap_set_optionW(LDAP_OPT_REFERRALS)");
 
     if (options.username && options.password) {
-      const userBuf = create_unicode_buffer(options.username);
-      const passBuf = create_unicode_buffer(options.password);
-      const domainBuf = options.domain ? create_unicode_buffer(options.domain) : null;
-
+      // SEC_WINNT_AUTH_IDENTITY_W fields are LPCWSTR — assigning strings uses
+      // the c_wchar_p struct-field keepalive (Python parity).
       const auth = new SEC_WINNT_AUTH_IDENTITY_W();
-      auth.User = addressof(userBuf);
+      auth.User = options.username;
       auth.UserLength = options.username.length;
-      auth.Password = addressof(passBuf);
+      auth.Password = options.password;
       auth.PasswordLength = options.password.length;
-      if (domainBuf) {
-        auth.Domain = addressof(domainBuf);
+      if (options.domain) {
+        auth.Domain = options.domain;
         auth.DomainLength = options.domain.length;
       } else {
-        auth.Domain = 0n;
+        auth.Domain = null;
         auth.DomainLength = 0;
       }
       auth.Flags = SEC_WINNT_AUTH_IDENTITY_UNICODE;
 
       rc = ldap.ldap_bind_sW(ld, null, byref(auth), LDAP_AUTH_NEGOTIATE);
-      auth._refs = { userBuf, passBuf, domainBuf };
     } else {
       rc = ldap.ldap_bind_sW(ld, null, null, LDAP_AUTH_NEGOTIATE);
     }
@@ -767,12 +780,11 @@ export function queryBegin(host, baseDn, scope, filter, properties, options = {}
   const ld = ldapConnect(host, options);
 
   try {
-    const baseDnBuf = create_unicode_buffer(baseDn);
-    const filterBuf = create_unicode_buffer(filter);
     const attrList = buildAttrList(properties);
     const resultPtr = new c_void_p();
 
-    const rc = ldap.ldap_search_sW(ld, baseDnBuf, scope, filterBuf, attrList, 0, byref(resultPtr));
+    // baseDn / filter pass through LPCWSTR argtype as plain strings.
+    const rc = ldap.ldap_search_sW(ld, baseDn, scope, filter, attrList, 0, byref(resultPtr));
     check(rc, "ldap_search_sW");
 
     return { ld, searchResult: resultPtr.value };
@@ -825,12 +837,13 @@ export function findObjects(ld, searchResult, maxObjects = -1) {
         continue;
       }
 
-      // Get attribute values (berval array)
-      const attrBuf = create_unicode_buffer(attrName);
-      const valuesPtr = ldap.ldap_get_values_lenW(ld, entry, attrBuf);
+      // Get attribute values (berval array) — attrName as plain JS string
+      const valuesPtr = ldap.ldap_get_values_lenW(ld, entry, attrName);
 
       if (valuesPtr && valuesPtr !== 0n) {
-        const count = ldap.ldap_count_values_len(valuesPtr);
+        // ldap_count_values_len returns ULONG → BigInt; normalize to Number
+        // for arithmetic with POINTER_SIZE (which is a plain Number).
+        const count = Number(ldap.ldap_count_values_len(valuesPtr));
         const values = [];
 
         if (count > 0) {
@@ -985,10 +998,10 @@ export function modify(dn, modifications, basePath, options = {}) {
   const ld = ldapConnect(options.host || host, options);
 
   try {
-    const dnBuf = create_unicode_buffer(dn);
     const modsArray = buildModsArray(modifications);
 
-    const rc = ldap.ldap_modify_sW(ld, dnBuf, modsArray);
+    // dn passes through LPCWSTR argtype as plain JS string.
+    const rc = ldap.ldap_modify_sW(ld, dn, modsArray);
     check(rc, "ldap_modify_sW");
   } finally {
     ldap.ldap_unbind(ld);
@@ -1026,8 +1039,6 @@ export function query(filter, basePath, scope = SCOPE.SUBTREE, properties = [], 
   const ld = ldapConnect(options.host || host, options);
 
   try {
-    const baseDnBuf = create_unicode_buffer(baseDn);
-    const filterBuf = create_unicode_buffer(filter);
     const attrList = buildAttrList(properties);
     const allResults = [];
 
@@ -1044,13 +1055,13 @@ export function query(filter, basePath, scope = SCOPE.SUBTREE, properties = [], 
       // 2. Build server controls array: [pageControl, NULL]
       const serverControls = buildControlsArray(pageControlPtr.value);
 
-      // 3. Paged search
+      // 3. Paged search — baseDn / filter as plain strings (LPCWSTR).
       const resultPtr = new c_void_p();
       rc = ldap.ldap_search_ext_sW(
         ld,
-        baseDnBuf,
+        baseDn,
         scope,
-        filterBuf,
+        filter,
         attrList,
         0, // attrsonly
         serverControls, // server controls
@@ -1075,7 +1086,8 @@ export function query(filter, basePath, scope = SCOPE.SUBTREE, properties = [], 
       // Free page control
       ldap.ldap_control_freeW(pageControlPtr.value);
 
-      if (rc !== LDAP_SUCCESS || !returnedControlsPtr.value || returnedControlsPtr.value === 0n) {
+      // ldap_parse_resultW returned ULONG as BigInt — compare via Number.
+      if (Number(rc) !== LDAP_SUCCESS || !returnedControlsPtr.value || returnedControlsPtr.value === 0n) {
         break;
       }
 
@@ -1087,7 +1099,7 @@ export function query(filter, basePath, scope = SCOPE.SUBTREE, properties = [], 
       // Free returned server controls
       ldap.ldap_controls_freeW(returnedControlsPtr.value);
 
-      if (rc !== LDAP_SUCCESS) break;
+      if (Number(rc) !== LDAP_SUCCESS) break;
 
       // 7. Check if cookie is empty (no more pages)
       if (!newCookiePtr.value || newCookiePtr.value === 0n) break;

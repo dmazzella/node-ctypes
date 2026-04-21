@@ -62,3 +62,15 @@ export const LRESULT = c_ssize_t;
 export const UINT_PTR = c_size_t;
 export const LONG_PTR = c_ssize_t;
 export const ULONG_PTR = c_size_t;
+
+// Advapi / registry
+export const LSTATUS = c_long; // LONG error code (0 = success, otherwise Win32 error)
+export const REGSAM = c_ulong; // Access mask for registry APIs
+
+// Pointer-to-primitive aliases (for *_OUT params / byref usage)
+// These are void* at the FFI level; semantic type documented by name.
+export const PBYTE = c_void_p;
+export const LPBYTE = c_void_p;
+export const PDWORD = c_void_p;
+export const LPDWORD = c_void_p;
+export const PHKEY = c_void_p;
