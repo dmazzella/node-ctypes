@@ -125,7 +125,9 @@ describe("errcheck (Python ctypes compatible)", function () {
 
   describe("errcheck with WinError (Windows pattern)", { skip: process.platform !== "win32" }, function () {
     it("should check GetLastError and throw on failure", function () {
-      const kernel32 = new ctypes.WinDLL("kernel32.dll");
+      // Python ctypes parity: GetLastError() legge lo slot privato, aggiornato
+      // solo dalle FFI call su lib con use_last_error: true.
+      const kernel32 = new ctypes.WinDLL("kernel32.dll", { use_last_error: true });
       const DeleteFileW = kernel32.func("DeleteFileW", ctypes.c_bool, [ctypes.c_wchar_p]);
 
       // Pattern Windows: controlla FALSE e usa GetLastError

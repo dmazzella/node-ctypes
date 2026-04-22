@@ -204,40 +204,41 @@ console.log(`${st.wYear}-${st.wMonth}-${st.wDay}`);
 
 ## API Compatibility Reference
 
-| Feature              | Python ctypes                     | node-ctypes                                     |
-| -------------------- | --------------------------------- | ----------------------------------------------- |
-| Load library         | `CDLL("lib.so")`                  | `new CDLL("lib.so")`                            |
-| Function setup       | `f.argtypes = [c_int]`            | `f.argtypes = [c_int]`                          |
-| Structs              | `class P(Structure):`             | `class P extends Structure`                     |
-| Unions               | `class U(Union):`                 | `class U extends Union`                         |
-| Arrays               | `c_int * 5`                       | `array(c_int, 5)`                               |
-| Bit fields           | `("f", c_uint, 3)`                | `["f", c_uint32, 3]`                            |
-| Callbacks            | `CFUNCTYPE(c_int, c_int)`         | `CFUNCTYPE(c_int, c_int)`                       |
-| Pointers             | `POINTER(c_int)` / `pointer(obj)` | `POINTER(c_int)` / `pointer(obj)`               |
-| Pointer arithmetic   | `p[i]`, C-style `ptr + n`         | `p[i]`, `p.add(n)`, `p.slice(a, b)`             |
-| Sizeof               | `sizeof(c_int)`                   | `sizeof(c_int)`                                 |
-| Alignment            | `alignment(c_int)`                | `alignment(c_int)`                              |
-| Strings              | `c_char_p(b"hello")`              | `create_string_buffer("hello")`                 |
-| Variadic             | `sprintf(buf, b"%d", 42)`         | `sprintf(buf, "%d", 42)`                        |
-| Errno                | `get_errno()`                     | `get_errno()`                                   |
-| byref                | `byref(obj)`                      | `byref(obj)`                                    |
-| cast                 | `cast(ptr, type)`                 | `cast(ptr, type)` (supports `POINTER()` target) |
-| Find library         | `ctypes.util.find_library("c")`   | `find_library("c")`                             |
-| Lazy load            | `ctypes.cdll.msvcrt.printf(...)`  | `cdll.msvcrt.printf(...)`                       |
-| `from_buffer`        | `S.from_buffer(buf)`              | `S.from_buffer(buf)`                            |
-| `from_buffer_copy`   | `S.from_buffer_copy(buf)`         | `S.from_buffer_copy(buf)`                       |
-| `from_address`       | `S.from_address(addr)`            | `S.from_address(addr)`                          |
-| `in_dll`             | `c_int.in_dll(lib, "errno")`      | `c_int.in_dll(lib, "errno")`                    |
-| `_as_parameter_`     | Unwrap on call                    | Unwrap on call                                  |
-| `from_param`         | Custom conversion                 | Custom conversion                               |
-| `use_last_error`     | `CDLL(..., use_last_error=True)`  | `new CDLL(..., { use_last_error: true })`       |
-| `use_errno`          | `CDLL(..., use_errno=True)`       | `new CDLL(..., { use_errno: true })`            |
-| `OleDLL` / `HRESULT` | `OleDLL("ole32")` auto-raises     | `new OleDLL("ole32.dll")` auto-throws           |
-| `paramflags`         | `proto((name, lib), paramflags)`  | `proto.bind(lib, name, paramflags)`             |
-| Big-endian struct    | `class X(BigEndianStructure)`     | `class X extends BigEndianStructure`            |
-| Little-endian struct | `class X(LittleEndianStructure)`  | `class X extends LittleEndianStructure`         |
-| Big-endian union     | `class X(BigEndianUnion)`         | `class X extends BigEndianUnion`                |
-| Little-endian union  | `class X(LittleEndianUnion)`      | `class X extends LittleEndianUnion`             |
+| Feature               | Python ctypes                           | node-ctypes                                     |
+| --------------------- | --------------------------------------- | ----------------------------------------------- |
+| Load library          | `CDLL("lib.so")`                        | `new CDLL("lib.so")`                            |
+| Function setup        | `f.argtypes = [c_int]`                  | `f.argtypes = [c_int]`                          |
+| Structs               | `class P(Structure):`                   | `class P extends Structure`                     |
+| Unions                | `class U(Union):`                       | `class U extends Union`                         |
+| Arrays                | `c_int * 5`                             | `array(c_int, 5)`                               |
+| Bit fields            | `("f", c_uint, 3)`                      | `["f", c_uint32, 3]`                            |
+| Callbacks             | `CFUNCTYPE(c_int, c_int)`               | `CFUNCTYPE(c_int, c_int)`                       |
+| Pointers              | `POINTER(c_int)` / `pointer(obj)`       | `POINTER(c_int)` / `pointer(obj)`               |
+| Pointer arithmetic    | `p[i]`, C-style `ptr + n`               | `p[i]`, `p.add(n)`, `p.slice(a, b)`             |
+| Sizeof                | `sizeof(c_int)`                         | `sizeof(c_int)`                                 |
+| Alignment             | `alignment(c_int)`                      | `alignment(c_int)`                              |
+| Strings               | `c_char_p(b"hello")`                    | `create_string_buffer("hello")`                 |
+| Variadic              | `sprintf(buf, b"%d", 42)`               | `sprintf(buf, "%d", 42)`                        |
+| Errno slot            | `get_errno()` / `set_errno()`           | `get_errno()` / `set_errno()`                   |
+| Last-error slot (Win) | `get_last_error()` / `set_last_error()` | `GetLastError()` / `SetLastError()`             |
+| byref                 | `byref(obj)`                            | `byref(obj)`                                    |
+| cast                  | `cast(ptr, type)`                       | `cast(ptr, type)` (supports `POINTER()` target) |
+| Find library          | `ctypes.util.find_library("c")`         | `find_library("c")`                             |
+| Lazy load             | `ctypes.cdll.msvcrt.printf(...)`        | `cdll.msvcrt.printf(...)`                       |
+| `from_buffer`         | `S.from_buffer(buf)`                    | `S.from_buffer(buf)`                            |
+| `from_buffer_copy`    | `S.from_buffer_copy(buf)`               | `S.from_buffer_copy(buf)`                       |
+| `from_address`        | `S.from_address(addr)`                  | `S.from_address(addr)`                          |
+| `in_dll`              | `c_int.in_dll(lib, "errno")`            | `c_int.in_dll(lib, "errno")`                    |
+| `_as_parameter_`      | Unwrap on call                          | Unwrap on call                                  |
+| `from_param`          | Custom conversion                       | Custom conversion                               |
+| `use_last_error`      | `CDLL(..., use_last_error=True)`        | `new CDLL(..., { use_last_error: true })`       |
+| `use_errno`           | `CDLL(..., use_errno=True)`             | `new CDLL(..., { use_errno: true })`            |
+| `OleDLL` / `HRESULT`  | `OleDLL("ole32")` auto-raises           | `new OleDLL("ole32.dll")` auto-throws           |
+| `paramflags`          | `proto((name, lib), paramflags)`        | `proto.bind(lib, name, paramflags)`             |
+| Big-endian struct     | `class X(BigEndianStructure)`           | `class X extends BigEndianStructure`            |
+| Little-endian struct  | `class X(LittleEndianStructure)`        | `class X extends LittleEndianStructure`         |
+| Big-endian union      | `class X(BigEndianUnion)`               | `class X extends BigEndianUnion`                |
+| Little-endian union   | `class X(LittleEndianUnion)`            | `class X extends LittleEndianUnion`             |
 
 ## Supported Types
 
@@ -290,17 +291,29 @@ const CoInit = ole32.func("CoInitializeEx", HRESULT, [c_void_p, c_uint32]);
 CoInit(null, 0); // throws on failure, no manual check needed
 ```
 
-### Snapshotted errno / GetLastError
+### Snapshotted errno / GetLastError (Python ctypes parity)
+
+`GetLastError()` / `get_errno()` read a **private thread-local slot** — exactly
+like `ctypes.get_last_error()` / `ctypes.get_errno()` in Python. The slot is
+updated **only** by FFI calls through libraries opened with `use_last_error`
+or `use_errno`. If you never set that flag, the slot stays at 0.
 
 ```javascript
+import { WinDLL, GetLastError, c_void_p, c_wchar_p } from "node-ctypes";
+
 const user32 = new WinDLL("user32.dll", { use_last_error: true });
 const FindWindow = user32.func("FindWindowW", c_void_p, [c_wchar_p, c_wchar_p]);
+
 FindWindow("NoSuchClass", null);
-console.log(user32.get_last_error()); // ERROR_CANNOT_FIND_WND_CLASS
+
+// Both read the same snapshot — the one taken atomically in native code
+// immediately after ffi_call, before any other JS can clobber it.
+console.log(GetLastError()); // top-level API (Python: ctypes.get_last_error)
+console.log(user32.get_last_error()); // per-library alias
 ```
 
-The snapshot is taken inside the native bridge immediately after `ffi_call`,
-so other Node.js code can't clobber it before you read it back.
+To read the **system** `GetLastError()` directly (ignoring the private slot),
+call the Win32 API manually as any other FFI function — same as Python.
 
 ### `paramflags` — out parameters become return values
 

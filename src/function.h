@@ -234,8 +234,8 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
   // ============================================================
   bool capture_last_error_;  // snapshot GetLastError dopo ogni call
   bool capture_errno_;       // snapshot errno dopo ogni call
-  int last_error_;
-  int last_errno_;
+  uint32_t last_error_;      // DWORD-like (unsigned), parity Win32
+  int last_errno_;           // errno è int in POSIX
 
  public:
   Napi::Value GetLastErrorCaptured(const Napi::CallbackInfo& info);

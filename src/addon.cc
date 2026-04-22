@@ -101,6 +101,11 @@ CTypesAddon::CTypesAddon(Napi::Env env, Napi::Object exports) {
                          InstanceMethod("cstring", &CTypesAddon::CreateCString),
                          InstanceMethod("readCString", &CTypesAddon::ReadCString),
                          InstanceMethod("ptrToBuffer", &CTypesAddon::PtrToBuffer),
+                         // Slot module-level last-error / errno (parity Python ctypes)
+                         InstanceMethod("getCapturedLastError", &CTypesAddon::GetCapturedLastError),
+                         InstanceMethod("setCapturedLastError", &CTypesAddon::SetCapturedLastError),
+                         InstanceMethod("getCapturedErrno", &CTypesAddon::GetCapturedErrno),
+                         InstanceMethod("setCapturedErrno", &CTypesAddon::SetCapturedErrno),
 
                          // CType enum - single source of truth per i tipi
                          InstanceValue("CType", CreateCType(env), napi_enumerable),
@@ -417,6 +422,37 @@ Napi::Value CTypesAddon::PtrToBuffer(const Napi::CallbackInfo& info) {
     // No-op finalizer - caller owns the memory
     // This is intentional but requires careful usage
   });
+}
+
+// ========== Module-level captured last-error / errno ==========
+// Slot privati thread-local aggiornati da FFIFunction::Call quando la library
+// è aperta con use_last_error / use_errno. Parity Python ctypes: le API
+// get_last_error / set_last_error / get_errno / set_errno leggono e scrivono
+// SOLO questa slot, non il valore di sistema.
+
+Napi::Value CTypesAddon::GetCapturedLastError(const Napi::CallbackInfo& info) {
+  // Ritorna unsigned (DWORD) come double — copre l'intero range uint32.
+  return Napi::Number::New(info.Env(), static_cast<double>(captured_last_error));
+}
+
+Napi::Value CTypesAddon::SetCapturedLastError(const Napi::CallbackInfo& info) {
+  uint32_t prev = captured_last_error;
+  if (info.Length() >= 1 && info[0].IsNumber()) {
+    captured_last_error = info[0].As<Napi::Number>().Uint32Value();
+  }
+  return Napi::Number::New(info.Env(), static_cast<double>(prev));
+}
+
+Napi::Value CTypesAddon::GetCapturedErrno(const Napi::CallbackInfo& info) {
+  return Napi::Number::New(info.Env(), captured_errno);
+}
+
+Napi::Value CTypesAddon::SetCapturedErrno(const Napi::CallbackInfo& info) {
+  int prev = captured_errno;
+  if (info.Length() >= 1 && info[0].IsNumber()) {
+    captured_errno = info[0].As<Napi::Number>().Int32Value();
+  }
+  return Napi::Number::New(info.Env(), prev);
 }
 
 }  // namespace ctypes

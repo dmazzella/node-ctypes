@@ -1,5 +1,7 @@
 #include "function.h"
 
+#include "addon.h"  // CTypesAddon per gli slot captured_last_error / captured_errno
+
 namespace ctypes {
 
 CallConv StringToCallConv(const std::string& name) {
@@ -49,7 +51,7 @@ Napi::Function FFIFunction::GetClass(Napi::Env env) {
 }
 
 Napi::Value FFIFunction::GetLastErrorCaptured(const Napi::CallbackInfo& info) {
-  return Napi::Number::New(info.Env(), last_error_);
+  return Napi::Number::New(info.Env(), static_cast<double>(last_error_));
 }
 
 Napi::Value FFIFunction::GetErrnoCaptured(const Napi::CallbackInfo& info) {
@@ -1065,16 +1067,27 @@ Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
 
   // Snapshot di errno / GetLastError subito dopo ffi_call, prima che
   // qualsiasi altro codice possa sovrascriverli (parity Python ctypes
-  // use_last_error / use_errno).
-  if (capture_last_error_) {
+  // use_last_error / use_errno). Aggiorna sia lo slot per-FFIFunction
+  // (leggibile da lib.get_last_error()) sia lo slot addon-instance
+  // (leggibile da GetLastError() / get_errno() top-level).
+  if (capture_last_error_ || capture_errno_) {
+    CTypesAddon* addon = env.GetInstanceData<CTypesAddon>();
+    if (capture_last_error_) {
 #ifdef _WIN32
-    last_error_ = static_cast<int>(::GetLastError());
+      last_error_ = static_cast<uint32_t>(::GetLastError());
 #else
-    last_error_ = errno;
+      last_error_ = static_cast<uint32_t>(errno);
 #endif
-  }
-  if (capture_errno_) {
-    last_errno_ = errno;
+      if (addon) {
+        addon->captured_last_error = last_error_;
+      }
+    }
+    if (capture_errno_) {
+      last_errno_ = errno;
+      if (addon) {
+        addon->captured_errno = last_errno_;
+      }
+    }
   }
 
   // Converti il return value e applica errcheck se presente
