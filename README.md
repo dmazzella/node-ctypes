@@ -380,6 +380,26 @@ h.magic = 0x12345678; // stored as 12 34 56 78 on the wire
 - No automatic memory management for returned pointers
 - Both `class extends Structure` (Python-like) and `struct({...})` (functional) syntaxes available
 - Only type classes (`c_int32`) are accepted, not string literals (`"int32"`) — same as Python
+- `c_char_p` / `c_wchar_p` argtypes also accept a raw `BigInt` / `number` pointer
+  address. Python ctypes is stricter (raises `TypeError` on `int`); for portable
+  code use `c_void_p` argtype when passing a raw address — both libraries
+  accept it there. See below.
+
+### Passing raw pointer addresses
+
+```javascript
+// You receive a LPWSTR address from another API (e.g. IDirectorySearch::
+// GetNextColumnName writes an address into a Buffer):
+const addr = pszColumn.readBigUInt64LE(0);
+
+// Node-ctypes (convenience — accepted on string argtypes):
+lib.wcslen.argtypes = [c_wchar_p];
+lib.wcslen(addr); // works
+
+// Python-idiomatic (works in both libraries — use for portable code):
+lib.wcslen.argtypes = [c_void_p];
+lib.wcslen(addr); // works
+```
 
 ### Debugging callback leaks
 
@@ -434,11 +454,12 @@ const p = new Point({ x: 3, y: 4 }); // p.x, p.y typed as number
 ## Examples
 
 - [Windows Controls Demo](examples/windows/demo_controls.js) — Win32 common controls showcase
-- [Windows Registry Demo](examples/windows/demo_registry.js) — setValue, getValue, openKey, deleteValue, deleteKey
-- [Windows Tray Demo](examples/windows/demo_tray.js) — System tray menu
-- [Windows COM Automation Demo](examples/windows/demo_comtypes.js) — IShellLinkW / IPersistFile COM interfaces
-- [Windows LDAP Demo](examples/windows/demo_ldap.js) — LDAP directory queries
-- [Smart Card (PC/SC) Demo](examples/demo_scard.js) — WinSCard on Windows, pcsclite on macOS/Linux
+- [Windows Registry Demo](examples/windows/demo_registry.js) — `setValue` / `getValue` / `openKey` / `deleteValue` / `deleteKey`
+- [Windows Tray Demo](examples/windows/demo_tray.js) — system tray icon and popup menu
+- [Windows COM — Shortcut](examples/windows/demo_comtypes_file.js) — create a `.lnk` via `IShellLinkW` + `IPersistFile`
+- [Windows COM — Active Directory](examples/windows/demo_comtypes_ads.js) — `IDirectorySearch` / `ADsOpenObject` for AD queries (`--tree` / `--flat`)
+- [Windows LDAP Demo](examples/windows/demo_ldap.js) — LDAP v3 paged search (`wldap32`), tree/flat output, auth with `SEC_WINNT_AUTH_IDENTITY`
+- [Smart Card (PC/SC) Demo](examples/demo_scard.js) — `WinSCard` on Windows, `pcsclite` on macOS/Linux
 
 ## Tests
 

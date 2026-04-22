@@ -15,7 +15,9 @@ from ctypes import (
     c_int32,
     sizeof,
     byref,
+    addressof,
     create_string_buffer,
+    create_unicode_buffer,
     cast,
     POINTER,
     c_double,
@@ -234,6 +236,42 @@ class TestFunctionsAndCallbacks(unittest.TestCase):
         self.assertNotEqual(ptr, 0, "malloc should return non-null pointer")
 
         free(ptr)
+
+    # Python ctypes is strict: c_char_p / c_wchar_p argtypes refuse raw ints
+    # with TypeError. To pass a raw pointer address to such a parameter, the
+    # idiomatic Python way is to declare the argtype as c_void_p instead.
+    #
+    # node-ctypes accepts the raw address directly on c_char_p / c_wchar_p
+    # as a convenience extension (strict superset of Python behavior). These
+    # tests document the Python-idiomatic pattern for the same use case.
+    def test_int_address_requires_c_void_p(self):
+        """Raw int address → use c_void_p argtype (Python-idiomatic)"""
+        # With c_char_p: Python raises TypeError on a plain int
+        strlen_bad = self.libc.strlen
+        strlen_bad.argtypes = [c_char_p]
+        strlen_bad.restype = c_size_t
+        buf = create_string_buffer(b"Hello")
+        addr = addressof(buf)
+        with self.assertRaises((TypeError, Exception)):
+            strlen_bad(addr)
+
+        # With c_void_p: works
+        strlen_ok = self.libc.strlen
+        strlen_ok.argtypes = [c_void_p]
+        strlen_ok.restype = c_size_t
+        self.assertEqual(strlen_ok(addr), 5)
+
+    def test_int_address_to_wcslen_via_c_void_p(self):
+        """Raw int address → wcslen via c_void_p argtype"""
+        try:
+            wcslen = self.libc.wcslen
+        except AttributeError:
+            self.skipTest("wcslen not exported by this libc")
+        wcslen.argtypes = [c_void_p]
+        wcslen.restype = c_size_t
+
+        wbuf = create_unicode_buffer("Hello")
+        self.assertEqual(wcslen(addressof(wbuf)), 5)
 
 
 if __name__ == "__main__":

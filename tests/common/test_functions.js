@@ -290,4 +290,61 @@ describe("Functions and Callbacks", function () {
       assert.strictEqual(len, 13n, `strlen("Hello, World!") = ${len}`);
     });
   });
+
+  // Regression test: passing a BigInt/Number (raw pointer address) to a
+  // c_char_p / c_wchar_p argtype used to write NULL instead of the address,
+  // breaking APIs like ADSI IDirectorySearch::GetColumn where the column
+  // name is received as a LPWSTR address from GetNextColumnName.
+  // Python ctypes accepts int as a raw pointer for string types — we now
+  // match that behavior.
+  describe("Raw pointer address to c_char_p / c_wchar_p argtype (regression)", function () {
+    it("c_char_p argtype accepts a BigInt address", function () {
+      const buf = Buffer.from("Hello\0", "utf8");
+      const addr = ctypes.addressof(buf);
+      assert.strictEqual(typeof addr, "bigint");
+
+      const strlen = libc.func("strlen", ctypes.c_size_t, [ctypes.c_char_p]);
+      assert.strictEqual(strlen(addr), 5n);
+
+      // Same via CFUNCTYPE-from-address path
+      const StrlenProto = ctypes.CFUNCTYPE(ctypes.c_size_t, ctypes.c_char_p);
+      const fn = StrlenProto(libc.symbol("strlen"));
+      assert.strictEqual(fn(addr), 5n);
+    });
+
+    it("c_wchar_p argtype accepts a BigInt address", function () {
+      let wcslen;
+      try {
+        wcslen = libc.func("wcslen", ctypes.c_size_t, [ctypes.c_wchar_p]);
+      } catch {
+        // wcslen may not be exported on every platform's libc; skip.
+        return;
+      }
+
+      const wbuf = ctypes.create_unicode_buffer("Hello");
+      const addr = ctypes.addressof(wbuf);
+      assert.strictEqual(typeof addr, "bigint");
+      assert.strictEqual(wcslen(addr), 5n);
+    });
+
+    it("c_wchar_p / c_char_p struct writers handle null", function () {
+      const out = Buffer.alloc(8);
+      ctypes.c_wchar_p._writer(out, 0, null);
+      assert.strictEqual(out.readBigUInt64LE(0), 0n);
+      ctypes.c_char_p._writer(out, 0, null);
+      assert.strictEqual(out.readBigUInt64LE(0), 0n);
+    });
+
+    // Python-idiomatic pattern: declare argtype as c_void_p when the caller
+    // may pass a raw int address. node-ctypes supports this exactly like
+    // Python ctypes, so the same code ports cleanly in either direction.
+    it("c_void_p argtype accepts raw BigInt address (Python-idiomatic)", function () {
+      const strlen = libc.func("strlen", ctypes.c_size_t, [ctypes.c_void_p]);
+      const buf = Buffer.from("Hello\0", "utf8");
+      assert.strictEqual(strlen(ctypes.addressof(buf)), 5n);
+      // Buffer directly also works under c_void_p (same as Python: ctypes
+      // auto-extracts the address of a create_string_buffer).
+      assert.strictEqual(strlen(buf), 5n);
+    });
+  });
 });

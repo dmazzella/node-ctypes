@@ -9,13 +9,16 @@
  * Here:   `import { HWND, DWORD, WPARAM, ... } from "./wintypes.js"`
  */
 
-import { c_int, c_uint, c_long, c_ulong, c_short, c_ushort, c_ubyte, c_char_p, c_wchar, c_wchar_p, c_void_p, c_size_t, c_ssize_t, c_uint64 } from "node-ctypes";
+import { c_int, c_uint, c_long, c_ulong, c_short, c_ushort, c_ubyte, c_char_p, c_wchar, c_wchar_p, c_void_p, c_size_t, c_ssize_t, c_int64, c_uint64 } from "node-ctypes";
 
 // Primitive numeric types
 export const BYTE = c_ubyte;
 export const WORD = c_ushort;
 export const DWORD = c_ulong;
 export const QWORD = c_uint64;
+export const DWORDLONG = c_uint64;
+export const LONGLONG = c_int64;
+export const ULONGLONG = c_uint64;
 export const BOOL = c_long;
 export const INT = c_int;
 export const UINT = c_uint;

@@ -106,10 +106,14 @@ function main() {
   const users = Ldap.query(userFilter, basePath, scope, properties, queryOpts);
   console.timeEnd("Query time");
 
-  console.log(`\n  Retrieved ${users.length} user(s).`);
+  // In TREE mode `users` is the tree root (top-level OU nodes). Count leaves
+  // recursively so the display matches the real record count.
+  const countLeaves = (nodes) => nodes.reduce((n, node) => n + (Array.isArray(node.children) ? countLeaves(node.children) : 1), 0);
+  const total = opts.outputType === OUTPUT_TYPE.TREE ? countLeaves(users) : users.length;
+  console.log(`\n  Retrieved ${total} user(s) — output: ${opts.outputType === OUTPUT_TYPE.TREE ? "tree" : "flat"}`);
 
   if (opts.debug) {
-    console.log(users);
+     console.dir(users, { depth: null });
   }
 
   // // ── 2. Low-level API demo (queryBegin / findObjects / queryEnd) ──

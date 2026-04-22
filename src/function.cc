@@ -970,6 +970,15 @@ Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
         } else if (val.IsBuffer()) {
           const char* ptr = reinterpret_cast<const char*>(val.As<Napi::Buffer<uint8_t>>().Data());
           memcpy(slot, &ptr, sizeof(ptr));
+        } else if (val.IsBigInt()) {
+          // Raw pointer address — interpretalo come char* (parity CTYPES_POINTER).
+          bool lossless;
+          uint64_t addr = val.As<Napi::BigInt>().Uint64Value(&lossless);
+          const char* ptr = reinterpret_cast<const char*>(addr);
+          memcpy(slot, &ptr, sizeof(ptr));
+        } else if (val.IsNumber()) {
+          const char* ptr = reinterpret_cast<const char*>(static_cast<uintptr_t>(val.As<Napi::Number>().Int64Value()));
+          memcpy(slot, &ptr, sizeof(ptr));
         } else {
           const char* null_ptr = nullptr;
           memcpy(slot, &null_ptr, sizeof(null_ptr));
@@ -1008,6 +1017,19 @@ Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
           memcpy(slot, &str_ptr, sizeof(str_ptr));
         } else if (val.IsBuffer()) {
           const wchar_t* ptr = reinterpret_cast<const wchar_t*>(val.As<Napi::Buffer<uint8_t>>().Data());
+          memcpy(slot, &ptr, sizeof(ptr));
+        } else if (val.IsBigInt()) {
+          // Raw pointer address (e.g. restituito da una precedente call o letto
+          // da uno struct field) — interpretalo come wchar_t* e scrivilo
+          // direttamente. Parity con CTYPES_POINTER.
+          bool lossless;
+          uint64_t addr = val.As<Napi::BigInt>().Uint64Value(&lossless);
+          const wchar_t* ptr = reinterpret_cast<const wchar_t*>(addr);
+          memcpy(slot, &ptr, sizeof(ptr));
+        } else if (val.IsNumber()) {
+          // Idem per Number usato come indirizzo.
+          const wchar_t* ptr =
+            reinterpret_cast<const wchar_t*>(static_cast<uintptr_t>(val.As<Napi::Number>().Int64Value()));
           memcpy(slot, &ptr, sizeof(ptr));
         } else {
           const wchar_t* null_ptr = nullptr;
@@ -1313,6 +1335,15 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
           const char* ptr = reinterpret_cast<const char*>(buf.Data());
           memcpy(slot, &ptr, sizeof(ptr));
           buffer_refs.push_back(Napi::Persistent(val.As<Napi::Object>()));
+        } else if (val.IsBigInt()) {
+          // Raw pointer address (parity CTYPES_POINTER)
+          bool lossless;
+          uint64_t addr = val.As<Napi::BigInt>().Uint64Value(&lossless);
+          const char* ptr = reinterpret_cast<const char*>(addr);
+          memcpy(slot, &ptr, sizeof(ptr));
+        } else if (val.IsNumber()) {
+          const char* ptr = reinterpret_cast<const char*>(static_cast<uintptr_t>(val.As<Napi::Number>().Int64Value()));
+          memcpy(slot, &ptr, sizeof(ptr));
         } else {
           const char* null_ptr = nullptr;
           memcpy(slot, &null_ptr, sizeof(null_ptr));
@@ -1352,6 +1383,16 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
           const wchar_t* ptr = reinterpret_cast<const wchar_t*>(buf.Data());
           memcpy(slot, &ptr, sizeof(ptr));
           buffer_refs.push_back(Napi::Persistent(val.As<Napi::Object>()));
+        } else if (val.IsBigInt()) {
+          // Raw pointer address (parity CTYPES_POINTER)
+          bool lossless;
+          uint64_t addr = val.As<Napi::BigInt>().Uint64Value(&lossless);
+          const wchar_t* ptr = reinterpret_cast<const wchar_t*>(addr);
+          memcpy(slot, &ptr, sizeof(ptr));
+        } else if (val.IsNumber()) {
+          const wchar_t* ptr =
+            reinterpret_cast<const wchar_t*>(static_cast<uintptr_t>(val.As<Napi::Number>().Int64Value()));
+          memcpy(slot, &ptr, sizeof(ptr));
         } else {
           const wchar_t* null_ptr = nullptr;
           memcpy(slot, &null_ptr, sizeof(null_ptr));
