@@ -1,0 +1,39 @@
+# Defines the Chromium style for automatic reformatting.
+# http://clang.llvm.org/docs/ClangFormatStyleOptions.html
+BasedOnStyle: Chromium
+Language: Cpp
+Standard: c++20
+
+InsertBraces: true
+InsertNewlineAtEOF: true
+
+ColumnLimit: 120
+
+IndentWidth: 2
+ContinuationIndentWidth: 2
+ConstructorInitializerIndentWidth: 2
+
+# Sort #includes by following
+# https://google.github.io/styleguide/cppguide.html#Names_and_Order_of_Includes
+#
+# ref: https://clang.llvm.org/docs/ClangFormatStyleOptions.html#includeblocks
+IncludeBlocks: Regroup
+# ref: https://clang.llvm.org/docs/ClangFormatStyleOptions.html#includecategories
+IncludeCategories:
+  # Note the low priority number.
+  # Other C system headers.
+  - Regex:           '^<windows\.h>'
+    Priority:        1
+  - Regex:           '^<.*\.h>'
+    Priority:        2
+  # C++ standard library headers.
+  - Regex:           '^<.*>'
+    Priority:        3
+  # Other libraries.
+  - Regex:           '.*'
+    Priority:        4
+# ref: https://clang.llvm.org/docs/ClangFormatStyleOptions.html#includeismainregex
+IncludeIsMainRegex: ""
+
+MacroBlockBegin: ""
+MacroBlockEnd: ""
