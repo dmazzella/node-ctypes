@@ -1092,7 +1092,7 @@ Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
   // use_last_error / use_errno). Aggiorna sia lo slot per-FFIFunction
   // (leggibile da lib.get_last_error()) sia lo slot addon-instance
   // (leggibile da GetLastError() / get_errno() top-level).
-  if (capture_last_error_ || capture_errno_) {
+  if (capture_last_error_ || capture_errno_) [[unlikely]] {
     CTypesAddon* addon = env.GetInstanceData<CTypesAddon>();
     if (capture_last_error_) {
 #ifdef _WIN32
@@ -1114,7 +1114,7 @@ Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
 
   // Converti il return value e applica errcheck se presente
   Napi::Value result = ConvertReturn(env, return_ptr, return_type_, return_struct_info_, return_array_info_);
-  if (errcheck_callback_.IsEmpty()) {
+  if (errcheck_callback_.IsEmpty()) [[likely]] {
     return result;
   }
   return ApplyErrcheck(env, result, info);
