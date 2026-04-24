@@ -43,7 +43,7 @@ console.log(p.x, p.y); // 3 4
 <details>
 <summary>Build from source</summary>
 
-Requires Node.js >= 16, CMake >= 3.15, and a C++ compiler.
+Requires Node.js >= 24, CMake >= 3.15, and a C++ compiler.
 
 ```bash
 npm install
@@ -160,6 +160,17 @@ const cmp2 = callback(
 // rely on GC — the callback holds a libffi closure that native code may
 // still reference.
 cmp.release();
+```
+
+Both callbacks and libraries implement `Symbol.dispose`, so they work
+with the `using` declaration for scope-bound cleanup (also on `throw`):
+
+```javascript
+{
+  using libc = new CDLL(null);
+  using cmp = callback(fn, c_int32, [c_void_p, c_void_p]);
+  qsort(arr, 5, 4, cmp);
+} // close() + release() run automatically
 ```
 
 Set `NODE_CTYPES_DEBUG_CALLBACKS=1` to log a stack trace for every

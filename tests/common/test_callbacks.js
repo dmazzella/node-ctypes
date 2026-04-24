@@ -173,4 +173,64 @@ describe("Callbacks", function () {
       callback.release();
     });
   });
+
+  describe("Symbol.dispose (explicit resource management)", function () {
+    // Use the top-level wrapper `ctypes.callback()` which exposes a plain
+    // object with writable properties — suitable for `using`.
+    function makeCb() {
+      return ctypes.callback(() => 42, ctypes.c_int32, []);
+    }
+    function openLibc() {
+      if (process.platform === "win32") return new ctypes.CDLL("msvcrt.dll");
+      return new ctypes.CDLL(platform === "darwin" ? "libc.dylib" : "libc.so.6");
+    }
+
+    it("callback wrapper implements Symbol.dispose", function () {
+      const cb = makeCb();
+      assert.strictEqual(typeof cb[Symbol.dispose], "function");
+      cb[Symbol.dispose](); // idempotent with release()
+    });
+
+    it("CDLL implements Symbol.dispose", function () {
+      const lib = openLibc();
+      assert.strictEqual(typeof lib[Symbol.dispose], "function");
+      lib[Symbol.dispose]();
+      assert.doesNotThrow(() => lib.close()); // idempotent
+    });
+
+    it("`using` releases callback at block exit", function () {
+      let released = false;
+      {
+        const cb = makeCb();
+        const orig = cb.release.bind(cb);
+        cb.release = () => { released = true; orig(); };
+        cb[Symbol.dispose] = () => cb.release();
+        using _guard = cb;
+        assert.strictEqual(released, false);
+      }
+      assert.strictEqual(released, true, "release should have run on scope exit");
+    });
+
+    it("`using` on CDLL closes library at block exit", function () {
+      let lib;
+      {
+        using tmp = openLibc();
+        lib = tmp;
+      }
+      assert.doesNotThrow(() => lib.close());
+    });
+
+    it("dispose runs on thrown exception", function () {
+      let released = false;
+      assert.throws(() => {
+        const cb = makeCb();
+        const orig = cb.release.bind(cb);
+        cb.release = () => { released = true; orig(); };
+        cb[Symbol.dispose] = () => cb.release();
+        using _guard = cb;
+        throw new Error("boom");
+      }, /boom/);
+      assert.strictEqual(released, true, "release runs even when the block throws");
+    });
+  });
 });
