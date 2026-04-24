@@ -17,6 +17,9 @@ class TestErrcheck(unittest.TestCase):
         if platform.system() == "Windows":
             cls.libc = ctypes.CDLL("msvcrt.dll")
             cls.kernel32 = ctypes.WinDLL("kernel32.dll")
+        elif platform.system() == "Darwin":
+            cls.libc = ctypes.CDLL("libSystem.B.dylib")
+            cls.kernel32 = None
         else:
             cls.libc = ctypes.CDLL("libc.so.6")
             cls.kernel32 = None

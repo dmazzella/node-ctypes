@@ -343,5 +343,62 @@ class TestByref(unittest.TestCase):
         self.assertIsNotNone(ref)
 
 
+class TestCastBufferToPointer(unittest.TestCase):
+    """Python: `cast(buf, POINTER(T))` produce un pointer alla memoria di buf.
+    Regressione di parity con node-ctypes (dove un vecchio bug faceva SIGSEGV
+    interpretando i byte del buffer come valore pointer)."""
+
+    def test_cast_points_to_buffer_memory(self):
+        # In Python ctypes la prassi è usare un array come storage e
+        # castare alla POINTER(T) desiderata.
+        buf = (c_int32 * 1)(0x12345678)
+        p = cast(buf, POINTER(c_int32))
+        self.assertEqual(p.contents.value, 0x12345678)
+
+
+class TestPointerArithmetic(unittest.TestCase):
+    """Python: `cast(arr, POINTER(T))` + `p[i]` per index walk."""
+
+    def test_indexing_via_cast(self):
+        IntArr5 = c_int32 * 5
+        arr = IntArr5(10, 20, 30, 40, 50)
+        p = cast(arr, POINTER(c_int32))
+        for i in range(5):
+            self.assertEqual(p[i], (i + 1) * 10)
+
+    def test_write_via_indexing(self):
+        IntArr3 = c_int32 * 3
+        arr = IntArr3(0, 0, 0)
+        p = cast(arr, POINTER(c_int32))
+        p[0] = 11
+        p[1] = 22
+        p[2] = 33
+        self.assertEqual(list(arr), [11, 22, 33])
+
+
+class TestSelfRefPointer(unittest.TestCase):
+    """Self-referential POINTER (linked list, tree)."""
+
+    def test_linked_list_class_body(self):
+        class Node(Structure):
+            pass
+        Node._fields_ = [("val", c_int32), ("next", POINTER(Node))]
+        import ctypes as _c
+        is_64 = _c.sizeof(_c.c_void_p) == 8
+        self.assertEqual(sizeof(Node), 16 if is_64 else 8)
+
+    def test_walk_two_element_chain(self):
+        class Node(Structure):
+            pass
+        Node._fields_ = [("val", c_int32), ("next", POINTER(Node))]
+        a = Node()
+        a.val = 1
+        b = Node()
+        b.val = 2
+        a.next = pointer(b)
+        self.assertTrue(bool(a.next))
+        self.assertEqual(a.next.contents.val, 2)
+
+
 if __name__ == '__main__':
     unittest.main()

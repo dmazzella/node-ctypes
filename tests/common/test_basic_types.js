@@ -616,11 +616,21 @@ describe("Basic Types", function () {
       assert.strictEqual(p.address, 0x12345678n);
     });
 
-    it("should cast Buffer to POINTER", function () {
+    // Python: `cast(buf, POINTER(T))` punta ALLA memoria di buf, non legge
+    // i suoi byte come valore pointer. Per costruire un POINTER da un
+    // address numerico usa `P.fromAddress(addr)` o `cast(BigInt, P)`.
+    it("should cast Buffer to POINTER (points to buffer memory)", function () {
       const IntPtr = ctypes.POINTER(ctypes.c_int32);
-      const addrBuf = Buffer.alloc(8);
-      addrBuf.writeBigUInt64LE(0x12345678n, 0);
-      const p = ctypes.cast(addrBuf, IntPtr);
+      const buf = Buffer.alloc(4);
+      buf.writeInt32LE(0x12345678, 0);
+      const p = ctypes.cast(buf, IntPtr);
+      assert.strictEqual(p.contents, 0x12345678, "contents read from buf memory");
+    });
+
+    it("should cast BigInt address to POINTER (from address value)", function () {
+      const IntPtr = ctypes.POINTER(ctypes.c_int32);
+      // Pattern per ottenere un POINTER da un address numerico noto.
+      const p = ctypes.cast(0x12345678n, IntPtr);
       assert.strictEqual(p.address, 0x12345678n);
     });
   });
@@ -797,5 +807,72 @@ describe("Basic Types", function () {
       view.writeInt32LE(999, 0);
       assert.strictEqual(x.value, 999);
     });
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────
+// SimpleCData.in_dll: bind a type to an exported global variable.
+// (Python: `c_int.in_dll(libc, "_timezone")` → Structure-valued instance)
+// ────────────────────────────────────────────────────────────────────
+
+describe("in_dll", function () {
+  const { c_int32 } = ctypes;
+
+  it("SimpleCData.in_dll binds to exported global (Win only)",
+     { skip: process.platform !== "win32" }, function () {
+    const libc = new ctypes.CDLL(ctypes.find_library("c"));
+    const tz = c_int32.in_dll(libc, "_timezone");
+    assert.strictEqual(typeof tz.value, "number");
+    libc.close();
+  });
+
+  it("throws on missing symbol", function () {
+    const libc = new ctypes.CDLL(ctypes.find_library("c"));
+    assert.throws(
+      () => c_int32.in_dll(libc, "symbol_that_definitely_does_not_exist_12345"),
+      /not found|Symbol/i,
+    );
+    libc.close();
+  });
+
+  it("Structure.in_dll is callable (inherited)",
+     { skip: process.platform !== "win32" }, function () {
+    class Dummy extends ctypes.Structure {
+      static _fields_ = [["x", c_int32]];
+    }
+    assert.strictEqual(typeof Dummy.in_dll, "function");
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────
+// `_as_parameter_` / `from_param` protocols
+// (Python: any ctypes call-site unwraps obj._as_parameter_ first;
+//  classmethod `from_param(cls, value)` converts before the call)
+// ────────────────────────────────────────────────────────────────────
+
+describe("_as_parameter_ / from_param", function () {
+  const { CDLL, find_library, c_int32 } = ctypes;
+
+  it("_as_parameter_ on a wrapper object unwraps to the real value", function () {
+    const libc = new CDLL(find_library("c"));
+    const abs = libc.func("abs", c_int32, [c_int32]);
+    class Handle {
+      constructor(v) { this._as_parameter_ = v; }
+    }
+    assert.strictEqual(abs(new Handle(-42)), 42);
+    libc.close();
+  });
+
+  it("from_param classmethod transforms the incoming arg", function () {
+    const libc = new CDLL(find_library("c"));
+    class StrLen extends c_int32 {
+      static from_param(obj) {
+        return typeof obj === "string" ? obj.length : obj;
+      }
+    }
+    const abs = libc.func("abs", c_int32, [StrLen]);
+    assert.strictEqual(abs("hello"), 5);
+    assert.strictEqual(abs(-7), 7);
+    libc.close();
   });
 });

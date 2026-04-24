@@ -8,6 +8,7 @@ import assert from "node:assert";
 import {
   POINTER,
   pointer,
+  cast,
   c_int32,
   c_double,
   c_char,
@@ -294,5 +295,86 @@ test("POINTER in function definitions", async (t) => {
 
     // memchr should return a pointer (non-null since 'W' exists)
     assert.ok(result !== 0n && result !== null, "memchr should find 'W'");
+  });
+});
+
+
+test("cast(Buffer, POINTER(T)) semantic", async (t) => {
+  await t.test("points to buffer memory, not reading bytes as address", () => {
+    // Python: `cast(buf, POINTER(T))` → pointer alla memoria di buf.
+    // Regressione contro un vecchio SIGSEGV che trattava i byte del buffer
+    // come valore pointer e dereferenziava un address arbitrario.
+    const buf = Buffer.alloc(4);
+    buf.writeInt32LE(0x12345678, 0);
+    const p = cast(buf, POINTER(c_int32));
+    assert.strictEqual(p.contents, 0x12345678);
+  });
+
+  await t.test("cast(BigInt, POINTER(T)) from address value", () => {
+    const p = cast(0x12345678n, POINTER(c_int32));
+    assert.strictEqual(p.address, 0x12345678n);
+  });
+});
+
+test("Self-referential POINTER (linked list)", async (t) => {
+  const ctypes = await import("../../lib/index.js");
+
+  await t.test("POINTER(() => Self) thunk resolves lazily", () => {
+    class Node extends ctypes.Structure {
+      static _fields_ = [
+        ["val", ctypes.c_int32],
+        ["next", ctypes.POINTER(() => Node)],
+      ];
+    }
+    const is64 = ctypes.POINTER_SIZE === 8;
+    assert.strictEqual(Node.size, is64 ? 16 : 8);
+  });
+
+  await t.test("can build a 2-element chain and walk it", () => {
+    class Node extends ctypes.Structure {
+      static _fields_ = [
+        ["val", ctypes.c_int32],
+        ["next", ctypes.POINTER(() => Node)],
+      ];
+    }
+    const a = new Node();
+    a.val = 1;
+    const b = new Node();
+    b.val = 2;
+    a.next = ctypes.pointer(b);
+    assert.ok(!a.next.isNull);
+    assert.strictEqual(a.next.contents.val, 2);
+  });
+
+  await t.test("late _fields_ binding with manual cache invalidation", () => {
+    class Node2 extends ctypes.Structure {}
+    Node2._fields_ = [
+      ["val", ctypes.c_int32],
+      ["next", ctypes.POINTER(Node2)],
+    ];
+    Node2._structDef = null;
+    const is64 = ctypes.POINTER_SIZE === 8;
+    assert.strictEqual(Node2.size, is64 ? 16 : 8);
+  });
+});
+
+test("POINTER arithmetic", async (t) => {
+  await t.test("p.add(n) offsets by element count", () => {
+    // Python: `p + n` su POINTER(T) — avanza di n elementi.
+    const IntArr5 = Buffer.alloc(5 * 4);
+    for (let i = 0; i < 5; i++) IntArr5.writeInt32LE(i + 1, i * 4);
+    const p = POINTER(c_int32).fromBuffer(IntArr5);
+    assert.strictEqual(p[0], 1);
+    assert.strictEqual(p[4], 5);
+    const q = p.add(2);
+    assert.strictEqual(q[0], 3);
+  });
+
+  await t.test("p.slice(a, b) reads a range of consecutive elements", () => {
+    // Python equivalente: p[start:end] su POINTER(T) (se supportato).
+    const IntArr5 = Buffer.alloc(5 * 4);
+    for (let i = 0; i < 5; i++) IntArr5.writeInt32LE((i + 1) * 10, i * 4);
+    const p = POINTER(c_int32).fromBuffer(IntArr5);
+    assert.deepStrictEqual(p.slice(1, 4), [20, 30, 40]);
   });
 });

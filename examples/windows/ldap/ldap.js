@@ -29,8 +29,8 @@
 //   Ldap.close();
 
 import { WinDLL, Structure, byref, sizeof, readValue, ptrToBuffer, addressof, create_unicode_buffer, wstring_at, c_void_p, c_void, c_uint32, c_int32, POINTER_SIZE } from "node-ctypes";
-import { BOOL, DWORD, INT, LONG, ULONG, LPCWSTR, LPVOID, PVOID, HANDLE } from "../wintypes.js";
-
+import { wintypes } from "node-ctypes";
+const { BOOL, DWORD, INT, LONG, ULONG, LPCWSTR, LPVOID, PVOID, HANDLE } = wintypes;
 // LDAP-specific type aliases (all void* at the FFI level; semantic documentation
 // only — keeps argtype tables readable for anyone used to the MSDN headers).
 const LDAP = HANDLE; // LDAP* connection handle

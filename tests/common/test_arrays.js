@@ -91,6 +91,30 @@ describe("Arrays", function () {
       const values = [...arr];
       assert.deepStrictEqual(values, [10, 20, 30]);
     });
+
+    // Python ctypes parity: `len(arr)` ritorna il numero di elementi.
+    // Prima del fix, `arr.length` cadeva sul buffer sottostante e
+    // tornava il byte count (20 per c_int32 × 5).
+    it("should expose element count via .length (Python parity)", function () {
+      const IntArray5 = ctypes.array(ctypes.c_int32, 5);
+      const arr = IntArray5.create([10, 20, 30, 40, 50]);
+      assert.strictEqual(arr.length, 5, ".length must be element count");
+      assert.strictEqual(arr.byteLength, 20, ".byteLength = element count × size");
+
+      // Pattern idiomatico: for-loop indicizzato
+      let sum = 0;
+      for (let i = 0; i < arr.length; i++) sum += arr[i];
+      assert.strictEqual(sum, 150);
+    });
+
+    it("should treat .length and .byteLength as read-only", function () {
+      const A = ctypes.array(ctypes.c_uint8, 4);
+      const a = A.create([1, 2, 3, 4]);
+      // Proxy set trap ritorna false per tentare assegnazione; in strict
+      // mode JS lancia, in sloppy mode viene silentemente ignorata.
+      assert.throws(() => { "use strict"; a.length = 10; });
+      assert.strictEqual(a.length, 4);
+    });
   });
 
   describe("Arrays in Structs", function () {

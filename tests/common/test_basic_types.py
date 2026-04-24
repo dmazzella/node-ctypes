@@ -264,5 +264,29 @@ class TestAlignment(unittest.TestCase):
             alignment("string")
 
 
+class TestAsParameterFromParam(unittest.TestCase):
+    """Python ctypes protocols for custom value conversion on calls.
+    `_as_parameter_` is unwrapped automatically by ctypes at call time;
+    `from_param(cls, value)` is a classmethod that can convert before the
+    call. Cross-platform: test shapes only, not call behavior."""
+
+    def test_as_parameter_attribute(self):
+        class Wrapper:
+            def __init__(self, v):
+                self._as_parameter_ = v
+        w = Wrapper(42)
+        self.assertEqual(w._as_parameter_, 42)
+
+    def test_from_param_classmethod(self):
+        class StrLen(c_int32):
+            @classmethod
+            def from_param(cls, value):
+                if isinstance(value, str):
+                    return len(value)
+                return value
+        self.assertEqual(StrLen.from_param("hello"), 5)
+        self.assertEqual(StrLen.from_param(42), 42)
+
+
 if __name__ == '__main__':
     unittest.main()

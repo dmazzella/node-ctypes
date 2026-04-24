@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstring>
 #include <cwchar>
@@ -44,6 +45,19 @@ typedef SSIZE_T ssize_t;
 #endif
 
 #include <ffi.h>
+
+// Force-inline portable. Applicato agli helper di FFIFunction::Call
+// (MarshalArguments, SelectReturnPtr, CaptureErrorState, FinalizeCall):
+// unico caller, call-overhead misurato ~5% sui bench primitive.
+//   GCC/Clang: [[gnu::always_inline]] inline   (C++ attribute)
+//   MSVC:      __forceinline                   (prefisso non-standard)
+#if defined(_MSC_VER)
+#  define CTYPES_ALWAYS_INLINE __forceinline
+#elif defined(__GNUC__) || defined(__clang__)
+#  define CTYPES_ALWAYS_INLINE [[gnu::always_inline]] inline
+#else
+#  define CTYPES_ALWAYS_INLINE inline
+#endif
 
 namespace ctypes {
 // Helper per verificare se un oggetto è un StructType (ha metodo addField)

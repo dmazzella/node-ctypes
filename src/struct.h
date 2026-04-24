@@ -51,6 +51,10 @@ class StructInfo {
   // Converte C struct buffer -> JS object
   Napi::Object StructToJS(Napi::Env env, const void* buffer);
 
+  // Scrive i campi direttamente in un oggetto esistente. Usato dal path
+  // _anonymous_ per evitare oggetti intermedi.
+  void WriteFieldsTo(Napi::Env env, const void* buffer, Napi::Object target);
+
  private:
   bool is_union_;
   size_t size_;

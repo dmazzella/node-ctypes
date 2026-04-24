@@ -1,5 +1,6 @@
 #pragma once
 
+#include "addon.h"
 #include "array.h"
 #include "shared.h"
 #include "struct.h"
@@ -61,6 +62,33 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
 
   Napi::Value Call(const Napi::CallbackInfo& info);
   Napi::Value CallAsync(const Napi::CallbackInfo& info);
+
+  // ==========================================================================
+  // CallContext — mutable state shared tra le fasi di Call().
+  // Oggi è usato solo dal path sincrono. Le fasi sono 4 helper privati:
+  //   1. MarshalArguments      — loop di marshalling per-argomento
+  //   2. SelectReturnPtr       — gestisce il return buffer per struct/array grandi
+  //   3. CaptureErrorState     — snapshot di errno/GetLastError post-ffi_call
+  //   4. FinalizeCall          — convert return + errcheck
+  // The variadic setup block (CIF cache lookup + prep_cif_var) resta inline
+  // in Call() perché usa SBO stack arrays che sarebbero persi con
+  // l'estrazione.
+  // ==========================================================================
+  struct CallContext {
+    Napi::Env env;
+    const Napi::CallbackInfo& info;
+    size_t argc = 0;
+    size_t expected_argc = 0;
+    ffi_cif* active_cif = nullptr;
+    VariadicCifCache* cache_entry = nullptr;
+    size_t num_extra = 0;
+    // Puntatore al primo elemento dell'array di tipi extra (che risiede
+    // su stack o heap nel frame di Call()). Valido solo se need_reprep.
+    const CType* extra_types_ptr = nullptr;
+    uint8_t* arg_storage = nullptr;
+    void** arg_values = nullptr;
+    void* return_ptr = nullptr;
+  };
   Napi::Value GetName(const Napi::CallbackInfo& info);
   Napi::Value GetAddress(const Napi::CallbackInfo& info);
   Napi::Value SetErrcheck(const Napi::CallbackInfo& info);
@@ -92,6 +120,29 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
 
  private:
   bool PrepareFFI(Napi::Env env);
+
+  // Per-section helpers for Call(). `always_inline` marcato sulla definition
+  // (vedi function.cc) — vengono chiamati esattamente una volta dal
+  // caller, l'overhead di call erode il hot path FFI.
+  bool MarshalArguments(CallContext& ctx);
+  void SelectReturnPtr(CallContext& ctx);
+  void CaptureErrorState();
+  Napi::Value FinalizeCall(CallContext& ctx);
+
+  // Helper condiviso tra Call() (sincrona) e CallAsync (asincrona):
+  // valida info.Length() vs arg_types_.size(), produce argc effettivo
+  // e flag is_variadic. In caso di errore, throws JS exception e
+  // ritorna false (caller deve restituire env.Undefined()).
+  bool ValidateAndResolveArgc(Napi::Env env,
+                              const Napi::CallbackInfo& info,
+                              size_t& out_argc,
+                              bool& out_is_variadic) const;
+  // Risolve il CType di un argomento all'indice `i` nel contesto corrente.
+  // Estrae la logica duplicata tra il loop di pre-reserve string buffer e
+  // il loop di marshalling.
+  inline CType ResolveArgType(const CallContext& ctx, size_t i,
+                              const CType* extra_types_stack,
+                              const std::vector<CType>& extra_types_heap) const;
 
   // Thin wrapper that calls ConvertReturn with member state
   inline Napi::Value ConvertReturnValue(Napi::Env env) {
@@ -236,6 +287,10 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
   bool capture_errno_;       // snapshot errno dopo ogni call
   uint32_t last_error_;      // DWORD-like (unsigned), parity Win32
   int last_errno_;           // errno è int in POSIX
+
+  // Cached addon pointer (avoid GetInstanceData<>() map lookup on every call).
+  // CTypesAddon lives in env instance data; lifetime >= this object's lifetime.
+  CTypesAddon* addon_;
 
  public:
   Napi::Value GetLastErrorCaptured(const Napi::CallbackInfo& info);

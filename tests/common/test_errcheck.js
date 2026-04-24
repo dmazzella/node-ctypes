@@ -323,3 +323,66 @@ describe("errcheck (Python ctypes compatible)", function () {
     });
   });
 });
+
+// ────────────────────────────────────────────────────────────────────
+// OleDLL + HRESULT auto-raise
+// (Python: OleDLL wraps COM calls; negative HRESULT becomes OSError)
+// ────────────────────────────────────────────────────────────────────
+
+describe("OleDLL + HRESULT", { skip: process.platform !== "win32" }, function () {
+  it("throws on negative HRESULT", function () {
+    const { OleDLL, HRESULT, c_wchar_p, c_void_p } = ctypes;
+    const ole32 = new OleDLL("ole32.dll");
+    const CLSIDFromString = ole32.func("CLSIDFromString", HRESULT, [c_wchar_p, c_void_p]);
+    const buf = Buffer.alloc(16);
+    assert.throws(
+      () => CLSIDFromString("NOT A GUID", buf),
+      (err) => {
+        assert.match(err.message, /HRESULT 0x/);
+        assert.strictEqual(typeof err.winerror, "number");
+        return true;
+      },
+    );
+  });
+
+  it("does NOT throw on success (S_OK = 0)", function () {
+    const { OleDLL, HRESULT, c_wchar_p, c_void_p } = ctypes;
+    const ole32 = new OleDLL("ole32.dll");
+    const CLSIDFromString = ole32.func("CLSIDFromString", HRESULT, [c_wchar_p, c_void_p]);
+    const buf = Buffer.alloc(16);
+    const result = CLSIDFromString("{00000000-0000-0000-0000-000000000000}", buf);
+    assert.strictEqual(Number(result), 0);
+  });
+
+  it("non-HRESULT restype is unaffected", function () {
+    const { OleDLL, c_int32 } = ctypes;
+    const ole32 = new OleDLL("ole32.dll");
+    const fn = ole32.func("CoGetCurrentProcess", c_int32, []);
+    const v = fn();
+    assert.ok(v > 0);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────
+// use_last_error: snapshot GetLastError immediately after an FFI call.
+// (Python: CDLL(..., use_last_error=True) + ctypes.get_last_error())
+// ────────────────────────────────────────────────────────────────────
+
+describe("use_last_error", { skip: process.platform !== "win32" }, function () {
+  const { WinDLL, c_void_p, c_wchar_p } = ctypes;
+
+  it("captures GetLastError snapshot after a failing call", function () {
+    const k32 = new WinDLL("kernel32.dll", { use_last_error: true });
+    const LoadLibraryW = k32.func("LoadLibraryW", c_void_p, [c_wchar_p]);
+    const h = LoadLibraryW("C:/NoSuchFile_ABCXYZ_test.dll");
+    assert.strictEqual(h, null);
+    const err = k32.get_last_error();
+    // 126 = ERROR_MOD_NOT_FOUND, 3 = PATH_NOT_FOUND — entrambi accettabili
+    assert.ok(err === 126 || err === 3, `unexpected error code: ${err}`);
+  });
+
+  it("throws if use_last_error was not set", function () {
+    const k32 = new WinDLL("kernel32.dll");
+    assert.throws(() => k32.get_last_error(), /use_last_error/);
+  });
+});

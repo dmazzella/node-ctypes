@@ -166,11 +166,12 @@ bool StructInfo::JSToStruct(Napi::Env env, Napi::Object obj, void* buffer, size_
     void* field_ptr = static_cast<char*>(buffer) + field.offset;
 
     if (field.array_type) {
-      // Array field
-      if (!obj.Has(field.name)) {
+      // Array field — single Get() + undefined test evita il doppio
+      // V8-crossing di Has()+Get().
+      Napi::Value value = obj.Get(field.name);
+      if (value.IsUndefined()) {
         continue;  // campo opzionale
       }
-      Napi::Value value = obj.Get(field.name);
       if (!field.array_type->JSToArray(env, value, field_ptr, field.size)) {
         return false;
       }
@@ -182,11 +183,10 @@ bool StructInfo::JSToStruct(Napi::Env env, Napi::Object obj, void* buffer, size_
           return false;
         }
       } else {
-        // Named field
-        if (!obj.Has(field.name)) {
+        Napi::Value value = obj.Get(field.name);
+        if (value.IsUndefined()) {
           continue;  // campo opzionale
         }
-        Napi::Value value = obj.Get(field.name);
         if (!value.IsObject()) {
           Napi::TypeError::New(env, std::format("Field {} must be an object", field.name)).ThrowAsJavaScriptException();
           return false;
@@ -197,10 +197,10 @@ bool StructInfo::JSToStruct(Napi::Env env, Napi::Object obj, void* buffer, size_
       }
     } else {
       // Tipo primitivo
-      if (!obj.Has(field.name)) {
+      Napi::Value value = obj.Get(field.name);
+      if (value.IsUndefined()) {
         continue;  // campo opzionale
       }
-      Napi::Value value = obj.Get(field.name);
       if (JSToC(env, value, field.type, field_ptr, field.size) < 0) {
         return false;
       }
@@ -212,34 +212,29 @@ bool StructInfo::JSToStruct(Napi::Env env, Napi::Object obj, void* buffer, size_
 
 Napi::Object StructInfo::StructToJS(Napi::Env env, const void* buffer) {
   Napi::Object obj = Napi::Object::New(env);
+  WriteFieldsTo(env, buffer, obj);
+  return obj;
+}
 
+void StructInfo::WriteFieldsTo(Napi::Env env, const void* buffer, Napi::Object obj) {
   for (const auto& field : fields_) {
     const void* field_ptr = static_cast<const char*>(buffer) + field.offset;
 
     if (field.array_type) {
-      // Array field - return as JS array
       obj.Set(field.name, field.array_type->ArrayToJS(env, field_ptr));
     } else if (field.struct_type) {
-      // Nested struct
-      Napi::Object nested = field.struct_type->StructToJS(env, field_ptr);
-
       if (field.is_anonymous) {
-        // Anonymous field: esponi i suoi campi direttamente
-        Napi::Array keys = nested.GetPropertyNames();
-        for (uint32_t i = 0; i < keys.Length(); i++) {
-          Napi::Value key = keys.Get(i);
-          obj.Set(key, nested.Get(key));
-        }
+        // Scrivi i sotto-campi direttamente nell'obj esterno: evita di
+        // creare un oggetto intermedio, enumerarne le chiavi e ricopiarle
+        // una a una (GetPropertyNames + N Get/Set coppie V8↔C++).
+        field.struct_type->WriteFieldsTo(env, field_ptr, obj);
       } else {
-        obj.Set(field.name, nested);
+        obj.Set(field.name, field.struct_type->StructToJS(env, field_ptr));
       }
     } else {
-      // Tipo primitivo
       obj.Set(field.name, CToJS(env, field_ptr, field.type));
     }
   }
-
-  return obj;
 }
 
 // ============================================================================
@@ -424,15 +419,12 @@ Napi::Value StructType::ToObject(const Napi::CallbackInfo& info) {
     return struct_info_->StructToJS(env, buffer.Data());
   }
 
-  // Se è un oggetto con _buffer, estrai il buffer
+  // Se è un oggetto con _buffer, estrai il buffer — single Get()
   if (arg.IsObject()) {
-    Napi::Object obj = arg.As<Napi::Object>();
-    if (obj.Has("_buffer")) {
-      Napi::Value bufferVal = obj.Get("_buffer");
-      if (bufferVal.IsBuffer()) {
-        Napi::Buffer<uint8_t> buffer = bufferVal.As<Napi::Buffer<uint8_t>>();
-        return struct_info_->StructToJS(env, buffer.Data());
-      }
+    Napi::Value bufferVal = arg.As<Napi::Object>().Get("_buffer");
+    if (bufferVal.IsBuffer()) {
+      Napi::Buffer<uint8_t> buffer = bufferVal.As<Napi::Buffer<uint8_t>>();
+      return struct_info_->StructToJS(env, buffer.Data());
     }
   }
 

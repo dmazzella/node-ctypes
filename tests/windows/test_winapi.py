@@ -5,6 +5,11 @@ Tests Windows-specific functions, types, and calling conventions
 
 import unittest
 import sys
+
+if sys.platform != 'win32':
+    import pytest
+    pytest.skip("Windows only", allow_module_level=True)
+
 from ctypes import (
     WinDLL, Structure, c_uint16, sizeof, byref, create_unicode_buffer,
     get_last_error, set_last_error, WinError, POINTER, c_void_p, c_size_t, c_int32

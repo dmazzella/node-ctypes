@@ -156,6 +156,13 @@ size_t CTypeSize(CType type) {
 // JSToC - Converte valore JS in bytes C
 // ============================================================================
 
+// Evita ToNumber() (che invoca napi_coerce_to_number — attraversamento V8
+// completo senza short-circuit) quando il valore è già un Number: la
+// conversione diretta salta la coercion path.
+static inline Napi::Number AsNumberFast(const Napi::Value& v) {
+  return v.IsNumber() ? v.As<Napi::Number>() : v.ToNumber();
+}
+
 int JSToC(Napi::Env env, Napi::Value value, CType type, void* buffer, size_t bufsize) {
   switch (type) {
     case CType::CTYPES_VOID:
@@ -165,7 +172,7 @@ int JSToC(Napi::Env env, Napi::Value value, CType type, void* buffer, size_t buf
       if (bufsize < 1) {
         return -1;
       }
-      int8_t val = static_cast<int8_t>(value.ToNumber().Int32Value());
+      int8_t val = static_cast<int8_t>(AsNumberFast(value).Int32Value());
       memcpy(buffer, &val, sizeof(val));
       return 1;
     }
@@ -174,7 +181,7 @@ int JSToC(Napi::Env env, Napi::Value value, CType type, void* buffer, size_t buf
       if (bufsize < 1) {
         return -1;
       }
-      uint8_t val = static_cast<uint8_t>(value.ToNumber().Uint32Value());
+      uint8_t val = static_cast<uint8_t>(AsNumberFast(value).Uint32Value());
       memcpy(buffer, &val, sizeof(val));
       return 1;
     }
@@ -183,7 +190,7 @@ int JSToC(Napi::Env env, Napi::Value value, CType type, void* buffer, size_t buf
       if (bufsize < 2) {
         return -1;
       }
-      int16_t val = static_cast<int16_t>(value.ToNumber().Int32Value());
+      int16_t val = static_cast<int16_t>(AsNumberFast(value).Int32Value());
       memcpy(buffer, &val, sizeof(val));
       return 2;
     }
@@ -192,7 +199,7 @@ int JSToC(Napi::Env env, Napi::Value value, CType type, void* buffer, size_t buf
       if (bufsize < 2) {
         return -1;
       }
-      uint16_t val = static_cast<uint16_t>(value.ToNumber().Uint32Value());
+      uint16_t val = static_cast<uint16_t>(AsNumberFast(value).Uint32Value());
       memcpy(buffer, &val, sizeof(val));
       return 2;
     }
@@ -201,7 +208,7 @@ int JSToC(Napi::Env env, Napi::Value value, CType type, void* buffer, size_t buf
       if (bufsize < 4) {
         return -1;
       }
-      int32_t val = value.ToNumber().Int32Value();
+      int32_t val = AsNumberFast(value).Int32Value();
       memcpy(buffer, &val, sizeof(val));
       return 4;
     }
@@ -210,7 +217,7 @@ int JSToC(Napi::Env env, Napi::Value value, CType type, void* buffer, size_t buf
       if (bufsize < 4) {
         return -1;
       }
-      uint32_t val = value.ToNumber().Uint32Value();
+      uint32_t val = AsNumberFast(value).Uint32Value();
       memcpy(buffer, &val, sizeof(val));
       return 4;
     }
@@ -224,7 +231,7 @@ int JSToC(Napi::Env env, Napi::Value value, CType type, void* buffer, size_t buf
         bool lossless;
         val = value.As<Napi::BigInt>().Int64Value(&lossless);
       } else {
-        val = value.ToNumber().Int64Value();
+        val = AsNumberFast(value).Int64Value();
       }
       memcpy(buffer, &val, sizeof(val));
       return sizeof(val);
@@ -239,7 +246,7 @@ int JSToC(Napi::Env env, Napi::Value value, CType type, void* buffer, size_t buf
         bool lossless;
         val = value.As<Napi::BigInt>().Uint64Value(&lossless);
       } else {
-        val = static_cast<uint64_t>(value.ToNumber().Int64Value());
+        val = static_cast<uint64_t>(AsNumberFast(value).Int64Value());
       }
       memcpy(buffer, &val, sizeof(val));
       return sizeof(val);
@@ -249,7 +256,7 @@ int JSToC(Napi::Env env, Napi::Value value, CType type, void* buffer, size_t buf
       if (bufsize < 4) {
         return -1;
       }
-      float val = static_cast<float>(value.ToNumber().FloatValue());
+      float val = static_cast<float>(AsNumberFast(value).FloatValue());
       memcpy(buffer, &val, sizeof(val));
       return sizeof(val);
     }
@@ -258,7 +265,7 @@ int JSToC(Napi::Env env, Napi::Value value, CType type, void* buffer, size_t buf
       if (bufsize < 8) {
         return -1;
       }
-      double val = value.ToNumber().DoubleValue();
+      double val = AsNumberFast(value).DoubleValue();
       memcpy(buffer, &val, sizeof(val));
       return sizeof(val);
     }
@@ -280,7 +287,7 @@ int JSToC(Napi::Env env, Napi::Value value, CType type, void* buffer, size_t buf
         uint64_t addr = value.As<Napi::BigInt>().Uint64Value(&lossless);
         ptr = reinterpret_cast<void*>(addr);
       } else if (value.IsNumber()) {
-        ptr = reinterpret_cast<void*>(static_cast<uintptr_t>(value.ToNumber().Int64Value()));
+        ptr = reinterpret_cast<void*>(static_cast<uintptr_t>(AsNumberFast(value).Int64Value()));
       }
 
       memcpy(buffer, &ptr, sizeof(void*));
@@ -332,7 +339,7 @@ int JSToC(Napi::Env env, Napi::Value value, CType type, void* buffer, size_t buf
       wchar_t val = 0;
 
       if (value.IsNumber()) {
-        val = static_cast<wchar_t>(value.ToNumber().Uint32Value());
+        val = static_cast<wchar_t>(AsNumberFast(value).Uint32Value());
       } else if (value.IsString()) {
         std::u16string str = value.As<Napi::String>().Utf16Value();
         if (!str.empty()) {
@@ -362,7 +369,7 @@ int JSToC(Napi::Env env, Napi::Value value, CType type, void* buffer, size_t buf
         bool lossless;
         val = static_cast<size_t>(value.As<Napi::BigInt>().Uint64Value(&lossless));
       } else {
-        val = static_cast<size_t>(value.ToNumber().Int64Value());
+        val = static_cast<size_t>(AsNumberFast(value).Int64Value());
       }
       memcpy(buffer, &val, sizeof(size_t));
       return sizeof(size_t);
@@ -377,7 +384,7 @@ int JSToC(Napi::Env env, Napi::Value value, CType type, void* buffer, size_t buf
         bool lossless;
         val = static_cast<ssize_t>(value.As<Napi::BigInt>().Int64Value(&lossless));
       } else {
-        val = static_cast<ssize_t>(value.ToNumber().Int64Value());
+        val = static_cast<ssize_t>(AsNumberFast(value).Int64Value());
       }
       memcpy(buffer, &val, sizeof(ssize_t));
       return sizeof(ssize_t);
@@ -392,7 +399,7 @@ int JSToC(Napi::Env env, Napi::Value value, CType type, void* buffer, size_t buf
         bool lossless;
         val = static_cast<long>(value.As<Napi::BigInt>().Int64Value(&lossless));
       } else {
-        val = static_cast<long>(value.ToNumber().Int64Value());
+        val = static_cast<long>(AsNumberFast(value).Int64Value());
       }
       memcpy(buffer, &val, sizeof(long));
       return sizeof(long);
@@ -407,7 +414,7 @@ int JSToC(Napi::Env env, Napi::Value value, CType type, void* buffer, size_t buf
         bool lossless;
         val = static_cast<unsigned long>(value.As<Napi::BigInt>().Uint64Value(&lossless));
       } else {
-        val = static_cast<unsigned long>(value.ToNumber().Int64Value());
+        val = static_cast<unsigned long>(AsNumberFast(value).Int64Value());
       }
       memcpy(buffer, &val, sizeof(unsigned long));
       return sizeof(unsigned long);

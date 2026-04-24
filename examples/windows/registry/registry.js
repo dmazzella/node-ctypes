@@ -16,8 +16,8 @@
 //   key.close();
 
 import { WinDLL, wstring_at, c_void_p } from "node-ctypes";
-import { DWORD, LSTATUS, REGSAM, HKEY as HKEY_T, LPCWSTR, LPDWORD, LPBYTE, PHKEY } from "../wintypes.js";
-
+import { wintypes } from "node-ctypes";
+const { DWORD, LSTATUS, REGSAM, HKEY: HKEY_T, LPCWSTR, LPDWORD, LPBYTE, PHKEY } = wintypes;
 // ─── Root keys (predefined pseudo-handles) ──────────────────────────
 // Python uses module-level HKEY_CURRENT_USER etc.; we expose a namespace
 // for ergonomic access: `HKEY.CURRENT_USER`.

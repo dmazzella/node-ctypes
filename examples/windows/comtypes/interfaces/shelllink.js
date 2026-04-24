@@ -4,7 +4,8 @@
 //   https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-ishelllinkw
 //   https://learn.microsoft.com/en-us/windows/win32/api/objidl/nn-objidl-ipersistfile
 
-import { INT, DWORD, LPVOID, LPCWSTR } from "../../wintypes.js";
+import { wintypes } from "node-ctypes";
+const { INT, DWORD, LPVOID, LPCWSTR } = wintypes;
 import { COMInterface, STDMETHOD, HRESULT, IUnknown } from "../comtypes.js";
 
 // Re-export IPersist/IPersistFile from their dedicated module for convenience

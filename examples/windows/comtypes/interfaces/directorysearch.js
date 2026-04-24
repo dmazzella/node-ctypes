@@ -3,7 +3,8 @@
 // References:
 //   https://learn.microsoft.com/en-us/windows/win32/api/iads/nn-iads-idirectorysearch
 
-import { DWORD, LPCWSTR, LPVOID, HANDLE } from "../../wintypes.js";
+import { wintypes } from "node-ctypes";
+const { DWORD, LPCWSTR, LPVOID, HANDLE } = wintypes;
 import { COMInterface, STDMETHOD, HRESULT, IUnknown, GUID } from "../comtypes.js";
 
 export const IID_IDirectorySearch = new GUID("{109BA8EC-92F0-11D0-A790-00C04FD8D5A8}");

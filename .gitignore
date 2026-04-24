@@ -4,6 +4,7 @@
 /.idea
 /.DS_Store
 /.env*
+.claude
 /node_modules
 /tests/python
 /tests/.pytest_cache
@@ -12,3 +13,4 @@
 /tests/windows/__pycache__
 /docs
 package-lock.json
+*ignore*.js

@@ -101,6 +101,7 @@ CTypesAddon::CTypesAddon(Napi::Env env, Napi::Object exports) {
                          InstanceMethod("cstring", &CTypesAddon::CreateCString),
                          InstanceMethod("readCString", &CTypesAddon::ReadCString),
                          InstanceMethod("ptrToBuffer", &CTypesAddon::PtrToBuffer),
+                         InstanceMethod("addressOf", &CTypesAddon::AddressOf),
                          // Slot module-level last-error / errno (parity Python ctypes)
                          InstanceMethod("getCapturedLastError", &CTypesAddon::GetCapturedLastError),
                          InstanceMethod("setCapturedLastError", &CTypesAddon::SetCapturedLastError),
@@ -380,6 +381,16 @@ Napi::Value CTypesAddon::ReadCString(const Napi::CallbackInfo& info) {
   }
 
   return Napi::String::New(env, ptr, len);
+}
+
+Napi::Value CTypesAddon::AddressOf(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  if (info.Length() < 1 || !info[0].IsBuffer()) {
+    Napi::TypeError::New(env, "addressOf requires a Buffer argument").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+  void* ptr = info[0].As<Napi::Buffer<uint8_t>>().Data();
+  return Napi::BigInt::New(env, reinterpret_cast<uint64_t>(ptr));
 }
 
 Napi::Value CTypesAddon::PtrToBuffer(const Napi::CallbackInfo& info) {

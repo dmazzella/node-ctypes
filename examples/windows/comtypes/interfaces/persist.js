@@ -4,7 +4,8 @@
 //   https://learn.microsoft.com/en-us/windows/win32/api/objidl/nn-objidl-ipersist
 //   https://learn.microsoft.com/en-us/windows/win32/api/objidl/nn-objidl-ipersistfile
 
-import { DWORD, LONG, LPVOID, LPCWSTR } from "../../wintypes.js";
+import { wintypes } from "node-ctypes";
+const { DWORD, LONG, LPVOID, LPCWSTR } = wintypes;
 import { COMInterface, STDMETHOD, HRESULT, IUnknown, GUID } from "../comtypes.js";
 
 export const IID_IPersist = new GUID("{0000010C-0000-0000-C000-000000000046}");

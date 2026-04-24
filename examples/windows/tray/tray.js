@@ -3,7 +3,8 @@
 // API mirrors the C++ reference: create_tray, add_menu, add_separator, update_with_loop, stop
 
 import { WinDLL, WINFUNCTYPE, Structure, array, sizeof, byref, c_void, c_wchar } from "node-ctypes";
-import { ATOM, BOOL, BYTE, COLORREF, DWORD, HBITMAP, HBRUSH, HCURSOR, HDC, HFONT, HGDIOBJ, HICON, HINSTANCE, HMODULE, HWND, INT, LONG, LPCWSTR, LPVOID, LPARAM, LRESULT, UINT, WORD, WPARAM } from "../wintypes.js";
+import { wintypes } from "node-ctypes";
+const { ATOM, BOOL, BYTE, COLORREF, DWORD, HBITMAP, HBRUSH, HCURSOR, HDC, HFONT, HGDIOBJ, HICON, HINSTANCE, HMODULE, HWND, INT, LONG, LPCWSTR, LPVOID, LPARAM, LRESULT, UINT, WORD, WPARAM } = wintypes;
 import { Registry, HKEY } from "../registry/registry.js";
 
 // ─── Win32 Constants ────────────────────────────────────────────────

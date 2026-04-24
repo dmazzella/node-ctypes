@@ -10,7 +10,8 @@
 
 import { WinDLL, OleDLL, Structure, Union, POINTER, array, byref, ptrToBuffer, create_unicode_buffer, wstring_at } from "node-ctypes";
 import { CoInitializeEx, CoUninitialize, COMPointer, HRESULT, SUCCEEDED } from "./comtypes/comtypes.js";
-import { BOOL, BYTE, DWORD, HANDLE, INT, LONG, LONGLONG, LPBYTE, LPCWSTR, LPVOID, LPWSTR, PVOID, WORD } from "./wintypes.js";
+import { wintypes } from "node-ctypes";
+const { BOOL, BYTE, DWORD, HANDLE, INT, LONG, LONGLONG, LPBYTE, LPCWSTR, LPVOID, LPWSTR, PVOID, WORD } = wintypes;
 import {
   IDirectorySearch,
   ADS_SEARCHPREF_PAGESIZE,

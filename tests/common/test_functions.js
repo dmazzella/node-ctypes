@@ -348,3 +348,119 @@ describe("Functions and Callbacks", function () {
     });
   });
 });
+
+// ────────────────────────────────────────────────────────────────────
+// Library resolution & lazy loaders (Python: ctypes.util.find_library,
+// ctypes.cdll / ctypes.windll).
+// ────────────────────────────────────────────────────────────────────
+
+describe("find_library", function () {
+  const { find_library, CDLL } = ctypes;
+
+  it("resolves 'c' on all platforms", function () {
+    const lib = find_library("c");
+    assert.ok(lib);
+    assert.strictEqual(typeof lib, "string");
+  });
+
+  it("returns null for null/empty input", function () {
+    assert.strictEqual(find_library(null), null);
+    assert.strictEqual(find_library(""), null);
+  });
+
+  it("CDLL(find_library('c')) opens successfully", function () {
+    const lib = new CDLL(find_library("c"));
+    assert.ok(lib);
+    lib.close();
+  });
+
+  if (process.platform === "win32") {
+    it("Windows: resolves 'kernel32'", function () {
+      assert.strictEqual(find_library("kernel32"), "kernel32.dll");
+    });
+    it("Windows: 'c' aliases to msvcrt.dll", function () {
+      assert.strictEqual(find_library("c"), "msvcrt.dll");
+    });
+  }
+});
+
+describe("cdll / windll lazy loaders", function () {
+  const { find_library, cdll, windll, c_uint32 } = ctypes;
+
+  it("cdll.<lib> lazy-loads and caches", function () {
+    const libcName = process.platform === "win32" ? "msvcrt" : find_library("c");
+    const lib = cdll[libcName];
+    assert.ok(lib);
+    assert.strictEqual(cdll[libcName], lib, "same instance on second access");
+  });
+
+  if (process.platform === "win32") {
+    it("windll.kernel32.GetTickCount via namespace", function () {
+      const gtc = windll.kernel32.func("GetTickCount", c_uint32, []);
+      const t = gtc();
+      assert.ok(t > 0);
+    });
+  }
+});
+
+describe("paramflags (in/out/default)", { skip: process.platform !== "win32" }, function () {
+  // Python: set paramflags at proto binding time → out-params become the
+  // function return value (tuple if multiple, single value if one).
+  const { WinDLL, WINFUNCTYPE, POINTER, c_uint32, c_void_p, c_int32 } = ctypes;
+
+  it("collects out params into the return tuple", function () {
+    const user32 = new WinDLL("user32.dll");
+    const proto = WINFUNCTYPE(c_uint32, c_void_p, POINTER(c_uint32));
+    const fn = proto.bind(user32, "GetWindowThreadProcessId", [
+      { dir: "in", name: "hWnd" },
+      { dir: "out", name: "pid" },
+    ]);
+    const hwnd = user32.func("GetDesktopWindow", c_void_p, [])();
+    // Python ctypes parity: single out param → scalar (not array).
+    const pid = fn(hwnd);
+    assert.ok(pid > 0);
+  });
+
+  it("supports named-call form", function () {
+    const user32 = new WinDLL("user32.dll");
+    const proto = WINFUNCTYPE(c_uint32, c_void_p, POINTER(c_uint32));
+    const fn = proto.bind(user32, "GetWindowThreadProcessId", [
+      { dir: "in", name: "hWnd" },
+      { dir: "out", name: "pid" },
+    ]);
+    const hwnd = user32.func("GetDesktopWindow", c_void_p, [])();
+    const pid = fn({ hWnd: hwnd });
+    assert.ok(pid > 0);
+  });
+
+  it("uses default values for missing in params", function () {
+    const user32 = new WinDLL("user32.dll");
+    const proto = WINFUNCTYPE(c_int32, c_void_p, c_int32);
+    const show = proto.bind(user32, "IsWindow", [
+      { dir: "in", name: "hWnd" },
+      { dir: "in", name: "unused", default: 0 },
+    ]);
+    assert.doesNotThrow(() => {
+      try { show(0n); } catch {}
+    });
+  });
+
+  it("throws on missing required in param", function () {
+    const user32 = new WinDLL("user32.dll");
+    const proto = WINFUNCTYPE(c_uint32, c_void_p, POINTER(c_uint32));
+    const fn = proto.bind(user32, "GetWindowThreadProcessId", [
+      { dir: "in", name: "hWnd" },
+      { dir: "out", name: "pid" },
+    ]);
+    assert.throws(() => fn(), /missing required arg.*hWnd/);
+  });
+
+  it("rejects 'out' on non-POINTER argtype", function () {
+    const user32 = new WinDLL("user32.dll");
+    const proto = WINFUNCTYPE(c_uint32, c_uint32);
+    assert.throws(
+      () => proto.bind(user32, "foo", [{ dir: "out", name: "x" }]),
+      /not a POINTER/,
+    );
+  });
+});

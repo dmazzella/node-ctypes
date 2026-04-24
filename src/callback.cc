@@ -102,16 +102,14 @@ static void CallbackHandler(ffi_cif* cif, void* ret, void** args, void* user_dat
     return;
   }
 
-  // Converti risultato JS -> C
+  // Converti risultato JS -> C direttamente nel buffer di ret, senza
+  // heap-allocare un vettore temporaneo e memcpy in ogni invocazione.
+  // `ret` è fornito da libffi ed è abbastanza grande per il tipo dichiarato.
   if (data->return_type != CType::CTYPES_VOID) {
     size_t ret_size = CTypeSize(data->return_type);
-    std::vector<uint8_t> buffer(ret_size);  // Dynamic allocation based on actual size
     Napi::Value result(env, result_val);
-
-    int written = JSToC(env, result, data->return_type, buffer.data(), buffer.size());
-    if (written > 0) {
-      memcpy(ret, buffer.data(), ret_size);
-    } else {
+    int written = JSToC(env, result, data->return_type, static_cast<uint8_t*>(ret), ret_size);
+    if (written <= 0) {
       memset(ret, 0, ret_size);
     }
   }
@@ -388,13 +386,13 @@ static void ThreadSafeCallbackHandler(ffi_cif* cif, void* ret, void** args, void
     }
 
     if (data->return_type != CType::CTYPES_VOID) {
+      // Scrivi direttamente in `ret` (buffer fornito da libffi) invece di
+      // allocare un vector temporaneo e fare memcpy — stesso fix della
+      // Callback main-thread path.
       size_t ret_size = CTypeSize(data->return_type);
-      std::vector<uint8_t> buffer(ret_size);  // Dynamic allocation
       Napi::Value result(env, result_val);
-      int written = JSToC(env, result, data->return_type, buffer.data(), buffer.size());
-      if (written > 0) {
-        memcpy(ret, buffer.data(), ret_size);
-      } else {
+      int written = JSToC(env, result, data->return_type, static_cast<uint8_t*>(ret), ret_size);
+      if (written <= 0) {
         memset(ret, 0, ret_size);
       }
     }

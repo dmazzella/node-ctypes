@@ -2,8 +2,8 @@
 // A compact demo that creates a window with a wide set of common Win32 controls
 
 import { WinDLL, Structure, POINTER, WINFUNCTYPE, sizeof, create_unicode_buffer, wstring_at, byref, c_void } from "node-ctypes";
-import { ATOM, BOOL, DWORD, HWND, HBRUSH, HCURSOR, HFONT, HICON, HINSTANCE, HMENU, HMODULE, HRGN, INT, LONG, LPCWSTR, LPWSTR, LPVOID, LRESULT, UINT, UINT_PTR, WPARAM, LPARAM } from "./wintypes.js";
-
+import { wintypes } from "node-ctypes";
+const { ATOM, BOOL, DWORD, HWND, HBRUSH, HCURSOR, HFONT, HICON, HINSTANCE, HMENU, HMODULE, HRGN, INT, LONG, LPCWSTR, LPWSTR, LPVOID, LRESULT, UINT, UINT_PTR, WPARAM, LPARAM } = wintypes;
 // LRESULT CALLBACK WindowProc(HWND, UINT, WPARAM, LPARAM)
 const WNDPROC = WINFUNCTYPE(LRESULT, HWND, UINT, WPARAM, LPARAM);
 

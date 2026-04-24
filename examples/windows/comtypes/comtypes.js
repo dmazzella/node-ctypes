@@ -18,8 +18,8 @@
 //   CoUninitialize();
 
 import { OleDLL, WINFUNCTYPE, Structure, array, ptrToBuffer, POINTER_SIZE, HRESULT as _HRESULT } from "node-ctypes";
-import { DWORD, WORD, BYTE, LPVOID } from "../wintypes.js";
-
+import { wintypes } from "node-ctypes";
+const { DWORD, WORD, BYTE, LPVOID } = wintypes;
 // ═══════════════════════════════════════════════════════════════════════
 // GUID — COM Globally Unique Identifier (16 bytes)
 // ═══════════════════════════════════════════════════════════════════════

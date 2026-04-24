@@ -29,6 +29,8 @@ class TestFunctionsAndCallbacks(unittest.TestCase):
     def setUpClass(cls):
         if sys.platform == "win32":
             cls.libc = CDLL("msvcrt")
+        elif sys.platform == "darwin":
+            cls.libc = CDLL("libSystem.B.dylib")
         else:
             cls.libc = CDLL("libc.so.6")
 
