@@ -3,7 +3,7 @@
 
 import * as ctypes from "node-ctypes";
 import pkg from "koffi";
-import os from "os";
+import os from "node:os";
 const { load } = pkg;
 
 const isWindows = os.platform() === "win32";
