@@ -24,22 +24,43 @@ const TEMPLATE_DIR = __dirname;
 const OUTPUT_DIR = path.join(__dirname, "fficonfig");
 
 /**
- * Extract version info from configure.ac
+ * Extract version info from configure.ac.
+ *
+ * The release version comes from AC_INIT(...), which is the single source of
+ * truth (it drives autotools' @VERSION@). The FFI_VERSION_STRING /
+ * FFI_VERSION_NUMBER lines are cross-checked and a warning is emitted if they
+ * drift, because upstream has at times forgotten to bump them in lockstep with
+ * AC_INIT (e.g. libffi 3.6.0 still declares FFI_VERSION_STRING="3.5.2").
  */
 function extractVersion() {
   const configureAc = fs.readFileSync(path.join(LIBFFI_DIR, "configure.ac"), "utf8");
 
+  // Primary source of truth: AC_INIT([libffi],[X.Y.Z],...)
+  const acInitMatch = configureAc.match(/AC_INIT\(\s*\[libffi\]\s*,\s*\[([^\]]+)\]/);
+  if (!acInitMatch) {
+    throw new Error("Could not extract version from AC_INIT in configure.ac");
+  }
+  const string = acInitMatch[1].trim();
+
+  // Derive the numeric form (x * 10000 + y * 100 + z) from the release version.
+  const parts = string.split(".").map((n) => parseInt(n, 10));
+  if (parts.length < 3 || parts.some((n) => Number.isNaN(n))) {
+    throw new Error(`Unexpected libffi version format: "${string}"`);
+  }
+  const [major, minor, patch] = parts;
+  const number = major * 10000 + minor * 100 + patch;
+
+  // Cross-check against the FFI_VERSION_* lines and warn on drift.
   const versionStringMatch = configureAc.match(/FFI_VERSION_STRING="([^"]+)"/);
   const versionNumberMatch = configureAc.match(/FFI_VERSION_NUMBER=(\d+)/);
-
-  if (!versionStringMatch || !versionNumberMatch) {
-    throw new Error("Could not extract version from configure.ac");
+  if (versionStringMatch && versionStringMatch[1] !== string) {
+    console.warn(`Warning: FFI_VERSION_STRING="${versionStringMatch[1]}" disagrees with AC_INIT "${string}"; using AC_INIT.`);
+  }
+  if (versionNumberMatch && parseInt(versionNumberMatch[1], 10) !== number) {
+    console.warn(`Warning: FFI_VERSION_NUMBER=${versionNumberMatch[1]} disagrees with derived ${number}; using ${number}.`);
   }
 
-  return {
-    string: versionStringMatch[1],
-    number: parseInt(versionNumberMatch[1], 10),
-  };
+  return { string, number };
 }
 
 /**
