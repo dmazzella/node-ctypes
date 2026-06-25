@@ -508,12 +508,12 @@ let ffiWins = 0;
 
 for (const r of results) {
   if (r.skipped) {
-    console.log(`║ - ${r.name.padEnd(25)} ${"N/A (non supportato)".padStart(23)}           ║`);
+    console.log(`║ - ${r.name.padEnd(25)} ${"N/A".padStart(24)}           ║`);
     continue;
   }
   const status = r.ratio < 1 ? "✓" : "✗";
   const diff = r.ratio < 1 ? (1 / r.ratio).toFixed(2) + "x faster" : r.ratio.toFixed(2) + "x slower";
-  console.log(`║ ${status} ${r.name.padEnd(25)} ${diff.padStart(23)} vs ffi    ║`);
+  console.log(`║ ${status} ${r.name.padEnd(25)} ${diff.padStart(24)} vs ffi    ║`);
   if (r.ratio < 1) ctypesWins++;
   else ffiWins++;
 }
