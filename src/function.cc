@@ -239,6 +239,18 @@ FFIFunction::~FFIFunction() {
   if (!errcheck_callback_.IsEmpty()) {
     errcheck_callback_.Reset();
   }
+
+  // Free reusable call plans (signature fissa + entry variadiche in cache).
+  if (call_plan_) {
+    ffi_call_plan_free(call_plan_);
+    call_plan_ = nullptr;
+  }
+  for (auto& entry : variadic_cache_) {
+    if (entry.plan) {
+      ffi_call_plan_free(entry.plan);
+      entry.plan = nullptr;
+    }
+  }
 }
 
 bool FFIFunction::PrepareFFI(Napi::Env env) {
@@ -274,6 +286,18 @@ bool FFIFunction::PrepareFFI(Napi::Env env) {
   }
 
   cif_prepared_ = true;
+
+  // Reusable call plan (libffi 3.7+): cattura una volta il posizionamento degli
+  // argomenti così le chiamate ripetute saltano la riclassificazione per-call che
+  // ffi_call rifarebbe ogni volta. Su x86-64 attiva il fast path di libffi;
+  // altrove ffi_call_plan_invoke ricade in sicurezza su ffi_call. Ricostruito
+  // in modo difensivo se PrepareFFI venisse rieseguito.
+  if (call_plan_) {
+    ffi_call_plan_free(call_plan_);
+    call_plan_ = nullptr;
+  }
+  call_plan_ = ffi_call_plan_alloc(&cif_);
+
   return true;
 }
 
@@ -959,6 +983,7 @@ Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
   // Gestione variadic ottimizzata (ispirata a CPython ctypes)
   // =====================================================================
   ffi_cif* active_cif = &cif_;
+  ffi_call_plan* active_plan = call_plan_;
   VariadicCifCache* cache_entry = nullptr;
   size_t num_extra = 0;  // Numero di argomenti extra variadic
 
@@ -999,6 +1024,7 @@ Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
         if (match) {
           cache_entry = &variadic_cache_[i];
           active_cif = &cache_entry->cif;
+          active_plan = cache_entry->plan;
           break;
         }
       }
@@ -1013,6 +1039,10 @@ Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
 
       VariadicCifCache& entry = variadic_cache_[slot];
       entry.valid = false;  // invalidate durante rebuild
+      if (entry.plan) {
+        ffi_call_plan_free(entry.plan);
+        entry.plan = nullptr;
+      }
       entry.total_args = argc;
       entry.extra_types.assign(extra_types, extra_types + num_extra);
       entry.ffi_types.resize(argc);
@@ -1034,9 +1064,12 @@ Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
         return env.Undefined();
       }
 
+      entry.plan = ffi_call_plan_alloc(&entry.cif);
+
       entry.valid = true;
       cache_entry = &entry;
       active_cif = &entry.cif;
+      active_plan = entry.plan;
     }
   }
 
@@ -1050,6 +1083,7 @@ Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
   ctx.argc = argc;
   ctx.expected_argc = expected_argc;
   ctx.active_cif = active_cif;
+  ctx.active_plan = active_plan;
   ctx.cache_entry = cache_entry;
   ctx.num_extra = num_extra;
   // Punta al primo elemento dell'array di tipi inferiti (stack o heap).
@@ -1128,7 +1162,13 @@ Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
   SelectReturnPtr(ctx);
 
   // ---- ffi_call + capture errno/GetLastError -----------------------
-  ffi_call(ctx.active_cif, FFI_FN(fn_ptr_), ctx.return_ptr, ctx.arg_values);
+  // Reusable call plan quando disponibile (fast path su x86-64; fallback sicuro
+  // a ffi_call altrove e se l'allocazione del plan è fallita).
+  if (ctx.active_plan) [[likely]] {
+    ffi_call_plan_invoke(ctx.active_plan, FFI_FN(fn_ptr_), ctx.return_ptr, ctx.arg_values);
+  } else {
+    ffi_call(ctx.active_cif, FFI_FN(fn_ptr_), ctx.return_ptr, ctx.arg_values);
+  }
   CaptureErrorState();
 
   // ---- Convert return + apply errcheck -----------------------------

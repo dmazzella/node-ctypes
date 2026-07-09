@@ -48,6 +48,9 @@ struct VariadicCifCache {
   std::vector<ffi_type*> ffi_types;
   std::vector<CType> extra_types;  // Tipi degli argomenti extra
   bool valid;
+  // Reusable call plan per questo CIF variadico (libffi 3.7+). Ricostruito
+  // insieme al cif quando lo slot viene riutilizzato; liberato nel distruttore.
+  ffi_call_plan* plan = nullptr;
 
   VariadicCifCache() : total_args(0), valid(false) {}
 };
@@ -80,6 +83,7 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
     size_t argc = 0;
     size_t expected_argc = 0;
     ffi_cif* active_cif = nullptr;
+    ffi_call_plan* active_plan = nullptr;
     VariadicCifCache* cache_entry = nullptr;
     size_t num_extra = 0;
     // Puntatore al primo elemento dell'array di tipi extra (che risiede
@@ -212,6 +216,12 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
   ffi_cif cif_;
   bool cif_prepared_;
   ffi_abi abi_;
+
+  // Reusable call plan per la signature fissa (libffi 3.7+). Costruito una volta
+  // in PrepareFFI e riusato ad ogni chiamata: cattura il posizionamento degli
+  // argomenti così ffi_call_plan_invoke evita di riclassificarli. Su x86-64 usa
+  // il fast path di libffi; altrove ffi_call_plan_invoke ricade su ffi_call.
+  ffi_call_plan* call_plan_ = nullptr;
 
   // Tipi
   CType return_type_;
