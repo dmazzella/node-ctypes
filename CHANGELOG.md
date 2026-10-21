@@ -122,6 +122,10 @@ It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-
   class; `.constructor` of structure instances returned a bound function.
 - `restype = null` (Python's `None`) threw `Invalid return type`; it now
   means `void`.
+- The native module was looked up from `process.cwd()`: applications started
+  from another directory, and nested installs, failed with "Native module not
+  found". It is now located from the package itself (the previous locations
+  remain as a fallback).
 - macOS prebuilt binaries required the macOS version of the CI runner
   (26.0 on arm64, 15.0 on x64); they now target macOS 13.5, like Node 24.
 
