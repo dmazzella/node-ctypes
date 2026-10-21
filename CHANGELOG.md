@@ -59,6 +59,8 @@ It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-
 
 ### Added
 
+- Prebuilt binaries for Linux with musl (Alpine), x64 and ARM64
+  (`ctypes-linux-<arch>-musl.node`), selected automatically.
 - Python names: `ArgumentError`, `ARRAY`, `c_buffer`, `c_voidp`, `c_time_t`,
   `SIZEOF_TIME_T`, `RTLD_GLOBAL`, `RTLD_LOCAL`, `DEFAULT_MODE`,
   `LibraryLoader`, `cdll.LoadLibrary()` (and `windll` / `oledll`),
@@ -120,6 +122,8 @@ It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-
   class; `.constructor` of structure instances returned a bound function.
 - `restype = null` (Python's `None`) threw `Invalid return type`; it now
   means `void`.
+- macOS prebuilt binaries required the macOS version of the CI runner
+  (26.0 on arm64, 15.0 on x64); they now target macOS 13.5, like Node 24.
 
 ### Performance
 
@@ -136,6 +140,10 @@ It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-
   `src/napi_fast.h` and all system headers are included from `src/shared.h`.
 - `typescript` is a devDependency; CI type-checks `lib/index.d.ts` in a
   dedicated job and packaging depends on it.
+- Linux binaries are built in `manylinux_2_28` containers: they require glibc
+  2.28 (like Node 24) and the system libstdc++, instead of glibc 2.34 and the
+  libstdc++ of GCC 13 (Ubuntu 22.04 and Debian 11/12 could not load them).
+  CI fails if a build raises these requirements.
 - Examples rewritten in Python ctypes style (`wintypes` structures,
   `DWORD()` / `HKEY()` with `byref` and `.value`, `in_dll`, `buf.value`,
   typed prototypes instead of raw Buffers and offsets).

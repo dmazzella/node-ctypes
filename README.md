@@ -17,7 +17,8 @@ If you know Python ctypes, you already know node-ctypes.
 npm install node-ctypes
 ```
 
-Prebuilt binaries ship for Windows, Linux, and macOS (x64/ARM64).
+Prebuilt binaries ship for Windows, macOS 13.5+ and Linux (glibc 2.28+ or musl /
+Alpine), on x64 and ARM64 — wherever Node 24 runs.
 
 ```javascript
 import { CDLL, Structure, c_int32, c_char_p } from "node-ctypes";
