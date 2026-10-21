@@ -1,4 +1,4 @@
-// demo_comtypes — COM automation demo using node-ctypes comtypes
+// demo_com_shortcut — COM automation demo using node-ctypes comtypes
 //
 // Creates a Windows shortcut (.lnk) to notepad.exe using
 // IShellLinkW + IPersistFile, entirely through COM vtable dispatch.
@@ -7,12 +7,12 @@
 // calls needed at the call-site.
 //
 // Usage:
-//   node examples/windows/demo_comtypes.js
+//   node examples/windows/com/demo_com_shortcut.js
 
 import { create_unicode_buffer } from "node-ctypes";
-import { CoInitializeEx, CoUninitialize, CoCreateInstance } from "./comtypes/comtypes.js";
-import { IPersistFile } from "./comtypes/interfaces/persist.js";
-import { IShellLinkW, CLSID_ShellLink } from "./comtypes/interfaces/shelllink.js";
+import { CoInitializeEx, CoUninitialize, CoCreateInstance } from "./comtypes.js";
+import { IPersistFile } from "./interfaces/persist.js";
+import { IShellLinkW, CLSID_ShellLink } from "./interfaces/shelllink.js";
 
 import { tmpdir } from "node:os";
 import { join } from "node:path";

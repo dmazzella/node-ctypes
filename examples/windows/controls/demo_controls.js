@@ -1,5 +1,8 @@
 // Windows Controls Showcase Demo
 // A compact demo that creates a window with a wide set of common Win32 controls
+//
+// Usage:
+//   node examples/windows/controls/demo_controls.js
 
 import { WinDLL, Structure, POINTER, WINFUNCTYPE, sizeof, create_unicode_buffer, byref, c_void } from "node-ctypes";
 import { wintypes } from "node-ctypes";

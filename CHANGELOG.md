@@ -5,6 +5,40 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Embedded Python example** (`examples/cross-platform/python`): CPython
+  driven through its C API with node-ctypes, on Windows, macOS and Linux
+  (glibc and musl), Python 3.8+ including free-threaded builds. It runs code
+  and imports modules (local `.py` files and numpy too), converts values
+  both ways (dict keys as properties, `Tuple`, `Date` ↔ `datetime`), uses
+  JavaScript objects from Python by reference (`JsProxy`, `byReference()`),
+  shares memory between typed arrays and Python buffers without copies,
+  implements `with` / `async with` and time limits, and connects asyncio to
+  the Node.js event loop with a `threadSafeCallback`: coroutines are
+  awaitable from JavaScript, coroutines and Python threads call JavaScript
+  functions, async iterators and cancellation work in both directions.
+- **A README for every example**, published as child pages of the Examples
+  document in the API documentation.
+
+### Changed
+
+- **Examples are organized by platform and example**
+  (`examples/cross-platform/`, `examples/macos/`, `examples/windows/`), one
+  folder per example with its library, demos and README;
+  `examples/README.md` is an index. The COM demos are renamed
+  `windows/com/demo_com_shortcut.js` and
+  `windows/com/demo_com_active_directory.js`.
+
+### Fixed
+
+- **Smart card example on Linux**: `libpcsclite.so.1` is loaded by soname
+  (the library is in the multiarch directory), `SCardError` codes are
+  unsigned 32-bit numbers (`c_long` results are BigInt), and listing readers
+  returns `[]` when none is connected (`SCARD_E_NO_READERS_AVAILABLE`).
+
 ## [2.0.0] - 2026-10-21
 
 2.0 aligns node-ctypes with Python ctypes as closely as the language allows,
@@ -323,6 +357,7 @@ It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-
 
 Initial releases.
 
+[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.0.0...HEAD
 [2.0.0]: https://github.com/dmazzella/node-ctypes/compare/v1.14.0...v2.0.0
 [1.14.0]: https://github.com/dmazzella/node-ctypes/compare/v1.13.0...v1.14.0
 [1.13.0]: https://github.com/dmazzella/node-ctypes/compare/v1.12.1...v1.13.0

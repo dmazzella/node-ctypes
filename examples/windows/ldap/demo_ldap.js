@@ -2,15 +2,15 @@
 // Demonstrates: query, queryBegin, findObjects, queryEnd, modify, parsePathComponents
 //
 // Run on a domain-joined Windows machine:
-//   node examples/windows/demo_ldap.js
+//   node examples/windows/ldap/demo_ldap.js
 //
 // With explicit credentials:
-//   node examples/windows/demo_ldap.js --user admin --pass secret --domain EXAMPLE
+//   node examples/windows/ldap/demo_ldap.js --user admin --pass secret --domain EXAMPLE
 //
 // With a custom base path:
-//   node examples/windows/demo_ldap.js --base "LDAP://DC=corp,DC=example,DC=com"
+//   node examples/windows/ldap/demo_ldap.js --base "LDAP://DC=corp,DC=example,DC=com"
 
-import { Ldap, SCOPE, OUTPUT_TYPE, MOD_OP, query, queryBegin, findObjects, queryEnd, modify, parsePathComponents, toTree, sortByDN, sortTreeByDN } from "./ldap/ldap.js";
+import { Ldap, SCOPE, OUTPUT_TYPE, MOD_OP, query, queryBegin, findObjects, queryEnd, modify, parsePathComponents, toTree, sortByDN, sortTreeByDN } from "./ldap.js";
 
 // ─── CLI argument parsing ───────────────────────────────────────────
 

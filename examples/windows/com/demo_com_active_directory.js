@@ -1,15 +1,15 @@
-// demo_comtypes_ads — Active Directory search using IDirectorySearch
+// demo_com_active_directory — Active Directory search using IDirectorySearch
 //
 // Queries Active Directory via ADsOpenObject + IDirectorySearch.
 // HRESULT-returning COM methods auto-throw on failure (parity with Python
 // comtypes), so the demo reads like straight-line code.
 //
 // Usage:
-//   node examples/windows/demo_comtypes_ads.js --base "LDAP://DC=contoso,DC=com" \
+//   node examples/windows/com/demo_com_active_directory.js --base "LDAP://DC=contoso,DC=com" \
 //        --filter "(objectClass=user)" --attributes "sAMAccountName,displayName,mail"
 
 import { WinDLL, OleDLL, Structure, Union, POINTER, array, byref, memmove, create_string_buffer, create_unicode_buffer, wstring_at, c_void_p } from "node-ctypes";
-import { CoInitializeEx, CoUninitialize, COMPointer, HRESULT, SUCCEEDED } from "./comtypes/comtypes.js";
+import { CoInitializeEx, CoUninitialize, COMPointer, HRESULT, SUCCEEDED } from "./comtypes.js";
 import { wintypes } from "node-ctypes";
 const { BOOL, BYTE, DWORD, HANDLE, INT, LONG, LONGLONG, LPBYTE, LPCWSTR, LPVOID, LPWSTR, PVOID, WORD } = wintypes;
 import {
@@ -39,9 +39,9 @@ import {
   ADSTYPE_UTC_TIME,
   S_ADS_NOMORE_ROWS,
   S_ADS_NOMORE_COLUMNS,
-} from "./comtypes/interfaces/directorysearch.js";
+} from "./interfaces/directorysearch.js";
 // Reuse the flat → tree helpers from the LDAP demo (OU-path based grouping).
-import { OUTPUT_TYPE, toTree, sortByDN, sortTreeByDN } from "./ldap/ldap.js";
+import { OUTPUT_TYPE, toTree, sortByDN, sortTreeByDN } from "../ldap/ldap.js";
 
 // ─── Native libs ─────────────────────────────────────────────────────
 // activeds is loaded via OleDLL so ADsOpenObject (HRESULT) auto-throws on
@@ -336,7 +336,7 @@ function main() {
 
   if (!basePath) {
     console.error("Error: Could not detect domain. Use --base to specify the LDAP path.");
-    console.error('  Example: node demo_comtypes_ads.js --base "LDAP://DC=example,DC=com"');
+    console.error('  Example: node demo_com_active_directory.js --base "LDAP://DC=example,DC=com"');
     process.exit(1);
   }
 

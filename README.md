@@ -499,13 +499,16 @@ needs these changes:
 
 ## Examples
 
-- [Windows Controls Demo](examples/windows/demo_controls.js) — Win32 common controls
-- [Windows Registry Demo](examples/windows/demo_registry.js) — `setValue` / `getValue` / `openKey` / `deleteKey`
-- [Windows Tray Demo](examples/windows/demo_tray.js) — system tray icon + popup menu
-- [Windows COM (Shortcut)](examples/windows/demo_comtypes_file.js) — `IShellLinkW` + `IPersistFile`
-- [Windows COM (Active Directory)](examples/windows/demo_comtypes_ads.js) — `IDirectorySearch` / `ADsOpenObject`
-- [Windows LDAP Demo](examples/windows/demo_ldap.js) — LDAPv3 paged search (`wldap32`)
-- [Smart Card (PC/SC) Demo](examples/demo_scard.js) — `WinSCard` on Windows, `pcsclite` on macOS/Linux
+Each example in `examples/` has its own README; see the [index](examples/README.md).
+
+- [Embedded Python](examples/cross-platform/python/README.md) — CPython through its C API: code, modules, callbacks, JavaScript objects by reference, shared memory, threads, asyncio and cancellation (Windows, macOS, Linux)
+- [Smart card (PC/SC)](examples/cross-platform/smartcard/README.md) — `winscard` on Windows, `PCSC.framework` on macOS, `libpcsclite` on Linux
+- [Accessibility](examples/macos/accessibility/README.md) — macOS UI automation with the Accessibility API
+- [COM automation](examples/windows/com/README.md) — shell shortcuts (`IShellLinkW`) and Active Directory (`IDirectorySearch`)
+- [Controls](examples/windows/controls/README.md) — Win32 common controls
+- [LDAP](examples/windows/ldap/README.md) — LDAPv3 paged search (`wldap32`)
+- [Registry](examples/windows/registry/README.md) — `setValue` / `getValue` / `openKey` / `deleteKey`
+- [System tray](examples/windows/tray/README.md) — tray icon + popup menu
 
 ---
 

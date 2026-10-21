@@ -1,3 +1,7 @@
+---
+title: Accessibility (macOS)
+---
+
 # macOS Accessibility API Wrapper for node-ctypes
 
 A JavaScript wrapper around the macOS Accessibility API (ApplicationServices framework) using node-ctypes. This is the **macOS equivalent of Microsoft UI Automation (UIA)**.
@@ -45,7 +49,7 @@ import {
   isAccessibilityEnabled,
   requestAccessibility,
   close,
-} from "./accessibility/accessibility.js";
+} from "./accessibility.js";
 
 if (!isAccessibilityEnabled()) {
   requestAccessibility(); // Shows macOS permission dialog
@@ -114,17 +118,17 @@ const window = element.getTopLevelElement();
 
 ```bash
 # List windows and UI elements for TextEdit
-node examples/macos/demo_accessibility.js --pid $(pgrep -x TextEdit)
+node examples/macos/accessibility/demo_accessibility.js --pid $(pgrep -x TextEdit)
 
 # Print the full element tree (max depth 4)
-node examples/macos/demo_accessibility.js --pid $(pgrep -x TextEdit) --tree --depth 4
+node examples/macos/accessibility/demo_accessibility.js --pid $(pgrep -x TextEdit) --tree --depth 4
 
 # Set a text field value by role + placeholder
-node examples/macos/demo_accessibility.js --pid $(pgrep -x Safari) \
+node examples/macos/accessibility/demo_accessibility.js --pid $(pgrep -x Safari) \
   --set-value "Hello" --set-value-role AXTextField --set-value-placeholder "Search"
 
 # Press a button by title
-node examples/macos/demo_accessibility.js --pid $(pgrep -x Safari) --press "Submit"
+node examples/macos/accessibility/demo_accessibility.js --pid $(pgrep -x Safari) --press "Submit"
 ```
 
 **Options:**
@@ -146,30 +150,6 @@ node examples/macos/demo_accessibility.js --pid $(pgrep -x Safari) --press "Subm
 | `--set-value-enabled` | Only match enabled elements |
 | `--set-value-url <url>` | Match by `AXURL` (links/web content) |
 | `--press <button>` | Press a button by its title |
-
-### FSE / browser login demo
-
-Demonstrates `getWebArea()`, `AXFrame`/`AXPosition` decoding, and form automation
-against a real Safari page.
-
-```bash
-# Inspect form elements (no fill)
-node examples/macos/demo_accessibility_fse.js
-
-# Fill username and password fields (no submit)
-node examples/macos/demo_accessibility_fse.js --user myuser --pass mypass
-
-# Fill and submit
-node examples/macos/demo_accessibility_fse.js --user myuser --pass mypass --submit
-```
-
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `--user <username>` | Username to fill |
-| `--pass <password>` | Password to fill |
-| `--submit` | Click the Login button after filling |
 
 ## API Reference
 
@@ -350,7 +330,7 @@ Window
 The module exports four constant dictionaries for use with APIs that accept name strings:
 
 ```javascript
-import { AXRoles, AXSubroles, AXActions, AXNotifications, AXAttributes } from "./accessibility/accessibility.js";
+import { AXRoles, AXSubroles, AXActions, AXNotifications, AXAttributes } from "./accessibility.js";
 
 // Instead of magic strings:
 element.findChild({ role: AXRoles.TextField });       // "AXTextField"
@@ -475,7 +455,7 @@ Currently all criteria in `findChild({ ... })` are combined with AND. UIA has co
 Planned API:
 
 ```javascript
-import { or, not } from "./accessibility/accessibility.js";
+import { or, not } from "./accessibility.js";
 
 // Find first element that is AXTextField OR AXTextArea
 win.findChild(or({ role: "AXTextField" }, { role: "AXTextArea" }));

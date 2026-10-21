@@ -7,7 +7,7 @@
 // using standard DLL exports from wldap32.dll.
 //
 // Usage:
-//   import { Ldap, SCOPE } from "./ldap/ldap.js";
+//   import { Ldap, SCOPE } from "./ldap.js";
 //
 //   // Query with Windows integrated auth
 //   const users = Ldap.query(

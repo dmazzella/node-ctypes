@@ -119,7 +119,8 @@ if (PLATFORM === "win32") {
 } else if (PLATFORM === "darwin") {
   winscard = new CDLL("/System/Library/Frameworks/PCSC.framework/PCSC");
 } else {
-  winscard = new CDLL("/usr/lib/libpcsclite.so.1");
+  // Soname: found by the dynamic linker (/usr/lib, /usr/lib/<arch>-linux-gnu, ...)
+  winscard = new CDLL("libpcsclite.so.1");
 }
 
 const SCardEstablishContext = winscard.SCardEstablishContext;
@@ -138,7 +139,8 @@ let SCardListReaders = PLATFORM === "win32" ? winscard.SCardListReadersA : winsc
 SCardListReaders.argtypes = [c_void_p, c_char_p, c_char_p, POINTER(c_uint)];
 SCardListReaders.restype = c_long;
 SCardListReaders.errcheck = function (rv, func, args) {
-  if (rv != E_SUCCESS) {
+  // No reader is an empty list, not an error (pcsclite reports E_NO_READERS_AVAILABLE).
+  if (rv != E_SUCCESS && Number(rv) >>> 0 !== E_NO_READERS_AVAILABLE) {
     throw new SCardError(rv);
   }
   return rv;
@@ -284,6 +286,9 @@ const SCARD_PCI_T1 = pci[PROTOCOL_T1] || null;
 // Error class
 export class SCardError extends Error {
   constructor(code, description) {
+    // LONG results are BigInt (c_long) and negative on some platforms: compare
+    // codes as unsigned 32-bit numbers, like the E_* constants.
+    code = Number(BigInt.asUintN(32, BigInt(code)));
     super(`SCardError: 0x${code.toString(16).toUpperCase()} - ${description || "Unknown error"}`);
     this.code = code;
     this.description = description;
@@ -312,6 +317,7 @@ export class Context {
   list_readers() {
     const readers_count = new c_uint(0);
     SCardListReaders(this.hcontext, null, null, byref(readers_count));
+    if (!readers_count.value) return [];
 
     const readers = create_string_buffer(readers_count.value);
     SCardListReaders(this.hcontext, null, readers, byref(readers_count));

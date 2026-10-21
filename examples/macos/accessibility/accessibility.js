@@ -7,7 +7,7 @@
  * This is the macOS equivalent of Microsoft UI Automation (UIA).
  *
  * Usage:
- *   import { AXApplication, AXSystem, isAccessibilityEnabled, requestAccessibility } from "./accessibility/accessibility.js";
+ *   import { AXApplication, AXSystem, isAccessibilityEnabled, requestAccessibility } from "./accessibility.js";
  *
  *   if (!isAccessibilityEnabled()) requestAccessibility();
  *

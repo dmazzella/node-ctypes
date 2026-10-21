@@ -1,5 +1,11 @@
 /**
- * Test script for scard.js
+ * demo_scard — PC/SC smart card demo using scard.js
+ *
+ * Establishes a context, lists the readers, waits for a card, then reads its
+ * ATR and sends an APDU.
+ *
+ * Usage:
+ *   node examples/cross-platform/smartcard/demo_scard.js
  */
 
 import { establish_context, Card, SCOPE_USER, SHARE_SHARED, PROTOCOL_Tx, E_NO_SMARTCARD, STATE_PRESENT, E_TIMEOUT } from "./scard.js";

@@ -11,6 +11,7 @@
 /tests/node_modules
 /tests/common/__pycache__
 /tests/windows/__pycache__
+/examples/cross-platform/python/__pycache__
 /docs
 package-lock.json
 *ignore*.js

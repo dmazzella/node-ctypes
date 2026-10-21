@@ -1,7 +1,10 @@
 // Registry Demo — using the reusable Registry class
 // Demonstrates: setValue, getValue, openKey, deleteValue, deleteKey
+//
+// Usage:
+//   node examples/windows/registry/demo_registry.js
 
-import { Registry, HKEY } from "./registry/registry.js";
+import { Registry, HKEY } from "./registry.js";
 
 async function main() {
   const subKey = "Software\\node_ctypes_demo";

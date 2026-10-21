@@ -5,7 +5,7 @@
 // instances + byref() for output parameters.
 //
 // Usage:
-//   import { Registry, HKEY, REG } from "./registry/registry.js";
+//   import { Registry, HKEY, REG } from "./registry.js";
 //
 //   const val = Registry.getValue(HKEY.CURRENT_USER, "Software\\MyApp", "Setting");
 //   Registry.setValue(HKEY.CURRENT_USER, "Software\\MyApp", "Setting", "hello");

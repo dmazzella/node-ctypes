@@ -5,24 +5,24 @@
  * searching UI elements, setting text field values, and pressing buttons.
  *
  * Run:
- *   node examples/macos/demo_accessibility.js --pid <PID>
- *   node examples/macos/demo_accessibility.js --pid <PID> --tree
- *   node examples/macos/demo_accessibility.js --pid <PID> --tree --depth 4
- *   node examples/macos/demo_accessibility.js --pid <PID> --title "Window Title"
- *   node examples/macos/demo_accessibility.js --pid <PID> --set-value "Hello" --set-value-role AXTextField
- *   node examples/macos/demo_accessibility.js --pid <PID> --set-value "Hello" --set-value-role AXTextField --set-value-title "Username"
- *   node examples/macos/demo_accessibility.js --pid <PID> --set-value "Hello" --set-value-role AXTextField --set-value-subrole AXSecureTextField
- *   node examples/macos/demo_accessibility.js --pid <PID> --set-value "Hello" --set-value-placeholder "Email"
- *   node examples/macos/demo_accessibility.js --pid <PID> --set-value "Hello" --set-value-identifier "login-email"
- *   node examples/macos/demo_accessibility.js --pid <PID> --set-value "Hello" --set-value-role AXTextField --set-value-enabled
- *   node examples/macos/demo_accessibility.js --pid <PID> --press "Submit"
+ *   node examples/macos/accessibility/demo_accessibility.js --pid <PID>
+ *   node examples/macos/accessibility/demo_accessibility.js --pid <PID> --tree
+ *   node examples/macos/accessibility/demo_accessibility.js --pid <PID> --tree --depth 4
+ *   node examples/macos/accessibility/demo_accessibility.js --pid <PID> --title "Window Title"
+ *   node examples/macos/accessibility/demo_accessibility.js --pid <PID> --set-value "Hello" --set-value-role AXTextField
+ *   node examples/macos/accessibility/demo_accessibility.js --pid <PID> --set-value "Hello" --set-value-role AXTextField --set-value-title "Username"
+ *   node examples/macos/accessibility/demo_accessibility.js --pid <PID> --set-value "Hello" --set-value-role AXTextField --set-value-subrole AXSecureTextField
+ *   node examples/macos/accessibility/demo_accessibility.js --pid <PID> --set-value "Hello" --set-value-placeholder "Email"
+ *   node examples/macos/accessibility/demo_accessibility.js --pid <PID> --set-value "Hello" --set-value-identifier "login-email"
+ *   node examples/macos/accessibility/demo_accessibility.js --pid <PID> --set-value "Hello" --set-value-role AXTextField --set-value-enabled
+ *   node examples/macos/accessibility/demo_accessibility.js --pid <PID> --press "Submit"
  *
  * Prerequisite:
  *   Accessibility permissions must be granted to Terminal / iTerm / your app.
  *   The script will prompt for permission if not already granted.
  */
 
-import { AXApplication, AXSystem, isAccessibilityEnabled, requestAccessibility, close } from "./accessibility/accessibility.js";
+import { AXApplication, AXSystem, isAccessibilityEnabled, requestAccessibility, close } from "./accessibility.js";
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -118,7 +118,7 @@ function trunc(s, max = 60) {
  * Falls back to AXChildrenInNavigationOrder when AXChildren is empty
  * (required for browser web content).
  *
- * @param {import("./accessibility/accessibility.js").AXElement} element
+ * @param {import("./accessibility.js").AXElement} element
  * @param {number} depth - current depth (0 = root)
  * @param {number} maxDepth - stop recursing beyond this depth
  * @param {string} prefix - line prefix for children

@@ -1,177 +1,40 @@
 ---
 title: Examples
+children:
+  - ./cross-platform/python/README.md
+  - ./cross-platform/smartcard/README.md
+  - ./macos/accessibility/README.md
+  - ./windows/com/README.md
+  - ./windows/controls/README.md
+  - ./windows/ldap/README.md
+  - ./windows/registry/README.md
+  - ./windows/tray/README.md
 ---
 
 # Examples
 
-Real-world examples demonstrating node-ctypes capabilities.
+Real-world programs built with node-ctypes, written in the style of Python ctypes code. Each folder holds an example: its reusable library, one or more `demo_*.js` scripts and a README.
 
-## Quick Start
+| Example                                                  | Platforms             | What it shows                                                                                                                                                                                                              |
+| -------------------------------------------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Embedded Python](cross-platform/python/README.md)       | Windows, macOS, Linux | CPython loaded through its C API: code, modules and packages, callbacks, JavaScript objects by reference, shared memory with typed arrays and numpy, threads, asyncio, async iterators and cancellation in both directions |
+| [Smart card (PC/SC)](cross-platform/smartcard/README.md) | Windows, macOS, Linux | Reader enumeration, card connection, ATR and APDU exchange (`winscard`, `PCSC.framework`, `libpcsclite`)                                                                                                                   |
+| [Accessibility](macos/accessibility/README.md)           | macOS                 | UI automation with the Accessibility API: find elements, read and set values, press buttons, browser content                                                                                                               |
+| [COM automation](windows/com/README.md)                  | Windows               | comtypes-like vtable dispatch: shell shortcuts (`IShellLinkW`) and Active Directory (`IDirectorySearch`)                                                                                                                   |
+| [Controls](windows/controls/README.md)                   | Windows               | A window with the common Win32 controls and a message loop                                                                                                                                                                 |
+| [LDAP](windows/ldap/README.md)                           | Windows               | Directory queries and changes with `wldap32` (paged search, schema-aware values)                                                                                                                                           |
+| [Registry](windows/registry/README.md)                   | Windows               | Read and write registry keys and values with `advapi32`                                                                                                                                                                    |
+| [System tray](windows/tray/README.md)                    | Windows               | Tray icon with a Fluent-style popup menu drawn with GDI                                                                                                                                                                    |
 
-### Call a C function
+## Running
 
-```javascript
-import { CDLL, c_int } from 'node-ctypes';
-
-const libc = new CDLL('libc.so.6');  // Linux
-// const libc = new CDLL('msvcrt.dll');  // Windows
-// const libc = new CDLL('libc.dylib');  // macOS
-
-const abs_func = libc.abs;
-abs_func.argtypes = [c_int];
-abs_func.restype = c_int;
-console.log(abs_func(-42));  // 42
-```
-
-### Define a struct
-
-```javascript
-import { Structure, c_int } from 'node-ctypes';
-
-class Point extends Structure {
-    static _fields_ = [["x", c_int], ["y", c_int]];
-}
-
-const p = new Point(10, 20);
-console.log(p.x, p.y);  // 10 20
-```
-
-### Use pointers
-
-```javascript
-import { POINTER, pointer, c_int32 } from 'node-ctypes';
-
-const x = new c_int32(42);
-const p = pointer(x);
-console.log(p.contents.value);  // 42 (Python: p.contents.value)
-
-p.contents = 100;
-console.log(x.value);  // 100
-```
-
-### Callbacks with qsort
-
-The same code as the Python ctypes tutorial:
-
-```javascript
-import { CDLL, CFUNCTYPE, POINTER, array, sizeof, c_int, c_void_p, c_size_t } from 'node-ctypes';
-
-const libc = new CDLL('msvcrt.dll');
-
-const CMPFUNC = CFUNCTYPE(c_int, POINTER(c_int), POINTER(c_int));
-const qsort = libc.qsort;
-qsort.argtypes = [c_void_p, c_size_t, c_size_t, CMPFUNC];
-qsort.restype = null;
-
-const cmp = CMPFUNC((a, b) => a[0] - b[0]);
-const arr = array(c_int, 5)(5, 2, 8, 1, 9);  // Python: (c_int * 5)(5, 2, 8, 1, 9)
-qsort(arr, arr.length, sizeof(c_int), cmp);
-
-console.log([...arr]);  // [1, 2, 5, 8, 9]
-cmp.release();
-```
-
-### Variadic functions (sprintf)
-
-```javascript
-import { CDLL, c_char_p, create_string_buffer } from 'node-ctypes';
-
-const libc = new CDLL('msvcrt.dll');
-const sprintf = libc.sprintf;
-sprintf.argtypes = [c_char_p, c_char_p];  // fixed arguments; the rest are variadic
-
-const buf = create_string_buffer(256);
-sprintf(buf, 'Hello %s! %d', 'World', 42);
-console.log(buf.value);  // "Hello World! 42"
-```
-
----
-
-## Windows API Examples
-
-### Windows Controls Showcase
-
-A GUI demo creating a window with common Win32 controls (buttons, checkboxes, listbox, combo box, progress bar, etc.) using `user32.dll` and `kernel32.dll`.
-
-Source: [windows/demo_controls.js](windows/demo_controls.js)
+The examples import `node-ctypes` by name. From a clone of this repository, build it once and run them from the repository root:
 
 ```bash
-node examples/windows/demo_controls.js
+npm install && npm run build
+node examples/cross-platform/python/demo_python_basics.js
 ```
 
-### Windows Registry
+From your own project, `npm install node-ctypes` and copy the example folder.
 
-Read/write registry values using `advapi32.dll`. Demonstrates `RegCreateKeyExW`, `RegOpenKeyExW`, `RegSetValueExW`, `RegGetValueW`, `RegDeleteValueW`, `RegDeleteKeyW` with `DWORD()` / `HKEY()` output parameters, as in Python.
-
-Source: [windows/demo_registry.js](windows/demo_registry.js) | Library: [windows/registry/registry.js](windows/registry/registry.js)
-
-```javascript
-import { Registry, HKEY } from "./registry/registry.js";
-
-Registry.setValue(HKEY.CURRENT_USER, "Software\\myapp", "Name", "Hello");
-const val = Registry.getValue(HKEY.CURRENT_USER, "Software\\myapp", "Name");
-console.log(val);  // "Hello"
-```
-
-### System Tray
-
-Create a system tray icon with context menu using `shell32.dll` and `user32.dll`. Inspired by [pit-ray/fluent-tray](https://github.com/pit-ray/fluent-tray).
-
-Source: [windows/demo_tray.js](windows/demo_tray.js) | Library: [windows/tray/tray.js](windows/tray/tray.js)
-
-```javascript
-import { FluentTray } from "./tray/tray.js";
-
-const tray = new FluentTray();
-tray.create_tray("myapp", "icon.ico");
-tray.add_menu("Home", "home.ico", false, () => { console.log("Home"); return true; });
-tray.add_separator();
-tray.add_menu("Exit", null, false, () => false);
-tray.status();
-```
-
-### COM Automation (IShellLinkW)
-
-Create Windows shortcuts (.lnk) through COM vtable dispatch using `WINFUNCTYPE`, `CoCreateInstance`, `IShellLinkW`, and `IPersistFile`.
-
-Source: [windows/demo_comtypes_file.js](windows/demo_comtypes_file.js) | Library: [windows/comtypes/comtypes.js](windows/comtypes/comtypes.js)
-
-```javascript
-import { CoInitializeEx, CoCreateInstance } from "./comtypes/comtypes.js";
-import { IShellLinkW, CLSID_ShellLink } from "./comtypes/interfaces/shelllink.js";
-
-CoInitializeEx();
-const shellLink = CoCreateInstance(CLSID_ShellLink, IShellLinkW);
-shellLink.SetPath("C:\\Windows\\notepad.exe");
-shellLink.SetDescription("My shortcut");
-// ... save via IPersistFile
-```
-
-### LDAP Directory Queries
-
-Query Active Directory using `wldap32.dll`. Supports bind, search, modify, and tree display.
-
-Source: [windows/demo_ldap.js](windows/demo_ldap.js) | Library: [windows/ldap/ldap.js](windows/ldap/ldap.js)
-
-```bash
-node examples/windows/demo_ldap.js
-node examples/windows/demo_ldap.js --user admin --pass secret --domain EXAMPLE
-```
-
----
-
-## Cross-Platform Example
-
-### Smart Card (PC/SC)
-
-Interact with smart cards using the PC/SC API — `winscard.dll` on Windows, `libpcsclite` on macOS/Linux. Demonstrates context establishment, reader enumeration, card connection, and APDU exchange.
-
-Source: [demo_scard.js](demo_scard.js) | Library: [scard.js](scard.js)
-
-```javascript
-import { establish_context, SCOPE_USER } from "./scard.js";
-
-const context = establish_context(SCOPE_USER);
-const readers = context.list_readers();
-console.log("Readers:", readers);
-```
+For the basics of the API (functions, structures, pointers, callbacks), see the [Quick start](../README.md#quick-start) and the guides of the main README.

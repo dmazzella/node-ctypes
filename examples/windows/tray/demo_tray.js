@@ -1,14 +1,14 @@
 // demo_tray.js — FluentTray demo (mirrors C++ fluent-tray API)
 //
-// Usage:  node examples/windows/demo_tray.js
+// Usage:  node examples/windows/tray/demo_tray.js
 
-import { FluentTray } from "./tray/tray.js";
+import { FluentTray } from "./tray.js";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const assets = join(__dirname, "tray", "assets");
+const assets = join(__dirname, "assets");
 
 async function main() {
   const tray = new FluentTray();
