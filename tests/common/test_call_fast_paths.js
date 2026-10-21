@@ -12,16 +12,21 @@ import * as ctypes from "node-ctypes";
 
 const platform = os.platform();
 const LIBC = platform === "win32" ? "msvcrt.dll" : platform === "darwin" ? "libc.dylib" : "libc.so.6";
+// On Linux the math functions (sqrt, ...) are in libm, elsewhere in the C library.
+const LIBM = platform === "linux" ? "libm.so.6" : LIBC;
 
 describe("Call fast paths", function () {
   let libc;
+  let libm;
 
   before(function () {
     libc = new ctypes.CDLL(LIBC);
+    libm = new ctypes.CDLL(LIBM);
   });
 
   after(function () {
     if (libc) libc.close();
+    if (libm) libm.close();
   });
 
   describe("narrow integer arguments are sign/zero-extended", function () {
@@ -137,7 +142,7 @@ describe("Call fast paths", function () {
   describe("argument validation (Python ctypes parity)", function () {
     it("strings, null and objects for number arguments throw TypeError", function () {
       const abs = libc.func("abs", ctypes.c_int32, [ctypes.c_int32]);
-      const sqrt = libc.func("sqrt", ctypes.c_double, [ctypes.c_double]);
+      const sqrt = libm.func("sqrt", ctypes.c_double, [ctypes.c_double]);
       assert.throws(() => abs("12"), TypeError);
       assert.throws(() => abs(null), TypeError);
       assert.throws(() => abs({}), TypeError);
@@ -149,7 +154,7 @@ describe("Call fast paths", function () {
 
     it("booleans count as 0/1", function () {
       const abs = libc.func("abs", ctypes.c_int32, [ctypes.c_int32]);
-      const sqrt = libc.func("sqrt", ctypes.c_double, [ctypes.c_double]);
+      const sqrt = libm.func("sqrt", ctypes.c_double, [ctypes.c_double]);
       const abs8 = libc.func("abs", ctypes.c_int32, [ctypes.c_int8]);
       assert.strictEqual(abs(true), 1);
       assert.strictEqual(abs(false), 0);
@@ -159,7 +164,7 @@ describe("Call fast paths", function () {
 
     it("BigInt values are truncated to the argument size", function () {
       const abs = libc.func("abs", ctypes.c_int32, [ctypes.c_int32]);
-      const sqrt = libc.func("sqrt", ctypes.c_double, [ctypes.c_double]);
+      const sqrt = libm.func("sqrt", ctypes.c_double, [ctypes.c_double]);
       assert.strictEqual(abs(-5n), 5);
       assert.strictEqual(abs(2n ** 40n + 3n), 3);
       assert.strictEqual(sqrt(16n), 4);
