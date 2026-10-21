@@ -43,7 +43,7 @@ import { POINTER, pointer, c_int32 } from 'node-ctypes';
 
 const x = new c_int32(42);
 const p = pointer(x);
-console.log(p.contents);  // 42
+console.log(p.contents.value);  // 42 (Python: p.contents.value)
 
 p.contents = 100;
 console.log(x.value);  // 100
@@ -51,38 +51,38 @@ console.log(x.value);  // 100
 
 ### Callbacks with qsort
 
+The same code as the Python ctypes tutorial:
+
 ```javascript
-import { CDLL, callback, c_int32, c_void, c_void_p, c_size_t,
-         readValue, writeValue, create_string_buffer } from 'node-ctypes';
+import { CDLL, CFUNCTYPE, POINTER, array, sizeof, c_int, c_void_p, c_size_t } from 'node-ctypes';
 
 const libc = new CDLL('msvcrt.dll');
 
-const compare = callback(
-    (a, b) => readValue(a, c_int32) - readValue(b, c_int32),
-    c_int32, [c_void_p, c_void_p]
-);
+const CMPFUNC = CFUNCTYPE(c_int, POINTER(c_int), POINTER(c_int));
+const qsort = libc.qsort;
+qsort.argtypes = [c_void_p, c_size_t, c_size_t, CMPFUNC];
+qsort.restype = null;
 
-const qsort = libc.func('qsort', c_void, [c_void_p, c_size_t, c_size_t, c_void_p]);
+const cmp = CMPFUNC((a, b) => a[0] - b[0]);
+const arr = array(c_int, 5)(5, 2, 8, 1, 9);  // Python: (c_int * 5)(5, 2, 8, 1, 9)
+qsort(arr, arr.length, sizeof(c_int), cmp);
 
-const arr = create_string_buffer(5 * 4);
-[5, 2, 8, 1, 9].forEach((v, i) => writeValue(arr, c_int32, v, i * 4));
-qsort(arr, 5, 4, compare.pointer);
-
-console.log(readValue(arr, c_int32, 0));  // 1 (sorted!)
-compare.release();
+console.log([...arr]);  // [1, 2, 5, 8, 9]
+cmp.release();
 ```
 
 ### Variadic functions (sprintf)
 
 ```javascript
-import { CDLL, c_int, c_void_p, c_char_p, string_at } from 'node-ctypes';
+import { CDLL, c_char_p, create_string_buffer } from 'node-ctypes';
 
 const libc = new CDLL('msvcrt.dll');
-const sprintf = libc.func('sprintf', c_int, [c_void_p, c_char_p]);
+const sprintf = libc.sprintf;
+sprintf.argtypes = [c_char_p, c_char_p];  // fixed arguments; the rest are variadic
 
-const buf = Buffer.alloc(256);
+const buf = create_string_buffer(256);
 sprintf(buf, 'Hello %s! %d', 'World', 42);
-console.log(string_at(buf));  // "Hello World! 42"
+console.log(buf.value);  // "Hello World! 42"
 ```
 
 ---
@@ -101,7 +101,7 @@ node examples/windows/demo_controls.js
 
 ### Windows Registry
 
-Read/write registry values using `advapi32.dll`. Demonstrates `RegOpenKeyExW`, `RegSetValueExW`, `RegQueryValueExW`, `RegDeleteValueW`, `RegDeleteKeyW`.
+Read/write registry values using `advapi32.dll`. Demonstrates `RegCreateKeyExW`, `RegOpenKeyExW`, `RegSetValueExW`, `RegGetValueW`, `RegDeleteValueW`, `RegDeleteKeyW` with `DWORD()` / `HKEY()` output parameters, as in Python.
 
 Source: [windows/demo_registry.js](windows/demo_registry.js) | Library: [windows/registry/registry.js](windows/registry/registry.js)
 
@@ -134,7 +134,7 @@ tray.status();
 
 Create Windows shortcuts (.lnk) through COM vtable dispatch using `WINFUNCTYPE`, `CoCreateInstance`, `IShellLinkW`, and `IPersistFile`.
 
-Source: [windows/demo_comtypes.js](windows/demo_comtypes.js) | Library: [windows/comtypes/comtypes.js](windows/comtypes/comtypes.js)
+Source: [windows/demo_comtypes_file.js](windows/demo_comtypes_file.js) | Library: [windows/comtypes/comtypes.js](windows/comtypes/comtypes.js)
 
 ```javascript
 import { CoInitializeEx, CoCreateInstance } from "./comtypes/comtypes.js";

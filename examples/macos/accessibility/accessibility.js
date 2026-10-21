@@ -24,7 +24,7 @@
  *   - Accessibility permissions must be granted to the terminal / application
  */
 
-import { CDLL, byref, c_void_p, c_int32, c_uint32, c_uint8, c_long, c_ulong, c_float, readValue, ptrToBuffer, POINTER_SIZE, create_string_buffer } from "node-ctypes";
+import { CDLL, Structure, addressof, byref, c_void_p, c_char_p, c_int32, c_uint32, c_uint8, c_int64, c_long, c_ulong, c_float, c_double, create_string_buffer } from "node-ctypes";
 
 // ─── AXError Codes ──────────────────────────────────────────────────
 
@@ -79,6 +79,37 @@ const kAXValueCGSizeType = 2; // { width: number, height: number }
 const kAXValueCGRectType = 3; // { x, y, width, height }
 const kAXValueCFRangeType = 4; // { location: number, length: number }
 const kAXValueIllegalType = 0xffffffff;
+
+// ─── CoreGraphics / CoreFoundation structures ───────────────────────
+// CGFloat is a double and CFIndex a long on 64-bit macOS.
+
+class CGPoint extends Structure {
+  static _fields_ = [
+    ["x", c_double],
+    ["y", c_double],
+  ];
+}
+
+class CGSize extends Structure {
+  static _fields_ = [
+    ["width", c_double],
+    ["height", c_double],
+  ];
+}
+
+class CGRect extends Structure {
+  static _fields_ = [
+    ["origin", CGPoint],
+    ["size", CGSize],
+  ];
+}
+
+class CFRange extends Structure {
+  static _fields_ = [
+    ["location", c_long],
+    ["length", c_long],
+  ];
+}
 
 // ─── Error Class ────────────────────────────────────────────────────
 
@@ -186,7 +217,7 @@ function cf() {
     _cf = new CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation");
 
     // CFString
-    _cf.CFStringCreateWithCString.argtypes = [c_void_p, c_void_p, c_uint32];
+    _cf.CFStringCreateWithCString.argtypes = [c_void_p, c_char_p, c_uint32];
     _cf.CFStringCreateWithCString.restype = c_void_p;
 
     _cf.CFStringGetCString.argtypes = [c_void_p, c_void_p, c_long, c_uint32];
@@ -251,11 +282,9 @@ function cf() {
 
 // ─── Global Symbol Accessors ────────────────────────────────────────
 
+// Python: c_void_p.in_dll(lib, name).value
 function getGlobalCFRef(lib, symbolName) {
-  const addr = lib.symbol(symbolName);
-  if (!addr || addr === 0n) return null;
-  const buf = ptrToBuffer(addr, POINTER_SIZE);
-  return readValue(buf, c_void_p, 0);
+  return c_void_p.in_dll(lib, symbolName).value;
 }
 
 let _kCFBooleanTrue = null;
@@ -285,17 +314,18 @@ function getAXTrustedCheckOptionPrompt() {
   return _kAXTrustedCheckOptionPrompt;
 }
 
-// These are struct addresses (not pointer-to-pointer), passed directly to CFDictionaryCreateMutable
+// These are structs: CFDictionaryCreateMutable takes their address
+// (Python: addressof(c_void_p.in_dll(cf, name))).
 function getCFTypeDictionaryKeyCallBacks() {
   if (_kCFTypeDictionaryKeyCallBacks === null) {
-    _kCFTypeDictionaryKeyCallBacks = cf().symbol("kCFTypeDictionaryKeyCallBacks");
+    _kCFTypeDictionaryKeyCallBacks = addressof(c_void_p.in_dll(cf(), "kCFTypeDictionaryKeyCallBacks"));
   }
   return _kCFTypeDictionaryKeyCallBacks;
 }
 
 function getCFTypeDictionaryValueCallBacks() {
   if (_kCFTypeDictionaryValueCallBacks === null) {
-    _kCFTypeDictionaryValueCallBacks = cf().symbol("kCFTypeDictionaryValueCallBacks");
+    _kCFTypeDictionaryValueCallBacks = addressof(c_void_p.in_dll(cf(), "kCFTypeDictionaryValueCallBacks"));
   }
   return _kCFTypeDictionaryValueCallBacks;
 }
@@ -311,9 +341,8 @@ const _cfstrCache = new Map();
  * @returns {bigint} CFStringRef pointer
  */
 function cfstr(jsString) {
-  const buf = Buffer.from(jsString + "\0", "utf8");
-  const ref = cf().CFStringCreateWithCString(null, buf, kCFStringEncodingUTF8);
-  if (!ref || ref === 0n) {
+  const ref = cf().CFStringCreateWithCString(null, jsString, kCFStringEncodingUTF8);
+  if (!ref) {
     throw new AXError(kAXErrorFailure, `Failed to create CFString for "${jsString}"`);
   }
   return ref;
@@ -343,13 +372,21 @@ function cfstrToJs(cfStringRef) {
   const len = Number(lib.CFStringGetLength(cfStringRef));
   if (len <= 0) return "";
   const maxSize = Number(lib.CFStringGetMaximumSizeForEncoding(len, kCFStringEncodingUTF8));
-  const bufSize = maxSize + 1;
-  const buf = Buffer.alloc(bufSize);
-  const ok = lib.CFStringGetCString(cfStringRef, buf, bufSize, kCFStringEncodingUTF8);
-  if (!ok) return "";
-  let end = 0;
-  while (end < buf.length && buf[end] !== 0) end++;
-  return buf.subarray(0, end).toString("utf8");
+  const buf = create_string_buffer(maxSize + 1);
+  if (!lib.CFStringGetCString(cfStringRef, buf, maxSize + 1, kCFStringEncodingUTF8)) return "";
+  return buf.value;
+}
+
+/**
+ * Create a CFNumberRef from a JS number. Caller must CFRelease.
+ * @param {number} value
+ * @returns {bigint} CFNumberRef pointer
+ */
+function cfNumber(value) {
+  if (Number.isInteger(value)) {
+    return cf().CFNumberCreate(null, kCFNumberSInt64Type, byref(new c_int64(BigInt(value))));
+  }
+  return cf().CFNumberCreate(null, kCFNumberFloat64Type, byref(new c_double(value)));
 }
 
 /**
@@ -357,7 +394,7 @@ function cfstrToJs(cfStringRef) {
  * @param {bigint} ref
  */
 function cfRelease(ref) {
-  if (ref && ref !== 0n) {
+  if (ref) {
     cf().CFRelease(ref);
   }
 }
@@ -402,7 +439,7 @@ function axValueTypeID() {
  * @returns {*} JS value (string, boolean, number, or raw bigint for unknown types)
  */
 function cfToJs(cfTypeRef) {
-  if (!cfTypeRef || cfTypeRef === 0n) return null;
+  if (!cfTypeRef) return null;
 
   const lib = cf();
   const typeID = lib.CFGetTypeID(cfTypeRef);
@@ -416,18 +453,16 @@ function cfToJs(cfTypeRef) {
   }
 
   if (typeID === cfNumberTypeID()) {
-    const buf = Buffer.alloc(8);
     // Try int64 first, then double
-    if (lib.CFNumberGetValue(cfTypeRef, kCFNumberSInt64Type, buf)) {
-      const val = buf.readBigInt64LE(0);
+    const int64 = new c_int64();
+    if (lib.CFNumberGetValue(cfTypeRef, kCFNumberSInt64Type, byref(int64))) {
+      const val = int64.value;
       // Return as Number if it fits safely
-      if (val >= -9007199254740991n && val <= 9007199254740991n) {
-        return Number(val);
-      }
-      return val;
+      return val >= -9007199254740991n && val <= 9007199254740991n ? Number(val) : val;
     }
-    if (lib.CFNumberGetValue(cfTypeRef, kCFNumberFloat64Type, buf)) {
-      return buf.readDoubleLE(0);
+    const float64 = new c_double();
+    if (lib.CFNumberGetValue(cfTypeRef, kCFNumberFloat64Type, byref(float64))) {
+      return float64.value;
     }
     return null;
   }
@@ -452,35 +487,27 @@ function axValueToJs(axValueRef) {
   const valueType = ax.AXValueGetType(axValueRef);
 
   if (valueType === kAXValueCGPointType) {
-    const buf = Buffer.alloc(16);
-    if (!ax.AXValueGetValue(axValueRef, kAXValueCGPointType, buf)) return null;
-    return { x: buf.readDoubleLE(0), y: buf.readDoubleLE(8) };
+    const point = new CGPoint();
+    if (!ax.AXValueGetValue(axValueRef, kAXValueCGPointType, byref(point))) return null;
+    return { x: point.x, y: point.y };
   }
 
   if (valueType === kAXValueCGSizeType) {
-    const buf = Buffer.alloc(16);
-    if (!ax.AXValueGetValue(axValueRef, kAXValueCGSizeType, buf)) return null;
-    return { width: buf.readDoubleLE(0), height: buf.readDoubleLE(8) };
+    const size = new CGSize();
+    if (!ax.AXValueGetValue(axValueRef, kAXValueCGSizeType, byref(size))) return null;
+    return { width: size.width, height: size.height };
   }
 
   if (valueType === kAXValueCGRectType) {
-    const buf = Buffer.alloc(32);
-    if (!ax.AXValueGetValue(axValueRef, kAXValueCGRectType, buf)) return null;
-    return {
-      x: buf.readDoubleLE(0),
-      y: buf.readDoubleLE(8),
-      width: buf.readDoubleLE(16),
-      height: buf.readDoubleLE(24),
-    };
+    const rect = new CGRect();
+    if (!ax.AXValueGetValue(axValueRef, kAXValueCGRectType, byref(rect))) return null;
+    return { x: rect.origin.x, y: rect.origin.y, width: rect.size.width, height: rect.size.height };
   }
 
   if (valueType === kAXValueCFRangeType) {
-    const buf = Buffer.alloc(16);
-    if (!ax.AXValueGetValue(axValueRef, kAXValueCFRangeType, buf)) return null;
-    return {
-      location: Number(buf.readBigInt64LE(0)),
-      length: Number(buf.readBigInt64LE(8)),
-    };
+    const range = new CFRange();
+    if (!ax.AXValueGetValue(axValueRef, kAXValueCFRangeType, byref(range))) return null;
+    return { location: Number(range.location), length: Number(range.length) };
   }
 
   return null;
@@ -492,13 +519,13 @@ function axValueToJs(axValueRef) {
  * @returns {string[]}
  */
 function cfStringArrayToJs(cfArrayRef) {
-  if (!cfArrayRef || cfArrayRef === 0n) return [];
+  if (!cfArrayRef) return [];
   const lib = cf();
   const count = Number(lib.CFArrayGetCount(cfArrayRef));
   const result = [];
   for (let i = 0; i < count; i++) {
     const strRef = lib.CFArrayGetValueAtIndex(cfArrayRef, i);
-    if (strRef && strRef !== 0n) {
+    if (strRef) {
       result.push(cfstrToJs(strRef));
     }
   }
@@ -514,30 +541,17 @@ function cfStringArrayToJs(cfArrayRef) {
 function jsToAXValue(obj) {
   const ax = appServices();
   if ("location" in obj && "length" in obj) {
-    const buf = Buffer.alloc(16);
-    buf.writeBigInt64LE(BigInt(obj.location), 0);
-    buf.writeBigInt64LE(BigInt(obj.length), 8);
-    return ax.AXValueCreate(kAXValueCFRangeType, buf);
+    return ax.AXValueCreate(kAXValueCFRangeType, byref(new CFRange(obj.location, obj.length)));
   }
   if ("x" in obj && "y" in obj && "width" in obj && "height" in obj) {
-    const buf = Buffer.alloc(32);
-    buf.writeDoubleLE(obj.x, 0);
-    buf.writeDoubleLE(obj.y, 8);
-    buf.writeDoubleLE(obj.width, 16);
-    buf.writeDoubleLE(obj.height, 24);
-    return ax.AXValueCreate(kAXValueCGRectType, buf);
+    const rect = new CGRect(new CGPoint(obj.x, obj.y), new CGSize(obj.width, obj.height));
+    return ax.AXValueCreate(kAXValueCGRectType, byref(rect));
   }
   if ("x" in obj && "y" in obj) {
-    const buf = Buffer.alloc(16);
-    buf.writeDoubleLE(obj.x, 0);
-    buf.writeDoubleLE(obj.y, 8);
-    return ax.AXValueCreate(kAXValueCGPointType, buf);
+    return ax.AXValueCreate(kAXValueCGPointType, byref(new CGPoint(obj.x, obj.y)));
   }
   if ("width" in obj && "height" in obj) {
-    const buf = Buffer.alloc(16);
-    buf.writeDoubleLE(obj.width, 0);
-    buf.writeDoubleLE(obj.height, 8);
-    return ax.AXValueCreate(kAXValueCGSizeType, buf);
+    return ax.AXValueCreate(kAXValueCGSizeType, byref(new CGSize(obj.width, obj.height)));
   }
   return null;
 }
@@ -582,7 +596,7 @@ export class AXElement {
     checkAX(err, `getAttribute("${name}")`);
 
     const cfValue = valueOut.value;
-    if (!cfValue || cfValue === 0n) return null;
+    if (!cfValue) return null;
 
     try {
       const typeID = lib.CFGetTypeID(cfValue);
@@ -593,7 +607,7 @@ export class AXElement {
         const result = [];
         for (let i = 0; i < count; i++) {
           const elem = lib.CFArrayGetValueAtIndex(cfValue, i);
-          if (!elem || elem === 0n) continue;
+          if (!elem) continue;
           const elemTypeID = lib.CFGetTypeID(elem);
           if (elemTypeID !== cfStringTypeID() && elemTypeID !== cfBooleanTypeID() && elemTypeID !== cfNumberTypeID() && elemTypeID !== cfArrayTypeID()) {
             // Likely an AXUIElementRef — retain it so it survives past the array release
@@ -632,19 +646,12 @@ export class AXElement {
       cfValue = value ? getCFBooleanTrue() : getCFBooleanFalse();
       shouldRelease = false; // globals — do NOT release
     } else if (typeof value === "number") {
-      const buf = Buffer.alloc(8);
-      if (Number.isInteger(value)) {
-        buf.writeBigInt64LE(BigInt(value), 0);
-        cfValue = cf().CFNumberCreate(null, kCFNumberSInt64Type, buf);
-      } else {
-        buf.writeDoubleLE(value, 0);
-        cfValue = cf().CFNumberCreate(null, kCFNumberFloat64Type, buf);
-      }
+      cfValue = cfNumber(value);
       shouldRelease = true;
     } else if (typeof value === "object" && value !== null) {
       // Geometry / range object → AXValueRef (e.g. setting AXPosition, AXSize)
       cfValue = jsToAXValue(value);
-      if (!cfValue || cfValue === 0n) {
+      if (!cfValue) {
         throw new Error(`setAttribute: cannot convert object to AXValueRef (unsupported shape)`);
       }
       shouldRelease = true;
@@ -685,7 +692,7 @@ export class AXElement {
     if (err === kAXErrorNoValue || err === kAXErrorAttributeUnsupported || err === kAXErrorCannotComplete) return [];
     checkAX(err, "getAttributeNames()");
     const cfNames = namesOut.value;
-    if (!cfNames || cfNames === 0n) return [];
+    if (!cfNames) return [];
     try {
       return cfStringArrayToJs(cfNames);
     } finally {
@@ -704,7 +711,7 @@ export class AXElement {
     if (err === kAXErrorNoValue || err === kAXErrorAttributeUnsupported || err === kAXErrorCannotComplete) return [];
     checkAX(err, "getParameterizedAttributeNames()");
     const cfNames = namesOut.value;
-    if (!cfNames || cfNames === 0n) return [];
+    if (!cfNames) return [];
     try {
       return cfStringArrayToJs(cfNames);
     } finally {
@@ -723,7 +730,7 @@ export class AXElement {
     if (err === kAXErrorNoValue || err === kAXErrorAttributeUnsupported || err === kAXErrorCannotComplete) return [];
     checkAX(err, "getActionNames()");
     const cfNames = namesOut.value;
-    if (!cfNames || cfNames === 0n) return [];
+    if (!cfNames) return [];
     try {
       return cfStringArrayToJs(cfNames);
     } finally {
@@ -743,7 +750,7 @@ export class AXElement {
     const err = ax.AXUIElementCopyActionDescription(this._ref, cfAction, byref(descOut));
     if (err !== kAXErrorSuccess) return null;
     const cfDesc = descOut.value;
-    if (!cfDesc || cfDesc === 0n) return null;
+    if (!cfDesc) return null;
     try {
       return cfstrToJs(cfDesc);
     } finally {
@@ -776,21 +783,14 @@ export class AXElement {
       cfParam = cfstr(parameter);
       shouldRelease = true;
     } else if (typeof parameter === "number") {
-      const buf = Buffer.alloc(8);
-      if (Number.isInteger(parameter)) {
-        buf.writeBigInt64LE(BigInt(parameter), 0);
-        cfParam = lib.CFNumberCreate(null, kCFNumberSInt64Type, buf);
-      } else {
-        buf.writeDoubleLE(parameter, 0);
-        cfParam = lib.CFNumberCreate(null, kCFNumberFloat64Type, buf);
-      }
+      cfParam = cfNumber(parameter);
       shouldRelease = true;
     } else if (parameter instanceof AXElement) {
       cfParam = parameter._ref;
       shouldRelease = false;
     } else if (typeof parameter === "object" && parameter !== null) {
       cfParam = jsToAXValue(parameter);
-      if (!cfParam || cfParam === 0n) throw new Error(`getParameterizedAttribute: cannot convert parameter to AXValueRef`);
+      if (!cfParam) throw new Error(`getParameterizedAttribute: cannot convert parameter to AXValueRef`);
       shouldRelease = true;
     } else {
       throw new Error(`getParameterizedAttribute: unsupported parameter type "${typeof parameter}"`);
@@ -808,7 +808,7 @@ export class AXElement {
     checkAX(err, `getParameterizedAttribute("${attr}")`);
 
     const cfValue = valueOut.value;
-    if (!cfValue || cfValue === 0n) return null;
+    if (!cfValue) return null;
 
     try {
       const typeID = lib.CFGetTypeID(cfValue);
@@ -817,7 +817,7 @@ export class AXElement {
         const result = [];
         for (let i = 0; i < count; i++) {
           const elem = lib.CFArrayGetValueAtIndex(cfValue, i);
-          if (!elem || elem === 0n) continue;
+          if (!elem) continue;
           const elemTypeID = lib.CFGetTypeID(elem);
           if (elemTypeID !== cfStringTypeID() && elemTypeID !== cfBooleanTypeID() && elemTypeID !== cfNumberTypeID() && elemTypeID !== cfArrayTypeID()) {
             lib.CFRetain(elem);
@@ -1121,7 +1121,7 @@ export class AXElement {
 
   /** Release the underlying AXUIElementRef. */
   dispose() {
-    if (this._owned && this._ref && this._ref !== 0n) {
+    if (this._owned && this._ref) {
       cfRelease(this._ref);
       this._ref = 0n;
     }
@@ -1164,7 +1164,7 @@ function _matches(element, criteria) {
  * @returns {AXElement|null}
  */
 function _findWebArea(el, visited) {
-  if (!el._ref || el._ref === 0n || visited.has(el._ref)) return null;
+  if (!el._ref || visited.has(el._ref)) return null;
   visited.add(el._ref);
 
   // Check regular children
@@ -1199,7 +1199,7 @@ export class AXApplication {
    */
   constructor(pid) {
     const ref = appServices().AXUIElementCreateApplication(pid);
-    if (!ref || ref === 0n) {
+    if (!ref) {
       throw new AXError(kAXErrorFailure, `Failed to create AXUIElement for pid ${pid}`);
     }
     this._element = new AXElement(ref, true);
@@ -1233,7 +1233,7 @@ export class AXApplication {
     if (result instanceof AXElement) return result;
     // AXFocusedWindow returns a single AXUIElementRef, not an array.
     // getAttribute will return it as a raw BigInt if it can't identify the CF type.
-    if (result && typeof result === "bigint" && result !== 0n) {
+    if (typeof result === "bigint" && result) {
       return new AXElement(result, true);
     }
     return null;
@@ -1246,7 +1246,7 @@ export class AXApplication {
   getMainWindow() {
     const result = this._element.getAttribute("AXMainWindow");
     if (result instanceof AXElement) return result;
-    if (result && typeof result === "bigint" && result !== 0n) {
+    if (typeof result === "bigint" && result) {
       return new AXElement(result, true);
     }
     return null;
@@ -1292,7 +1292,7 @@ export class AXApplication {
     if (err === kAXErrorNoValue || err === kAXErrorCannotComplete) return null;
     checkAX(err, `getElementAtPosition(${x}, ${y})`);
     const ref = elementOut.value;
-    if (!ref || ref === 0n) return null;
+    if (!ref) return null;
     return new AXElement(ref, true);
   }
 
@@ -1325,7 +1325,7 @@ export class AXApplication {
 export class AXSystem {
   constructor() {
     const ref = appServices().AXUIElementCreateSystemWide();
-    if (!ref || ref === 0n) {
+    if (!ref) {
       throw new AXError(kAXErrorFailure, "Failed to create system-wide AXUIElement");
     }
     this._element = new AXElement(ref, true);
@@ -1335,7 +1335,7 @@ export class AXSystem {
   getFocusedElement() {
     const result = this._element.getAttribute("AXFocusedUIElement");
     if (result instanceof AXElement) return result;
-    if (result && typeof result === "bigint" && result !== 0n) {
+    if (typeof result === "bigint" && result) {
       return new AXElement(result, true);
     }
     return null;
@@ -1602,7 +1602,7 @@ export function requestAccessibility() {
 
   const dict = lib.CFDictionaryCreateMutable(null, 1, getCFTypeDictionaryKeyCallBacks(), getCFTypeDictionaryValueCallBacks());
 
-  if (!dict || dict === 0n) {
+  if (!dict) {
     throw new AXError(kAXErrorFailure, "Failed to create CFDictionary for accessibility options");
   }
 

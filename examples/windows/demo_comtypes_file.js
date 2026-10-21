@@ -9,7 +9,7 @@
 // Usage:
 //   node examples/windows/demo_comtypes.js
 
-import { create_unicode_buffer, wstring_at } from "node-ctypes";
+import { create_unicode_buffer } from "node-ctypes";
 import { CoInitializeEx, CoUninitialize, CoCreateInstance } from "./comtypes/comtypes.js";
 import { IPersistFile } from "./comtypes/interfaces/persist.js";
 import { IShellLinkW, CLSID_ShellLink } from "./comtypes/interfaces/shelllink.js";
@@ -71,12 +71,11 @@ console.log(`[5] Saved: ${lnkPath}\n`);
   // GetPath(pszFile, cch, pfd, fFlags)
   const pathBuf = create_unicode_buffer(260);
   shellLink2.GetPath(pathBuf, 260, null, 0);
-  // wstring_at(buf) stops at the first null — no manual trim needed.
-  console.log(`[6] Verified — link target: "${wstring_at(pathBuf)}"`);
+  console.log(`[6] Verified — link target: "${pathBuf.value}"`);
 
   const descBuf = create_unicode_buffer(1024);
   shellLink2.GetDescription(descBuf, 1024);
-  console.log(`    description: "${wstring_at(descBuf)}"`);
+  console.log(`    description: "${descBuf.value}"`);
 
   pf2.Release();
   shellLink2.Release();

@@ -21,6 +21,9 @@ class CTypesAddon : public Napi::Addon<CTypesAddon> {
   uint32_t captured_last_error = 0;  // DWORD-like (unsigned) per parity Win32
   int captured_errno = 0;            // errno è int in POSIX
 
+  // Classe JS ArgumentError (Python ctypes.ArgumentError), registrata da lib/index.js.
+  Napi::FunctionReference argument_error_ctor;
+
   CTypesAddon(Napi::Env env, Napi::Object exports);
   ~CTypesAddon();
 
@@ -33,6 +36,7 @@ class CTypesAddon : public Napi::Addon<CTypesAddon> {
   Napi::Value SizeOf(const Napi::CallbackInfo& info);
   Napi::Value CreateCString(const Napi::CallbackInfo& info);
   Napi::Value ReadCString(const Napi::CallbackInfo& info);
+  Napi::Value ReadWString(const Napi::CallbackInfo& info);
   Napi::Value PtrToBuffer(const Napi::CallbackInfo& info);
   Napi::Value AddressOf(const Napi::CallbackInfo& info);
 
@@ -41,6 +45,7 @@ class CTypesAddon : public Napi::Addon<CTypesAddon> {
   Napi::Value SetCapturedLastError(const Napi::CallbackInfo& info);
   Napi::Value GetCapturedErrno(const Napi::CallbackInfo& info);
   Napi::Value SetCapturedErrno(const Napi::CallbackInfo& info);
+  Napi::Value SetArgumentError(const Napi::CallbackInfo& info);
 };
 
 }  // namespace ctypes

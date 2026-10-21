@@ -51,6 +51,41 @@ class TestWintypes(unittest.TestCase):
         self.assertEqual(ctypes.sizeof(wintypes.WPARAM), ps)
         self.assertEqual(ctypes.sizeof(wintypes.LPARAM), ps)
 
+    def test_character_types(self):
+        self.assertIs(wintypes.CHAR, ctypes.c_char)
+        self.assertIs(wintypes.WCHAR, ctypes.c_wchar)
+
+    def test_pointer_types(self):
+        self.assertIs(wintypes.LPDWORD._type_, wintypes.DWORD)
+        self.assertIs(wintypes.PDWORD, wintypes.LPDWORD)
+        self.assertIs(wintypes.LPBYTE._type_, wintypes.BYTE)
+        self.assertIs(wintypes.PHKEY._type_, wintypes.HKEY)
+        self.assertIs(wintypes.LPRECT._type_, wintypes.RECT)
+        self.assertIs(wintypes.LPMSG._type_, wintypes.MSG)
+        n = wintypes.DWORD(7)
+        p = ctypes.cast(ctypes.byref(n), wintypes.LPDWORD)
+        self.assertEqual(p[0], 7)
+
+    def test_structures(self):
+        rect = wintypes.RECT(1, 2, 3, 4)
+        self.assertEqual([rect.left, rect.bottom], [1, 4])
+        self.assertEqual(ctypes.sizeof(wintypes.RECT), 4 * ctypes.sizeof(ctypes.c_long))
+        self.assertIs(wintypes.tagRECT, wintypes.RECT)
+        self.assertIs(wintypes.POINTL, wintypes.POINT)
+        self.assertIs(wintypes.SIZEL, wintypes.SIZE)
+        self.assertIsNone(wintypes.MSG().hWnd)
+        self.assertEqual(wintypes.SMALL_RECT(1, 2, 3, 4).Bottom, 4)
+        find = wintypes.WIN32_FIND_DATAW()
+        find.cFileName = "notepad.exe"
+        self.assertEqual(find.cFileName, "notepad.exe")
+        self.assertEqual(wintypes.MAX_PATH, 260)
+        self.assertEqual(wintypes.RGB(1, 2, 3), 0x030201)
+
+    def test_variant_bool(self):
+        v = wintypes.VARIANT_BOOL(True)
+        self.assertIs(v.value, True)
+        self.assertEqual(bytes(v), b"\xff\xff")
+
 
 if __name__ == "__main__":
     unittest.main()

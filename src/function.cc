@@ -4,6 +4,164 @@
 
 namespace ctypes {
 
+namespace {
+
+// Data pointer of a Buffer argument, or nullptr.
+// Python ctypes rifiuta i valori non convertibili in puntatore con
+// ArgumentError "wrong type": mai NULL implicito per funzioni o oggetti.
+[[noreturn]] inline void ThrowWrongType(const Napi::Value& val) {
+  throw Napi::TypeError::New(val.Env(), "wrong type");
+}
+
+// Memoria di un oggetto passato a un parametro puntatore: Buffer e ogni
+// TypedArray/DataView/ArrayBuffer (in place); altri oggetti sono un TypeError.
+inline void* ObjectData(const Napi::Value& val) {
+  if (val.IsBuffer()) [[likely]] {
+    return val.As<Napi::Buffer<uint8_t>>().Data();
+  }
+  if (val.IsTypedArray()) {
+    Napi::TypedArray ta = val.As<Napi::TypedArray>();
+    return static_cast<uint8_t*>(ta.ArrayBuffer().Data()) + ta.ByteOffset();
+  }
+  if (val.IsDataView()) {
+    Napi::DataView dv = val.As<Napi::DataView>();
+    return static_cast<uint8_t*>(dv.ArrayBuffer().Data()) + dv.ByteOffset();
+  }
+  if (val.IsArrayBuffer()) {
+    return val.As<Napi::ArrayBuffer>().Data();
+  }
+  ThrowWrongType(val);
+}
+
+// Address carried by a BigInt / Number pointer argument.
+inline uintptr_t AddressFromBigInt(const Napi::Value& val) {
+  bool lossless;
+  return static_cast<uintptr_t>(val.As<Napi::BigInt>().Uint64Value(&lossless));
+}
+
+inline uintptr_t AddressFromNumber(const Napi::Value& val) {
+  return static_cast<uintptr_t>(val.As<Napi::Number>().Int64Value());
+}
+
+// Argomenti numerici, parity Python ctypes: accettano number, boolean
+// (true → 1) e BigInt (troncato ai bit del tipo, come Python maschera gli int);
+// stringhe, null e oggetti sono un TypeError (Python: ArgumentError).
+[[noreturn]] inline void ThrowNotNumeric(const Napi::Value& val, const char* kind) {
+  throw Napi::TypeError::New(val.Env(), std::format("Expected a number, boolean or BigInt for {} argument", kind));
+}
+
+inline int32_t Int32Arg(const Napi::Value& val) {
+  switch (val.Type()) {
+    case napi_number:
+      return val.As<Napi::Number>().Int32Value();
+    case napi_boolean:
+      return val.As<Napi::Boolean>().Value() ? 1 : 0;
+    case napi_bigint: {
+      bool lossless;
+      return static_cast<int32_t>(val.As<Napi::BigInt>().Uint64Value(&lossless));
+    }
+    default:
+      ThrowNotNumeric(val, "an integer");
+  }
+}
+
+inline uint32_t Uint32Arg(const Napi::Value& val) {
+  if (val.Type() == napi_number) {
+    return val.As<Napi::Number>().Uint32Value();
+  }
+  return static_cast<uint32_t>(Int32Arg(val));
+}
+
+inline int64_t Int64Arg(const Napi::Value& val) {
+  switch (val.Type()) {
+    case napi_number:
+      return val.As<Napi::Number>().Int64Value();
+    case napi_boolean:
+      return val.As<Napi::Boolean>().Value() ? 1 : 0;
+    case napi_bigint: {
+      bool lossless;
+      return static_cast<int64_t>(val.As<Napi::BigInt>().Uint64Value(&lossless));
+    }
+    default:
+      ThrowNotNumeric(val, "an integer");
+  }
+}
+
+// Python c_char: bytes di 1 byte o intero 0..255. In JS stringa di 1 carattere
+// (codice 0..255), Buffer/Uint8Array di 1 byte, numero o boolean.
+inline uint8_t CharArg(const Napi::Value& val) {
+  switch (val.Type()) {
+    case napi_string: {
+      const std::u16string str = val.As<Napi::String>().Utf16Value();
+      if (str.size() == 1 && str[0] <= 0xff) {
+        return static_cast<uint8_t>(str[0]);
+      }
+      break;
+    }
+    case napi_number: {
+      const double d = val.As<Napi::Number>().DoubleValue();
+      if (d >= 0 && d <= 0xff && d == static_cast<double>(static_cast<int>(d))) {
+        return static_cast<uint8_t>(d);
+      }
+      break;
+    }
+    case napi_boolean:
+      return val.As<Napi::Boolean>().Value() ? 1 : 0;
+    case napi_object:
+      if (val.IsTypedArray()) {
+        Napi::TypedArray ta = val.As<Napi::TypedArray>();
+        if (ta.TypedArrayType() == napi_uint8_array && ta.ElementLength() == 1) {
+          return static_cast<const uint8_t*>(ta.ArrayBuffer().Data())[ta.ByteOffset()];
+        }
+      }
+      break;
+    default:
+      break;
+  }
+  throw Napi::TypeError::New(val.Env(), "one character bytes, bytearray or integer expected");
+}
+
+// Errore di conversione dell'argomento `index` come ctypes.ArgumentError di Python:
+// "argument N: TypeError: <messaggio>". TypeError se la classe non è registrata.
+Napi::Error ArgumentErrorFor(Napi::Env env, size_t index, const Napi::Error& cause) {
+  std::string kind = "TypeError";
+  Napi::Value name = cause.Value().Get("name");
+  if (name.IsString()) {
+    kind = name.As<Napi::String>().Utf8Value();
+  }
+  const std::string message = std::format("argument {}: {}: {}", index + 1, kind, cause.Message());
+  CTypesAddon* addon = env.GetInstanceData<CTypesAddon>();
+  if (addon != nullptr && !addon->argument_error_ctor.IsEmpty()) {
+    return Napi::Error(env, addon->argument_error_ctor.New({Napi::String::New(env, message)}));
+  }
+  return Napi::TypeError::New(env, message);
+}
+
+inline double DoubleArg(const Napi::Value& val) {
+  switch (val.Type()) {
+    case napi_number:
+      return val.As<Napi::Number>().DoubleValue();
+    case napi_boolean:
+      return val.As<Napi::Boolean>().Value() ? 1.0 : 0.0;
+    case napi_bigint: {
+      bool lossless;
+      const int64_t v = val.As<Napi::BigInt>().Int64Value(&lossless);
+      if (lossless) {
+        return static_cast<double>(v);
+      }
+      const uint64_t u = val.As<Napi::BigInt>().Uint64Value(&lossless);
+      if (lossless) {
+        return static_cast<double>(u);
+      }
+      throw Napi::RangeError::New(val.Env(), "BigInt out of range for a floating point argument");
+    }
+    default:
+      ThrowNotNumeric(val, "a floating point");
+  }
+}
+
+}  // namespace
+
 CallConv StringToCallConv(const std::string& name) {
   if (name == "cdecl" || name == "default") {
     return CallConv::CTYPES_CDECL;
@@ -232,6 +390,25 @@ FFIFunction::FFIFunction(const Napi::CallbackInfo& info)
   if (!PrepareFFI(env)) {
     return;
   }
+
+  InstallFastCall(env);
+}
+
+Napi::Value FFIFunction::FastCall(const Napi::CallbackInfo& info) {
+  return static_cast<FFIFunction*>(info.Data())->Call(info);
+}
+
+// Shadows the prototype `call` (InstanceMethod) with an own-property function
+// whose N-API data is `this`. InstanceMethod resolves the instance through
+// napi_unwrap(info.This()), a full V8 property lookup that was ~1/3 of the
+// cost of a simple call. The function keeps a strong reference to the wrapper
+// object, so the native instance outlives any detached reference to `call`.
+void FFIFunction::InstallFastCall(Napi::Env env) {
+  Napi::Object self = Value();
+  Napi::Function fast_call = Napi::Function::New<&FFIFunction::FastCall>(env, "call", this);
+  fast_call.DefineProperty(Napi::PropertyDescriptor::Value("_ffiFunction", self, napi_default));
+  self.DefineProperty(Napi::PropertyDescriptor::Value(
+    "call", fast_call, static_cast<napi_property_attributes>(napi_writable | napi_configurable)));
 }
 
 FFIFunction::~FFIFunction() {
@@ -298,7 +475,72 @@ bool FFIFunction::PrepareFFI(Napi::Env env) {
   }
   call_plan_ = ffi_call_plan_alloc(&cif_);
 
+  SetupDirectCall();
+
   return true;
+}
+
+void FFIFunction::SetupDirectCall() {
+  direct_invoker_ = nullptr;
+  direct_arg_widen_count_ = 0;
+  direct_ret_widen_size_ = 0;
+  direct_ret_signed_ = false;
+
+  if constexpr (sizeof(void*) != 8 || std::endian::native != std::endian::little) {
+    return;
+  }
+  if (abi_ != FFI_DEFAULT_ABI || arg_types_.size() > direct::kMaxDirectArgs) {
+    return;
+  }
+
+  size_t code = 0;
+  size_t weight = 1;
+  for (size_t i = 0; i < arg_types_.size(); i++) {
+    const CType t = arg_types_[i];
+    direct::ArgClass cls;
+    if ((t == CType::CTYPES_DOUBLE || t == CType::CTYPES_FLOAT) && !direct::kFloatArgsAllowed) {
+      direct_arg_widen_count_ = 0;
+      return;
+    }
+    if (t == CType::CTYPES_DOUBLE) {
+      cls = direct::ArgClass::Double;
+    } else if (t == CType::CTYPES_FLOAT) {
+      cls = direct::ArgClass::Float;
+    } else if (direct::IsIntClass(t)) {
+      cls = direct::ArgClass::Int;
+      const size_t size = CTypeSize(t);
+      if (size < 8) {
+        direct_arg_widen_[direct_arg_widen_count_++] = {static_cast<uint8_t>(i), static_cast<uint8_t>(size),
+                                                        direct::IsSignedInt(t)};
+      }
+    } else {
+      direct_arg_widen_count_ = 0;
+      return;
+    }
+    code += static_cast<size_t>(cls) * weight;
+    weight *= direct::kArgClassCount;
+  }
+
+  direct::RetClass ret;
+  if (return_type_ == CType::CTYPES_VOID) {
+    ret = direct::RetClass::Void;
+  } else if (return_type_ == CType::CTYPES_DOUBLE) {
+    ret = direct::RetClass::Double;
+  } else if (return_type_ == CType::CTYPES_FLOAT) {
+    ret = direct::RetClass::Float;
+  } else if (direct::IsIntClass(return_type_)) {
+    ret = direct::RetClass::Int;
+    const size_t size = CTypeSize(return_type_);
+    if (size < 8) {
+      direct_ret_widen_size_ = static_cast<uint8_t>(size);
+      direct_ret_signed_ = direct::IsSignedInt(return_type_);
+    }
+  } else {
+    direct_arg_widen_count_ = 0;
+    return;
+  }
+
+  direct_invoker_ = direct::Select(ret, arg_types_.size(), code);
 }
 
 // ============================================================================
@@ -353,17 +595,11 @@ Napi::Value FFIFunction::ConvertReturn(Napi::Env env,
     case CType::CTYPES_VOID:
       return env.Undefined();
 
-    case CType::CTYPES_INT32: {
-      napi_value result;
-      napi_create_int32(env, rv->i32, &result);
-      return Napi::Value(env, result);
-    }
+    case CType::CTYPES_INT32:
+      return Napi::Number::New(env, rv->i32);
 
-    case CType::CTYPES_UINT32: {
-      napi_value result;
-      napi_create_uint32(env, rv->u32, &result);
-      return Napi::Value(env, result);
-    }
+    case CType::CTYPES_UINT32:
+      return Napi::Number::New(env, rv->u32);
 
     case CType::CTYPES_INT64:
       return Napi::BigInt::New(env, rv->i64);
@@ -372,17 +608,11 @@ Napi::Value FFIFunction::ConvertReturn(Napi::Env env,
     case CType::CTYPES_SIZE_T:
       return Napi::BigInt::New(env, rv->u64);
 
-    case CType::CTYPES_DOUBLE: {
-      napi_value result;
-      napi_create_double(env, rv->d, &result);
-      return Napi::Value(env, result);
-    }
+    case CType::CTYPES_DOUBLE:
+      return Napi::Number::New(env, rv->d);
 
-    case CType::CTYPES_FLOAT: {
-      napi_value result;
-      napi_create_double(env, static_cast<double>(rv->f), &result);
-      return Napi::Value(env, result);
-    }
+    case CType::CTYPES_FLOAT:
+      return Napi::Number::New(env, static_cast<double>(rv->f));
 
     case CType::CTYPES_BOOL:
       return Napi::Boolean::New(env, rv->u8 != 0);
@@ -397,9 +627,7 @@ Napi::Value FFIFunction::ConvertReturn(Napi::Env env,
       if (rv->str == nullptr) {
         return env.Null();
       }
-      napi_value result;
-      napi_create_string_utf8(env, rv->str, NAPI_AUTO_LENGTH, &result);
-      return Napi::Value(env, result);
+      return Napi::String::New(env, rv->str);
     }
 
     case CType::CTYPES_WSTRING: {
@@ -482,16 +710,12 @@ Napi::Value FFIFunction::ConvertReturn(Napi::Env env,
 inline bool FFIFunction::MarshalPrimitive(Napi::Env env, const Napi::Value& val, CType type, uint8_t* slot) {
   switch (type) {
     case CType::CTYPES_INT32: {
-      napi_value nv = val;
-      int32_t v;
-      napi_get_value_int32(env, nv, &v);
+      int32_t v = Int32Arg(val);
       memcpy(slot, &v, sizeof(v));
       return true;
     }
     case CType::CTYPES_UINT32: {
-      napi_value nv = val;
-      uint32_t v;
-      napi_get_value_uint32(env, nv, &v);
+      uint32_t v = Uint32Arg(val);
       memcpy(slot, &v, sizeof(v));
       return true;
     }
@@ -499,39 +723,41 @@ inline bool FFIFunction::MarshalPrimitive(Napi::Env env, const Napi::Value& val,
     case CType::CTYPES_UINT64:
     case CType::CTYPES_SIZE_T:
     case CType::CTYPES_SSIZE_T: {
-      int64_t v;
-      if (val.IsBigInt()) {
-        bool lossless;
-        v = val.As<Napi::BigInt>().Int64Value(&lossless);
-      } else if (val.IsNull() || val.IsUndefined()) {
-        v = 0;
-      } else if (val.IsBuffer()) {
-        void* ptr = val.As<Napi::Buffer<uint8_t>>().Data();
-        v = static_cast<int64_t>(reinterpret_cast<intptr_t>(ptr));
-      } else if (val.IsArrayBuffer()) {
-        void* ptr = val.As<Napi::ArrayBuffer>().Data();
-        v = static_cast<int64_t>(reinterpret_cast<intptr_t>(ptr));
-      } else {
-        napi_value nv = val;
-        if (napi_get_value_int64(env, nv, &v) != napi_ok) {
-          v = 0;
+      // Una sola Value::Type() invece di IsBigInt/IsNull/IsUndefined in cascata
+      // (ognuna è una napi_typeof separata).
+      int64_t v = 0;
+      switch (val.Type()) {
+        case napi_number:
+          v = val.As<Napi::Number>().Int64Value();
+          break;
+        case napi_bigint: {
+          bool lossless;
+          v = val.As<Napi::BigInt>().Int64Value(&lossless);
+          break;
         }
+        case napi_boolean:
+          v = val.As<Napi::Boolean>().Value() ? 1 : 0;
+          break;
+        case napi_object:
+          if (val.IsBuffer()) {
+            v = static_cast<int64_t>(reinterpret_cast<intptr_t>(val.As<Napi::Buffer<uint8_t>>().Data()));
+          } else if (val.IsArrayBuffer()) {
+            v = static_cast<int64_t>(reinterpret_cast<intptr_t>(val.As<Napi::ArrayBuffer>().Data()));
+          }
+          break;
+        default:
+          break;
       }
       memcpy(slot, &v, sizeof(v));
       return true;
     }
     case CType::CTYPES_DOUBLE: {
-      napi_value nv = val;
-      double v;
-      napi_get_value_double(env, nv, &v);
+      double v = DoubleArg(val);
       memcpy(slot, &v, sizeof(v));
       return true;
     }
     case CType::CTYPES_FLOAT: {
-      napi_value nv = val;
-      double dv;
-      napi_get_value_double(env, nv, &dv);
-      float v = static_cast<float>(dv);
+      float v = static_cast<float>(DoubleArg(val));
       memcpy(slot, &v, sizeof(v));
       return true;
     }
@@ -540,45 +766,38 @@ inline bool FFIFunction::MarshalPrimitive(Napi::Env env, const Napi::Value& val,
       memcpy(slot, &v, sizeof(v));
       return true;
     }
+    case CType::CTYPES_CHAR: {
+      uint8_t v = CharArg(val);
+      memcpy(slot, &v, sizeof(v));
+      return true;
+    }
     case CType::CTYPES_INT8: {
-      int8_t v = static_cast<int8_t>(val.As<Napi::Number>().Int32Value());
+      int8_t v = static_cast<int8_t>(Int32Arg(val));
       memcpy(slot, &v, sizeof(v));
       return true;
     }
     case CType::CTYPES_UINT8: {
-      uint8_t v = static_cast<uint8_t>(val.As<Napi::Number>().Uint32Value());
+      uint8_t v = static_cast<uint8_t>(Uint32Arg(val));
       memcpy(slot, &v, sizeof(v));
       return true;
     }
     case CType::CTYPES_INT16: {
-      int16_t v = static_cast<int16_t>(val.As<Napi::Number>().Int32Value());
+      int16_t v = static_cast<int16_t>(Int32Arg(val));
       memcpy(slot, &v, sizeof(v));
       return true;
     }
     case CType::CTYPES_UINT16: {
-      uint16_t v = static_cast<uint16_t>(val.As<Napi::Number>().Uint32Value());
+      uint16_t v = static_cast<uint16_t>(Uint32Arg(val));
       memcpy(slot, &v, sizeof(v));
       return true;
     }
     case CType::CTYPES_LONG: {
-      long v;
-      if (val.IsBigInt()) {
-        bool lossless;
-        v = static_cast<long>(val.As<Napi::BigInt>().Int64Value(&lossless));
-      } else {
-        v = static_cast<long>(val.As<Napi::Number>().Int64Value());
-      }
+      long v = static_cast<long>(Int64Arg(val));
       memcpy(slot, &v, sizeof(v));
       return true;
     }
     case CType::CTYPES_ULONG: {
-      unsigned long v;
-      if (val.IsBigInt()) {
-        bool lossless;
-        v = static_cast<unsigned long>(val.As<Napi::BigInt>().Uint64Value(&lossless));
-      } else {
-        v = static_cast<unsigned long>(val.As<Napi::Number>().Int64Value());
-      }
+      unsigned long v = static_cast<unsigned long>(Int64Arg(val));
       memcpy(slot, &v, sizeof(v));
       return true;
     }
@@ -735,20 +954,6 @@ CTYPES_ALWAYS_INLINE bool FFIFunction::ValidateAndResolveArgc(Napi::Env env,
   return false;
 }
 
-CTYPES_ALWAYS_INLINE CType FFIFunction::ResolveArgType(const CallContext& ctx,
-                                                       size_t i,
-                                                       const CType* extra_types_stack,
-                                                       const std::vector<CType>& extra_types_heap) const {
-  if (i < ctx.expected_argc) [[likely]] {
-    return arg_types_[i];
-  }
-  if (ctx.cache_entry) {
-    return ctx.cache_entry->extra_types[i - ctx.expected_argc];
-  }
-  const size_t extra_idx = i - ctx.expected_argc;
-  return (ctx.num_extra <= MAX_VARIADIC_EXTRA_ARGS) ? extra_types_stack[extra_idx] : extra_types_heap[extra_idx];
-}
-
 // Loop di marshalling per-argomento. Dispatch su CType con fast path
 // primitivo. Ritorna false se un'eccezione JS è stata lanciata e il
 // caller deve restituire env.Undefined().
@@ -759,14 +964,13 @@ CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalArguments(CallContext& ctx) {
   const size_t expected_argc = ctx.expected_argc;
   uint8_t* const arg_storage = ctx.arg_storage;
   void** const arg_values = ctx.arg_values;
+  string_fixups_.clear();
 
   for (size_t i = 0; i < argc; i++) {
     uint8_t* slot = arg_storage + (i * ARG_SLOT_SIZE);
     arg_values[i] = slot;
     const Napi::Value& val = info[i];
 
-    // Il tipo è risolto direttamente qui (non tramite ResolveArgType) per
-    // accedere al path stack/heap senza passare i buffer di nuovo.
     CType type;
     if (i < expected_argc) [[likely]] {
       type = arg_types_[i];
@@ -777,143 +981,169 @@ CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalArguments(CallContext& ctx) {
     }
 
     // Fast path: primitivi.
-    if (MarshalPrimitive(env, val, type, slot)) {
-      continue;
+    try {
+      if (MarshalPrimitive(env, val, type, slot)) {
+        continue;
+      }
+    } catch (const Napi::Error& e) {
+      throw ArgumentErrorFor(env, i, e);
     }
 
-    switch (type) {
-      case CType::CTYPES_POINTER: {
-        void* ptr = nullptr;
-        if (val.IsNull() || val.IsUndefined()) {
-          ptr = nullptr;
-        } else if (val.IsBuffer()) {
-          ptr = val.As<Napi::Buffer<uint8_t>>().Data();
-        } else if (val.IsBigInt()) {
-          bool lossless;
-          ptr = reinterpret_cast<void*>(val.As<Napi::BigInt>().Uint64Value(&lossless));
-        } else if (val.IsNumber()) {
-          napi_value nv = val;
-          int64_t v;
-          napi_get_value_int64(env, nv, &v);
-          ptr = reinterpret_cast<void*>(static_cast<uintptr_t>(v));
-        }
-        memcpy(slot, &ptr, sizeof(ptr));
-        break;
-      }
+    // Python c_void_p accetta anche bytes/str: la stringa passa come char* UTF-8.
+    if (type == CType::CTYPES_POINTER && val.Type() == napi_string) {
+      type = CType::CTYPES_STRING;
+    }
 
-      case CType::CTYPES_STRING: {
-        if (val.IsString()) {
-          napi_value nval = val;
-          // SBO: prova prima il buffer inline
-          size_t remaining = kInlineStringBufferSize - inline_string_offset_;
-          if (remaining > 1) {
-            size_t copied;
-            char* dest = inline_string_buffer_ + inline_string_offset_;
-            napi_status status = napi_get_value_string_utf8(env, nval, dest, remaining, &copied);
-            if (status == napi_ok && copied < remaining - 1) {
-              const char* str_ptr = dest;
-              memcpy(slot, &str_ptr, sizeof(str_ptr));
-              inline_string_offset_ += copied + 1;
+    try {
+      switch (type) {
+        case CType::CTYPES_POINTER: {
+          void* ptr = nullptr;
+          switch (val.Type()) {
+            case napi_object:
+              ptr = ObjectData(val);
+              break;
+            case napi_bigint:
+              ptr = reinterpret_cast<void*>(AddressFromBigInt(val));
+              break;
+            case napi_number:
+              ptr = reinterpret_cast<void*>(AddressFromNumber(val));
+              break;
+            case napi_boolean:
+              ptr = reinterpret_cast<void*>(static_cast<uintptr_t>(val.As<Napi::Boolean>().Value()));
+              break;
+            case napi_null:
+            case napi_undefined:
+              break;
+            default:
+              ThrowWrongType(val);
+          }
+          memcpy(slot, &ptr, sizeof(ptr));
+          break;
+        }
+
+        case CType::CTYPES_STRING: {
+          const char* str_ptr = nullptr;
+          switch (val.Type()) {
+            case napi_string: {
+              const Napi::String js_str = val.As<Napi::String>();
+              // SBO: prova prima il buffer inline (una sola copia, vedi napi_fast.h)
+              char* dest = inline_string_buffer_ + inline_string_offset_;
+              if (auto copied =
+                    napi_fast::TryCopyUtf8Into(js_str, dest, kInlineStringBufferSize - inline_string_offset_)) {
+                str_ptr = dest;
+                inline_string_offset_ += *copied + 1;
+                break;
+              }
+              // Fallback: heap string_buffer_. Il puntatore viene scritto a fine
+              // marshalling (string_fixups_) perché resize() successivi possono riallocare.
+              const std::string str = js_str.Utf8Value();
+              const size_t needed = str.size() + 1;
+              size_t offset = string_buffer_.size();
+              string_buffer_.resize(offset + needed);
+              memcpy(string_buffer_.data() + offset, str.c_str(), needed);
+              string_fixups_.emplace_back(i, offset);
               break;
             }
+            case napi_object:
+              str_ptr = static_cast<const char*>(ObjectData(val));
+              break;
+            case napi_bigint:
+              str_ptr = reinterpret_cast<const char*>(AddressFromBigInt(val));
+              break;
+            case napi_number:
+              str_ptr = reinterpret_cast<const char*>(AddressFromNumber(val));
+              break;
+            case napi_null:
+            case napi_undefined:
+              break;
+            default:
+              ThrowWrongType(val);
           }
-          // Fallback: heap string_buffer_
-          size_t len;
-          napi_get_value_string_utf8(env, nval, nullptr, 0, &len);
-          size_t offset = string_buffer_.size();
-          string_buffer_.resize(offset + len + 1);
-          napi_get_value_string_utf8(env, nval, string_buffer_.data() + offset, len + 1, &len);
-          const char* str_ptr = string_buffer_.data() + offset;
           memcpy(slot, &str_ptr, sizeof(str_ptr));
-        } else if (val.IsBuffer()) {
-          const char* ptr = reinterpret_cast<const char*>(val.As<Napi::Buffer<uint8_t>>().Data());
-          memcpy(slot, &ptr, sizeof(ptr));
-        } else if (val.IsBigInt()) {
-          bool lossless;
-          uint64_t addr = val.As<Napi::BigInt>().Uint64Value(&lossless);
-          const char* ptr = reinterpret_cast<const char*>(addr);
-          memcpy(slot, &ptr, sizeof(ptr));
-        } else if (val.IsNumber()) {
-          const char* ptr = reinterpret_cast<const char*>(static_cast<uintptr_t>(val.As<Napi::Number>().Int64Value()));
-          memcpy(slot, &ptr, sizeof(ptr));
-        } else {
-          const char* null_ptr = nullptr;
-          memcpy(slot, &null_ptr, sizeof(null_ptr));
+          break;
         }
-        break;
-      }
 
-      case CType::CTYPES_WSTRING: {
-        if (val.IsString()) {
-          napi_value nval = val;
-          size_t u16_len = 0;
-          napi_get_value_string_utf16(env, nval, nullptr, 0, &u16_len);
-          constexpr size_t wchar_size = sizeof(wchar_t);
-          constexpr size_t wchar_align = alignof(wchar_t);
-          size_t byte_len = (u16_len + 1) * wchar_size;
-          size_t offset = string_buffer_.size();
-          offset = (offset + wchar_align - 1) & ~(wchar_align - 1);
-          string_buffer_.resize(offset + byte_len);
-          wchar_t* wptr = reinterpret_cast<wchar_t*>(string_buffer_.data() + offset);
+        case CType::CTYPES_WSTRING: {
+          const wchar_t* str_ptr = nullptr;
+          switch (val.Type()) {
+            case napi_string: {
+              const std::u16string u16str = val.As<Napi::String>().Utf16Value();
+              constexpr size_t wchar_size = sizeof(wchar_t);
+              constexpr size_t wchar_align = alignof(wchar_t);
+              size_t byte_len = (u16str.length() + 1) * wchar_size;
+              size_t offset = string_buffer_.size();
+              offset = (offset + wchar_align - 1) & ~(wchar_align - 1);
+              string_buffer_.resize(offset + byte_len);
+              wchar_t* wptr = reinterpret_cast<wchar_t*>(string_buffer_.data() + offset);
 #ifdef _WIN32
-          size_t written = 0;
-          napi_get_value_string_utf16(env, nval, reinterpret_cast<char16_t*>(wptr), u16_len + 1, &written);
+              // wchar_t è UTF-16 su Windows: copia diretta.
+              memcpy(wptr, u16str.data(), u16str.length() * wchar_size);
 #else
-          std::u16string u16str = val.As<Napi::String>().Utf16Value();
-          for (size_t j = 0; j < u16str.length(); j++) {
-            wptr[j] = static_cast<wchar_t>(u16str[j]);
-          }
-          wptr[u16str.length()] = L'\0';
+              for (size_t j = 0; j < u16str.length(); j++) {
+                wptr[j] = static_cast<wchar_t>(u16str[j]);
+              }
 #endif
-          const wchar_t* str_ptr = wptr;
+              wptr[u16str.length()] = L'\0';
+              string_fixups_.emplace_back(i, offset);
+              break;
+            }
+            case napi_object:
+              str_ptr = static_cast<const wchar_t*>(ObjectData(val));
+              break;
+            case napi_bigint:
+              str_ptr = reinterpret_cast<const wchar_t*>(AddressFromBigInt(val));
+              break;
+            case napi_number:
+              str_ptr = reinterpret_cast<const wchar_t*>(AddressFromNumber(val));
+              break;
+            case napi_null:
+            case napi_undefined:
+              break;
+            default:
+              ThrowWrongType(val);
+          }
           memcpy(slot, &str_ptr, sizeof(str_ptr));
-        } else if (val.IsBuffer()) {
-          const wchar_t* ptr = reinterpret_cast<const wchar_t*>(val.As<Napi::Buffer<uint8_t>>().Data());
-          memcpy(slot, &ptr, sizeof(ptr));
-        } else if (val.IsBigInt()) {
-          bool lossless;
-          uint64_t addr = val.As<Napi::BigInt>().Uint64Value(&lossless);
-          const wchar_t* ptr = reinterpret_cast<const wchar_t*>(addr);
-          memcpy(slot, &ptr, sizeof(ptr));
-        } else if (val.IsNumber()) {
-          const wchar_t* ptr =
-            reinterpret_cast<const wchar_t*>(static_cast<uintptr_t>(val.As<Napi::Number>().Int64Value()));
-          memcpy(slot, &ptr, sizeof(ptr));
-        } else {
-          const wchar_t* null_ptr = nullptr;
-          memcpy(slot, &null_ptr, sizeof(null_ptr));
+          break;
         }
-        break;
-      }
 
-      case CType::CTYPES_STRUCT: {
-        if (i < expected_argc && arg_struct_infos_[i]) {
-          if (!MarshalStructArg(env, val, i, arg_struct_infos_[i], slot, &arg_values[i], sync_large_arg_buffers_,
-                                nullptr)) {
-            return false;
+        case CType::CTYPES_STRUCT: {
+          if (i < expected_argc && arg_struct_infos_[i]) {
+            if (!MarshalStructArg(env, val, i, arg_struct_infos_[i], slot, &arg_values[i], sync_large_arg_buffers_,
+                                  nullptr)) {
+              return false;
+            }
+          } else {
+            JSToC(env, val, type, slot, ARG_SLOT_SIZE);
           }
-        } else {
-          JSToC(env, val, type, slot, ARG_SLOT_SIZE);
+          break;
         }
-        break;
-      }
 
-      case CType::CTYPES_ARRAY: {
-        if (i < expected_argc && arg_array_infos_[i]) {
-          if (!MarshalArrayArg(env, val, i, arg_array_infos_[i], slot, &arg_values[i], sync_large_arg_buffers_,
-                               nullptr)) {
-            return false;
+        case CType::CTYPES_ARRAY: {
+          if (i < expected_argc && arg_array_infos_[i]) {
+            if (!MarshalArrayArg(env, val, i, arg_array_infos_[i], slot, &arg_values[i], sync_large_arg_buffers_,
+                                 nullptr)) {
+              return false;
+            }
+          } else {
+            JSToC(env, val, type, slot, ARG_SLOT_SIZE);
           }
-        } else {
-          JSToC(env, val, type, slot, ARG_SLOT_SIZE);
+          break;
         }
-        break;
-      }
 
-      default:
-        JSToC(env, val, type, slot, ARG_SLOT_SIZE);
-        break;
+        default:
+          JSToC(env, val, type, slot, ARG_SLOT_SIZE);
+          break;
+      }
+    } catch (const Napi::Error& e) {
+      throw ArgumentErrorFor(env, i, e);
     }
+  }
+
+  // Puntatori alle stringhe nel heap string_buffer_: scritti solo ora, quando il
+  // buffer non verrà più riallocato in questa call.
+  for (const auto& [slot_index, offset] : string_fixups_) {
+    const char* str_ptr = string_buffer_.data() + offset;
+    memcpy(arg_storage + (slot_index * ARG_SLOT_SIZE), &str_ptr, sizeof(str_ptr));
   }
   return true;
 }
@@ -1056,8 +1286,13 @@ Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
         entry.ffi_types[fixed_args + i] = CTypeToFFI(extra_types[i]);
       }
 
-      ffi_status status = ffi_prep_cif_var(&entry.cif, abi_, static_cast<unsigned int>(fixed_args),
-                                           static_cast<unsigned int>(argc), ffi_return_type_, entry.ffi_types.data());
+      // Python ctypes: senza argtypes gli argomenti sono fissi (ffi_prep_cif),
+      // altrimenti quelli oltre gli argtypes sono variadici.
+      ffi_status status =
+        fixed_args == 0
+          ? ffi_prep_cif(&entry.cif, abi_, static_cast<unsigned int>(argc), ffi_return_type_, entry.ffi_types.data())
+          : ffi_prep_cif_var(&entry.cif, abi_, static_cast<unsigned int>(fixed_args), static_cast<unsigned int>(argc),
+                             ffi_return_type_, entry.ffi_types.data());
 
       if (status != FFI_OK) {
         Napi::Error::New(env, "Failed to prepare variadic FFI call").ThrowAsJavaScriptException();
@@ -1114,9 +1349,10 @@ Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
     ctx.arg_values = heap_arg_values_.data();
   }
 
-  // ---- Pre-reserve string buffer -----------------------------------
-  // Se eventuali resize() nel loop di marshalling riallocano, i char*/wchar_t*
-  // già salvati in arg slot diventerebbero dangling → crash in ffi_call.
+  // ---- Reset string buffers ----------------------------------------
+  // Le stringhe che non stanno nel buffer inline finiscono in string_buffer_;
+  // i loro puntatori sono scritti dopo il marshalling (string_fixups_), quindi
+  // non serve pre-riservare la capacità con un passaggio extra sugli argomenti.
   const bool call_has_strings = has_string_args_ || (need_reprep && [&] {
                                   for (size_t i = 0; i < num_extra; i++) {
                                     CType t = ctx.extra_types_ptr[i];
@@ -1131,19 +1367,6 @@ Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
     string_buffer_.clear();
     if (string_buffer_.capacity() > 10 * 1024 * 1024) {
       string_buffer_.shrink_to_fit();
-    }
-    size_t reserve_bytes = 0;
-    for (size_t i = 0; i < argc; i++) {
-      CType t = ResolveArgType(ctx, i, extra_types_stack, extra_types_heap);
-      if ((t == CType::CTYPES_STRING || t == CType::CTYPES_WSTRING) && info[i].IsString()) {
-        size_t len = 0;
-        napi_get_value_string_utf16(env, info[i], nullptr, 0, &len);
-        const size_t per_unit = (t == CType::CTYPES_WSTRING) ? sizeof(wchar_t) : 4;
-        reserve_bytes += (len + 1) * per_unit + alignof(wchar_t);
-      }
-    }
-    if (reserve_bytes > string_buffer_.capacity()) {
-      string_buffer_.reserve(reserve_bytes);
     }
   }
 
@@ -1162,14 +1385,27 @@ Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
   SelectReturnPtr(ctx);
 
   // ---- ffi_call + capture errno/GetLastError -----------------------
-  // Reusable call plan quando disponibile (fast path su x86-64; fallback sicuro
-  // a ffi_call altrove e se l'allocazione del plan è fallita).
-  if (ctx.active_plan) [[likely]] {
-    ffi_call_plan_invoke(ctx.active_plan, FFI_FN(fn_ptr_), ctx.return_ptr, ctx.arg_values);
+  // Signature fisse semplici: chiamata diretta senza libffi (direct_call.h).
+  // Altrimenti reusable call plan quando disponibile (fast path su x86-64;
+  // fallback sicuro a ffi_call altrove e se l'allocazione del plan è fallita).
+  if (direct_invoker_ && ctx.active_cif == &cif_) [[likely]] {
+    for (uint8_t k = 0; k < direct_arg_widen_count_; k++) {
+      const direct::Widen& w = direct_arg_widen_[k];
+      direct::WidenInPlace(ctx.arg_values[w.index], w.size, w.is_signed);
+    }
+    direct_invoker_(fn_ptr_, ctx.arg_values, ctx.return_ptr);
+    CaptureErrorState();
+    if (direct_ret_widen_size_) {
+      direct::WidenInPlace(ctx.return_ptr, direct_ret_widen_size_, direct_ret_signed_);
+    }
   } else {
-    ffi_call(ctx.active_cif, FFI_FN(fn_ptr_), ctx.return_ptr, ctx.arg_values);
+    if (ctx.active_plan) [[likely]] {
+      ffi_call_plan_invoke(ctx.active_plan, FFI_FN(fn_ptr_), ctx.return_ptr, ctx.arg_values);
+    } else {
+      ffi_call(ctx.active_cif, FFI_FN(fn_ptr_), ctx.return_ptr, ctx.arg_values);
+    }
+    CaptureErrorState();
   }
-  CaptureErrorState();
 
   // ---- Convert return + apply errcheck -----------------------------
   return FinalizeCall(ctx);
@@ -1204,20 +1440,13 @@ Napi::Value FFIFunction::ApplyErrcheck(Napi::Env env, Napi::Value result, const 
     return result;
   }
 
-  // errcheck(result, this, args) — usa array stack-allocato da 3 elementi
-  // invece di un std::vector heap per gli argomenti della Call.
+  // errcheck(result, this, args). Un'eccezione lanciata da errcheck diventa
+  // Napi::Error (NAPI_CPP_EXCEPTIONS) e si propaga al caller JS.
   Napi::Array args_array = Napi::Array::New(env, info.Length());
   for (size_t i = 0; i < info.Length(); i++) {
     args_array.Set(i, info[i]);
   }
-  napi_value errcheck_args[3] = {result, info.This(), args_array};
-  napi_value out;
-  napi_status status = napi_call_function(env, env.Undefined(), errcheck_callback_.Value(), 3, errcheck_args, &out);
-  if (status != napi_ok) {
-    // Eccezione già pending: lasciala propagare al caller JS.
-    return env.Undefined();
-  }
-  return Napi::Value(env, out);
+  return errcheck_callback_.Value().Call(env.Undefined(), {result, info.This(), args_array});
 }
 
 Napi::Value FFIFunction::GetName(const Napi::CallbackInfo& info) {
@@ -1283,8 +1512,12 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
       owned_ffi_types[expected_argc + i] = CTypeToFFI(extra_types[i]);
     }
 
-    ffi_status status = ffi_prep_cif_var(owned_cif.get(), abi_, static_cast<unsigned int>(expected_argc),
-                                         static_cast<unsigned int>(argc), ffi_return_type_, owned_ffi_types.data());
+    // Python ctypes: senza argtypes gli argomenti sono fissi (vedi Call()).
+    ffi_status status =
+      expected_argc == 0
+        ? ffi_prep_cif(owned_cif.get(), abi_, static_cast<unsigned int>(argc), ffi_return_type_, owned_ffi_types.data())
+        : ffi_prep_cif_var(owned_cif.get(), abi_, static_cast<unsigned int>(expected_argc),
+                           static_cast<unsigned int>(argc), ffi_return_type_, owned_ffi_types.data());
 
     if (status != FFI_OK) {
       Napi::Error::New(env, "Failed to prepare variadic FFI call for async").ThrowAsJavaScriptException();
@@ -1335,140 +1568,158 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
     const Napi::Value& val = info[i];
 
     // Fast path: primitive types (shared implementation)
-    if (MarshalPrimitive(env, val, type, slot)) {
-      continue;
+    try {
+      if (MarshalPrimitive(env, val, type, slot)) {
+        continue;
+      }
+    } catch (const Napi::Error& e) {
+      throw ArgumentErrorFor(env, i, e);
     }
 
-    switch (type) {
-      case CType::CTYPES_POINTER: {
-        void* ptr = nullptr;
-        if (val.IsNull() || val.IsUndefined()) {
-          ptr = nullptr;
-        } else if (val.IsBuffer()) {
-          auto buf = val.As<Napi::Buffer<uint8_t>>();
-          ptr = buf.Data();
-          // Pin: impedisci al GC di raccogliere il Buffer
-          buffer_refs.push_back(Napi::Persistent(val.As<Napi::Object>()));
-        } else if (val.IsBigInt()) {
-          bool lossless;
-          ptr = reinterpret_cast<void*>(val.As<Napi::BigInt>().Uint64Value(&lossless));
-        } else if (val.IsNumber()) {
-          ptr = reinterpret_cast<void*>(static_cast<uintptr_t>(val.As<Napi::Number>().Int64Value()));
+    if (type == CType::CTYPES_POINTER && val.IsString()) {
+      type = CType::CTYPES_STRING;
+    }
+
+    try {
+      switch (type) {
+        case CType::CTYPES_POINTER: {
+          void* ptr = nullptr;
+          if (val.IsNull() || val.IsUndefined()) {
+            ptr = nullptr;
+          } else if (val.IsObject()) {
+            ptr = ObjectData(val);
+            // Pin: impedisci al GC di raccogliere la memoria durante la chiamata
+            buffer_refs.push_back(Napi::Persistent(val.As<Napi::Object>()));
+          } else if (val.IsBigInt()) {
+            bool lossless;
+            ptr = reinterpret_cast<void*>(val.As<Napi::BigInt>().Uint64Value(&lossless));
+          } else if (val.IsNumber()) {
+            ptr = reinterpret_cast<void*>(static_cast<uintptr_t>(val.As<Napi::Number>().Int64Value()));
+          } else if (val.IsBoolean()) {
+            ptr = reinterpret_cast<void*>(static_cast<uintptr_t>(val.As<Napi::Boolean>().Value()));
+          } else {
+            ThrowWrongType(val);
+          }
+          memcpy(slot, &ptr, sizeof(ptr));
+          break;
         }
-        memcpy(slot, &ptr, sizeof(ptr));
-        break;
-      }
 
-      case CType::CTYPES_STRING: {
-        if (val.IsString()) {
-          std::string str = val.As<Napi::String>().Utf8Value();
-          size_t offset = async_string_buffer.size();
-          async_string_buffer.resize(offset + str.size() + 1);
-          memcpy(async_string_buffer.data() + offset, str.c_str(), str.size() + 1);
+        case CType::CTYPES_STRING: {
+          if (val.IsString()) {
+            std::string str = val.As<Napi::String>().Utf8Value();
+            size_t offset = async_string_buffer.size();
+            async_string_buffer.resize(offset + str.size() + 1);
+            memcpy(async_string_buffer.data() + offset, str.c_str(), str.size() + 1);
 
-          // Puntatore provvisorio (verrà fixato dal worker)
-          const char* str_ptr = async_string_buffer.data() + offset;
-          memcpy(slot, &str_ptr, sizeof(str_ptr));
+            // Puntatore provvisorio (verrà fixato dal worker)
+            const char* str_ptr = async_string_buffer.data() + offset;
+            memcpy(slot, &str_ptr, sizeof(str_ptr));
 
-          // Registra per fixup post-move
-          string_fixups.emplace_back(i, offset);
-        } else if (val.IsBuffer()) {
-          auto buf = val.As<Napi::Buffer<uint8_t>>();
-          const char* ptr = reinterpret_cast<const char*>(buf.Data());
-          memcpy(slot, &ptr, sizeof(ptr));
-          buffer_refs.push_back(Napi::Persistent(val.As<Napi::Object>()));
-        } else if (val.IsBigInt()) {
-          // Raw pointer address (parity CTYPES_POINTER)
-          bool lossless;
-          uint64_t addr = val.As<Napi::BigInt>().Uint64Value(&lossless);
-          const char* ptr = reinterpret_cast<const char*>(addr);
-          memcpy(slot, &ptr, sizeof(ptr));
-        } else if (val.IsNumber()) {
-          const char* ptr = reinterpret_cast<const char*>(static_cast<uintptr_t>(val.As<Napi::Number>().Int64Value()));
-          memcpy(slot, &ptr, sizeof(ptr));
-        } else {
-          const char* null_ptr = nullptr;
-          memcpy(slot, &null_ptr, sizeof(null_ptr));
+            // Registra per fixup post-move
+            string_fixups.emplace_back(i, offset);
+          } else if (val.IsObject()) {
+            const char* ptr = static_cast<const char*>(ObjectData(val));
+            memcpy(slot, &ptr, sizeof(ptr));
+            buffer_refs.push_back(Napi::Persistent(val.As<Napi::Object>()));
+          } else if (val.IsBigInt()) {
+            // Raw pointer address (parity CTYPES_POINTER)
+            bool lossless;
+            uint64_t addr = val.As<Napi::BigInt>().Uint64Value(&lossless);
+            const char* ptr = reinterpret_cast<const char*>(addr);
+            memcpy(slot, &ptr, sizeof(ptr));
+          } else if (val.IsNumber()) {
+            const char* ptr =
+              reinterpret_cast<const char*>(static_cast<uintptr_t>(val.As<Napi::Number>().Int64Value()));
+            memcpy(slot, &ptr, sizeof(ptr));
+          } else if (val.IsNull() || val.IsUndefined()) {
+            const char* null_ptr = nullptr;
+            memcpy(slot, &null_ptr, sizeof(null_ptr));
+          } else {
+            ThrowWrongType(val);
+          }
+          break;
         }
-        break;
-      }
 
-      case CType::CTYPES_WSTRING: {
-        if (val.IsString()) {
-          std::u16string u16str = val.As<Napi::String>().Utf16Value();
-          size_t wchar_size = sizeof(wchar_t);
-          size_t byte_len = (u16str.length() + 1) * wchar_size;
+        case CType::CTYPES_WSTRING: {
+          if (val.IsString()) {
+            std::u16string u16str = val.As<Napi::String>().Utf16Value();
+            size_t wchar_size = sizeof(wchar_t);
+            size_t byte_len = (u16str.length() + 1) * wchar_size;
 
-          // Align offset for wchar_t to avoid unaligned access
-          // (critical on ARM, perf penalty on x86)
-          size_t offset = async_string_buffer.size();
-          constexpr size_t wchar_align = alignof(wchar_t);
-          offset = (offset + wchar_align - 1) & ~(wchar_align - 1);
-          async_string_buffer.resize(offset + byte_len);
+            // Align offset for wchar_t to avoid unaligned access
+            // (critical on ARM, perf penalty on x86)
+            size_t offset = async_string_buffer.size();
+            constexpr size_t wchar_align = alignof(wchar_t);
+            offset = (offset + wchar_align - 1) & ~(wchar_align - 1);
+            async_string_buffer.resize(offset + byte_len);
 
 #ifdef _WIN32
-          memcpy(async_string_buffer.data() + offset, u16str.data(), byte_len);
+            memcpy(async_string_buffer.data() + offset, u16str.data(), byte_len);
 #else
-          wchar_t* wptr = reinterpret_cast<wchar_t*>(async_string_buffer.data() + offset);
-          for (size_t j = 0; j < u16str.length(); j++) {
-            wptr[j] = static_cast<wchar_t>(u16str[j]);
-          }
-          wptr[u16str.length()] = L'\0';
+            wchar_t* wptr = reinterpret_cast<wchar_t*>(async_string_buffer.data() + offset);
+            for (size_t j = 0; j < u16str.length(); j++) {
+              wptr[j] = static_cast<wchar_t>(u16str[j]);
+            }
+            wptr[u16str.length()] = L'\0';
 #endif
 
-          const wchar_t* str_ptr = reinterpret_cast<const wchar_t*>(async_string_buffer.data() + offset);
-          memcpy(slot, &str_ptr, sizeof(str_ptr));
+            const wchar_t* str_ptr = reinterpret_cast<const wchar_t*>(async_string_buffer.data() + offset);
+            memcpy(slot, &str_ptr, sizeof(str_ptr));
 
-          wstring_fixups.emplace_back(i, offset);
-        } else if (val.IsBuffer()) {
-          auto buf = val.As<Napi::Buffer<uint8_t>>();
-          const wchar_t* ptr = reinterpret_cast<const wchar_t*>(buf.Data());
-          memcpy(slot, &ptr, sizeof(ptr));
-          buffer_refs.push_back(Napi::Persistent(val.As<Napi::Object>()));
-        } else if (val.IsBigInt()) {
-          // Raw pointer address (parity CTYPES_POINTER)
-          bool lossless;
-          uint64_t addr = val.As<Napi::BigInt>().Uint64Value(&lossless);
-          const wchar_t* ptr = reinterpret_cast<const wchar_t*>(addr);
-          memcpy(slot, &ptr, sizeof(ptr));
-        } else if (val.IsNumber()) {
-          const wchar_t* ptr =
-            reinterpret_cast<const wchar_t*>(static_cast<uintptr_t>(val.As<Napi::Number>().Int64Value()));
-          memcpy(slot, &ptr, sizeof(ptr));
-        } else {
-          const wchar_t* null_ptr = nullptr;
-          memcpy(slot, &null_ptr, sizeof(null_ptr));
-        }
-        break;
-      }
-
-      case CType::CTYPES_STRUCT: {
-        if (i < expected_argc && arg_struct_infos_[i]) {
-          if (!MarshalStructArg(env, val, i, arg_struct_infos_[i], slot, &async_arg_values[i], large_arg_buffers,
-                                &large_arg_indices)) {
-            return env.Undefined();
+            wstring_fixups.emplace_back(i, offset);
+          } else if (val.IsObject()) {
+            const wchar_t* ptr = static_cast<const wchar_t*>(ObjectData(val));
+            memcpy(slot, &ptr, sizeof(ptr));
+            buffer_refs.push_back(Napi::Persistent(val.As<Napi::Object>()));
+          } else if (val.IsBigInt()) {
+            // Raw pointer address (parity CTYPES_POINTER)
+            bool lossless;
+            uint64_t addr = val.As<Napi::BigInt>().Uint64Value(&lossless);
+            const wchar_t* ptr = reinterpret_cast<const wchar_t*>(addr);
+            memcpy(slot, &ptr, sizeof(ptr));
+          } else if (val.IsNumber()) {
+            const wchar_t* ptr =
+              reinterpret_cast<const wchar_t*>(static_cast<uintptr_t>(val.As<Napi::Number>().Int64Value()));
+            memcpy(slot, &ptr, sizeof(ptr));
+          } else if (val.IsNull() || val.IsUndefined()) {
+            const wchar_t* null_ptr = nullptr;
+            memcpy(slot, &null_ptr, sizeof(null_ptr));
+          } else {
+            ThrowWrongType(val);
           }
-        } else {
-          JSToC(env, val, type, slot, ARG_SLOT_SIZE);
+          break;
         }
-        break;
-      }
 
-      case CType::CTYPES_ARRAY: {
-        if (i < expected_argc && arg_array_infos_[i]) {
-          if (!MarshalArrayArg(env, val, i, arg_array_infos_[i], slot, &async_arg_values[i], large_arg_buffers,
-                               &large_arg_indices)) {
-            return env.Undefined();
+        case CType::CTYPES_STRUCT: {
+          if (i < expected_argc && arg_struct_infos_[i]) {
+            if (!MarshalStructArg(env, val, i, arg_struct_infos_[i], slot, &async_arg_values[i], large_arg_buffers,
+                                  &large_arg_indices)) {
+              return env.Undefined();
+            }
+          } else {
+            JSToC(env, val, type, slot, ARG_SLOT_SIZE);
           }
-        } else {
-          JSToC(env, val, type, slot, ARG_SLOT_SIZE);
+          break;
         }
-        break;
-      }
 
-      default:
-        JSToC(env, val, type, slot, ARG_SLOT_SIZE);
-        break;
+        case CType::CTYPES_ARRAY: {
+          if (i < expected_argc && arg_array_infos_[i]) {
+            if (!MarshalArrayArg(env, val, i, arg_array_infos_[i], slot, &async_arg_values[i], large_arg_buffers,
+                                 &large_arg_indices)) {
+              return env.Undefined();
+            }
+          } else {
+            JSToC(env, val, type, slot, ARG_SLOT_SIZE);
+          }
+          break;
+        }
+
+        default:
+          JSToC(env, val, type, slot, ARG_SLOT_SIZE);
+          break;
+      }
+    } catch (const Napi::Error& e) {
+      throw ArgumentErrorFor(env, i, e);
     }
   }
 

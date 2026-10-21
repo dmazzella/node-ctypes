@@ -3,10 +3,14 @@
 #include <napi.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <cwchar>
 #include <filesystem>
@@ -22,6 +26,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -52,11 +57,11 @@ typedef SSIZE_T ssize_t;
 //   GCC/Clang: [[gnu::always_inline]] inline   (C++ attribute)
 //   MSVC:      __forceinline                   (prefisso non-standard)
 #if defined(_MSC_VER)
-#  define CTYPES_ALWAYS_INLINE __forceinline
+#define CTYPES_ALWAYS_INLINE __forceinline
 #elif defined(__GNUC__) || defined(__clang__)
-#  define CTYPES_ALWAYS_INLINE [[gnu::always_inline]] inline
+#define CTYPES_ALWAYS_INLINE [[gnu::always_inline]] inline
 #else
-#  define CTYPES_ALWAYS_INLINE inline
+#define CTYPES_ALWAYS_INLINE inline
 #endif
 
 namespace ctypes {

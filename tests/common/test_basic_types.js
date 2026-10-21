@@ -160,8 +160,10 @@ describe("Basic Types", function () {
       assert(size === 4 || size === 8, "c_long should be 4 or 8 bytes");
 
       if (size === 4) {
+        // BigInt on every platform, as on 64-bit long platforms
         const val = new ctypes.c_long(2147483647);
-        assert.strictEqual(val.value, 2147483647);
+        assert.strictEqual(val.value, 2147483647n);
+        assert.strictEqual(new ctypes.c_long(-1n).value, -1n);
       } else {
         const val = new ctypes.c_long(9223372036854775807n);
         assert.strictEqual(val.value, 9223372036854775807n);
@@ -174,7 +176,8 @@ describe("Basic Types", function () {
 
       if (size === 4) {
         const val = new ctypes.c_ulong(4294967295);
-        assert.strictEqual(val.value, 4294967295);
+        assert.strictEqual(val.value, 4294967295n);
+        assert.strictEqual(new ctypes.c_ulong(4294967296n + 5n).value, 5n);
       } else {
         const val = new ctypes.c_ulong(18446744073709551615n);
         assert.strictEqual(val.value, 18446744073709551615n);
@@ -464,7 +467,7 @@ describe("Basic Types", function () {
       const p = ctypes.pointer(x);
       assert.strictEqual(p.isNull, false);
       assert.strictEqual(p[0], 42);
-      assert.strictEqual(p.contents, 42);
+      assert.strictEqual(p.contents.value, 42);
     });
 
     it("should modify through pointer changes original", function () {
@@ -475,12 +478,24 @@ describe("Basic Types", function () {
       assert.strictEqual(x.value, 100);
     });
 
-    it("should write value via contents setter", function () {
-      // Python: p.contents = c_int32(99)
+    it("should re-point when an instance is assigned to contents", function () {
+      // Python: p.contents = c_int32(99) → p punta al nuovo oggetto, x non cambia
+      const x = new ctypes.c_int32(42);
+      const p = ctypes.pointer(x);
+      const y = new ctypes.c_int32(99);
+      p.contents = y;
+      assert.strictEqual(p[0], 99);
+      assert.strictEqual(x.value, 42);
+      p[0] = 7;
+      assert.strictEqual(y.value, 7);
+    });
+
+    it("should write a plain value assigned to contents", function () {
+      // Estensione JS: un valore semplice viene scritto nella memoria puntata
       const x = new ctypes.c_int32(42);
       const p = ctypes.pointer(x);
       p.contents = 99;
-      assert.strictEqual(p.contents, 99);
+      assert.strictEqual(p.contents.value, 99);
       assert.strictEqual(x.value, 99);
     });
 
@@ -505,8 +520,8 @@ describe("Basic Types", function () {
     it("should have deref() alias for contents", function () {
       const x = new ctypes.c_int32(42);
       const p = ctypes.pointer(x);
-      assert.strictEqual(p.deref(), p.contents);
-      assert.strictEqual(p.deref(), 42);
+      assert.strictEqual(p.deref().value, p.contents.value);
+      assert.strictEqual(p.deref().value, 42);
     });
   });
 
@@ -624,7 +639,7 @@ describe("Basic Types", function () {
       const buf = Buffer.alloc(4);
       buf.writeInt32LE(0x12345678, 0);
       const p = ctypes.cast(buf, IntPtr);
-      assert.strictEqual(p.contents, 0x12345678, "contents read from buf memory");
+      assert.strictEqual(p.contents.value, 0x12345678, "contents read from buf memory");
     });
 
     it("should cast BigInt address to POINTER (from address value)", function () {
@@ -756,9 +771,9 @@ describe("Basic Types", function () {
       const p = IntPtr.create();
       assert.strictEqual(p.isNull, true);
       p.set(buf1);
-      assert.strictEqual(p.contents, 42);
+      assert.strictEqual(p.contents.value, 42);
       p.set(buf2);
-      assert.strictEqual(p.contents, 100);
+      assert.strictEqual(p.contents.value, 100);
     });
 
     it("should set() to change target address", function () {

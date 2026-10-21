@@ -8,7 +8,7 @@
 //   node examples/windows/demo_comtypes_ads.js --base "LDAP://DC=contoso,DC=com" \
 //        --filter "(objectClass=user)" --attributes "sAMAccountName,displayName,mail"
 
-import { WinDLL, OleDLL, Structure, Union, POINTER, array, byref, ptrToBuffer, create_unicode_buffer, wstring_at } from "node-ctypes";
+import { WinDLL, OleDLL, Structure, Union, POINTER, array, byref, memmove, create_string_buffer, create_unicode_buffer, wstring_at, c_void_p } from "node-ctypes";
 import { CoInitializeEx, CoUninitialize, COMPointer, HRESULT, SUCCEEDED } from "./comtypes/comtypes.js";
 import { wintypes } from "node-ctypes";
 const { BOOL, BYTE, DWORD, HANDLE, INT, LONG, LONGLONG, LPBYTE, LPCWSTR, LPVOID, LPWSTR, PVOID, WORD } = wintypes;
@@ -209,20 +209,27 @@ class ADS_SEARCH_COLUMN extends Structure {
   ];
 }
 
+// Search preference (Python: ADS_SEARCHPREF_INFO(pref, ADSVALUE(type, ADSVALUE_DATA(**value))))
+function searchPref(dwSearchPref, dwType, value) {
+  return new ADS_SEARCHPREF_INFO(dwSearchPref, new ADSVALUE(dwType, new ADSVALUE_DATA(value)));
+}
+
+/** Copy `length` bytes at a pointer into a Buffer (Python: string_at(ptr, length)). */
+function bytesAt(ptr, length) {
+  const data = create_string_buffer(length);
+  memmove(data, ptr, length);
+  return data.raw;
+}
+
 // ─── Value conversion helpers ────────────────────────────────────────
 
 /** Convert a binary SID buffer to its string form (S-1-5-…). */
 function sidToString(sidBuffer) {
-  const sidBuf = Buffer.from(sidBuffer); // native-allocated copy
-  const strSidPtr = Buffer.alloc(8); // receives LPWSTR
-  const ok = advapi32.ConvertSidToStringSidW(sidBuf, strSidPtr);
-  if (!ok) return sidBuffer.toString("hex");
+  const strSid = new c_void_p(); // receives LPWSTR
+  if (!advapi32.ConvertSidToStringSidW(sidBuffer, byref(strSid)) || !strSid.value) return sidBuffer.toString("hex");
 
-  const addr = strSidPtr.readBigUInt64LE(0);
-  if (!addr) return sidBuffer.toString("hex");
-
-  const str = wstring_at(addr);
-  kernel32.LocalFree(addr);
+  const str = wstring_at(strSid.value);
+  kernel32.LocalFree(strSid.value);
   return str;
 }
 
@@ -230,13 +237,9 @@ function sidToString(sidBuffer) {
 function guidToString(guidBuffer) {
   if (guidBuffer.length < 16) return guidBuffer.toString("hex");
 
-  const guidBuf = Buffer.from(guidBuffer.subarray(0, 16));
   const outBuf = create_unicode_buffer(39);
-  const len = ole32.StringFromGUID2(guidBuf, outBuf, 39);
-  if (len === 0) return guidBuffer.toString("hex");
-
-  // wstring_at stops at the first NUL — no manual trim needed.
-  return wstring_at(outBuf);
+  if (ole32.StringFromGUID2(guidBuffer, outBuf, 39) === 0) return guidBuffer.toString("hex");
+  return outBuf.value;
 }
 
 // ─── ADsOpenObject wrapper ───────────────────────────────────────────
@@ -245,10 +248,9 @@ function ADsOpenObject(path, interfaceDef, username = null, password = null, aut
   // OleDLL + HRESULT auto-throws on failure — no checkHR needed.
   // Path/user/password are LPCWSTR and accept plain JS strings directly
   // (Python-ctypes parity via c_wchar_p keepalive).
-  const ppv = Buffer.alloc(8);
-  activeds.ADsOpenObject(path, username, password, authFlags, byref(interfaceDef._iid), ppv);
-  const addr = ppv.readBigUInt64LE(0);
-  return new COMPointer(addr, interfaceDef);
+  const ppv = new c_void_p();
+  activeds.ADsOpenObject(path, username, password, authFlags, byref(interfaceDef._iid), byref(ppv));
+  return new COMPointer(ppv.value, interfaceDef);
 }
 
 // ─── Detect domain base DN from environment ─────────────────────────
@@ -357,40 +359,41 @@ function main() {
     // Set search preferences. All COM methods with HRESULT restype auto-throw
     // on failure (vtable errcheck installed by comtypes.js).
     const dwNumPrefs = 5;
-    const searchPrefs = array(ADS_SEARCHPREF_INFO, dwNumPrefs).create([
-      { dwSearchPref: ADS_SEARCHPREF_PAGESIZE, vValue: { dwType: ADSTYPE_INTEGER, Value: { Integer: pageSize } } },
-      { dwSearchPref: ADS_SEARCHPREF_SEARCH_SCOPE, vValue: { dwType: ADSTYPE_INTEGER, Value: { Integer: scope } } },
-      { dwSearchPref: ADS_SEARCHPREF_ASYNCHRONOUS, vValue: { dwType: ADSTYPE_BOOLEAN, Value: { Boolean: 1 } } },
-      { dwSearchPref: ADS_SEARCHPREF_CHASE_REFERRALS, vValue: { dwType: ADSTYPE_INTEGER, Value: { Integer: ADS_CHASE_REFERRALS_ALWAYS } } },
-      { dwSearchPref: ADS_SEARCHPREF_CACHE_RESULTS, vValue: { dwType: ADSTYPE_BOOLEAN, Value: { Boolean: 0 } } },
-    ]);
+    const searchPrefs = array(ADS_SEARCHPREF_INFO, dwNumPrefs)(
+      searchPref(ADS_SEARCHPREF_PAGESIZE, ADSTYPE_INTEGER, { Integer: pageSize }),
+      searchPref(ADS_SEARCHPREF_SEARCH_SCOPE, ADSTYPE_INTEGER, { Integer: scope }),
+      searchPref(ADS_SEARCHPREF_ASYNCHRONOUS, ADSTYPE_BOOLEAN, { Boolean: 1 }),
+      searchPref(ADS_SEARCHPREF_CHASE_REFERRALS, ADSTYPE_INTEGER, { Integer: ADS_CHASE_REFERRALS_ALWAYS }),
+      searchPref(ADS_SEARCHPREF_CACHE_RESULTS, ADSTYPE_BOOLEAN, { Boolean: 0 }),
+    );
 
     directorySearch.SetSearchPreference(searchPrefs, dwNumPrefs);
 
-    // Execute search. attrPtrArray is a NULL-terminated array of LPWSTR; the
-    // `array(LPCWSTR, N).create([...])` helper builds it from plain strings.
-    const hSearchOut = Buffer.alloc(8);
-    const attrPtrArray = attrList.length ? array(LPCWSTR, attrList.length).create(attrList) : null;
-    directorySearch.ExecuteSearch(searchFilter, attrPtrArray, attrList.length ? attrList.length : -1, byref(hSearchOut));
-    const hSearch = hSearchOut.readBigUInt64LE(0);
+    // Execute search. The attribute names are an array of LPWSTR
+    // (Python: (LPCWSTR * n)(*attrList)).
+    const attrNames = attrList.length ? array(LPCWSTR, attrList.length)(...attrList) : null;
+    const hSearchOut = new HANDLE();
+    directorySearch.ExecuteSearch(searchFilter, attrNames, attrList.length ? attrList.length : -1, byref(hSearchOut));
+    const hSearch = hSearchOut.value;
 
     console.time("Enumerating rows");
 
     const rows = [];
-    const pszColumn = Buffer.alloc(8);
+    const pszColumn = new c_void_p();
     const col = new ADS_SEARCH_COLUMN();
     let hr;
 
     while (SUCCEEDED((hr = directorySearch.GetNextRow(hSearch))) && hr !== S_ADS_NOMORE_ROWS) {
       const row = {};
 
-      while (SUCCEEDED((hr = directorySearch.GetNextColumnName(hSearch, pszColumn))) && hr !== S_ADS_NOMORE_COLUMNS) {
-        const colNameAddr = pszColumn.readBigUInt64LE(0);
+      while (SUCCEEDED((hr = directorySearch.GetNextColumnName(hSearch, byref(pszColumn)))) && hr !== S_ADS_NOMORE_COLUMNS) {
+        const colNameAddr = pszColumn.value;
         if (SUCCEEDED(directorySearch.GetColumn(hSearch, colNameAddr, col))) {
           const values = [];
           const colName = wstring_at(colNameAddr);
 
-          switch (col.dwADsType) {
+          // DWORD fields are BigInt; the ADSTYPE_* constants are numbers.
+          switch (Number(col.dwADsType)) {
             // LPWSTR union fields auto-convert to a JS string on read (the
             // c_wchar_p reader calls readWString). NULL → null.
             case ADSTYPE_DN_STRING: {
@@ -414,13 +417,13 @@ function main() {
             }
             case ADSTYPE_INTEGER: {
               for (let i = 0; i < col.dwNumValues; i++) {
-                values.push(col.pADsValues[i].Value.Integer);
+                values.push(Number(col.pADsValues[i].Value.Integer));
               }
               break;
             }
             case ADSTYPE_BOOLEAN: {
               for (let i = 0; i < col.dwNumValues; i++) {
-                values.push(col.pADsValues[i].Value.Boolean !== 0);
+                values.push(Boolean(col.pADsValues[i].Value.Boolean));
               }
               break;
             }
@@ -441,9 +444,10 @@ function main() {
             }
             case ADSTYPE_OCTET_STRING: {
               for (let i = 0; i < col.dwNumValues; i++) {
+                // lpValue is an LPBYTE (POINTER(BYTE)): null when NULL
                 const { dwLength, lpValue } = col.pADsValues[i].Value.OctetString;
-                if (lpValue && lpValue !== 0n && dwLength > 0) {
-                  const rawBuf = Buffer.from(ptrToBuffer(lpValue, Number(dwLength)));
+                if (lpValue && dwLength > 0) {
+                  const rawBuf = bytesAt(lpValue, Number(dwLength));
                   if (colName.toLowerCase() === "objectsid") {
                     values.push(sidToString(rawBuf));
                   } else if (colName.toLowerCase() === "objectguid") {

@@ -33,7 +33,8 @@ static const char* CTypeNames[] = {
   "ulong",    // CTYPES_ULONG = 19
   "struct",   // CTYPES_STRUCT = 20
   "union",    // CTYPES_UNION = 21
-  "array"     // CTYPES_ARRAY = 22
+  "array",    // CTYPES_ARRAY = 22
+  "char"      // CTYPES_CHAR = 23
 };
 
 const char* CTypeToName(CType type) {
@@ -74,6 +75,8 @@ ffi_type* CTypeToFFI(CType type) {
       return &ffi_type_pointer;
     case CType::CTYPES_WSTRING:
       return &ffi_type_pointer;
+    case CType::CTYPES_CHAR:
+      return std::is_signed_v<char> ? &ffi_type_sint8 : &ffi_type_uint8;
     case CType::CTYPES_WCHAR:
       // wchar_t è 16-bit su Windows, 32-bit su Unix
 #ifdef _WIN32
@@ -137,6 +140,8 @@ size_t CTypeSize(CType type) {
       return sizeof(wchar_t*);
     case CType::CTYPES_WCHAR:
       return sizeof(wchar_t);
+    case CType::CTYPES_CHAR:
+      return 1;
     case CType::CTYPES_BOOL:
       return 1;
     case CType::CTYPES_SIZE_T:
@@ -167,6 +172,25 @@ int JSToC(Napi::Env env, Napi::Value value, CType type, void* buffer, size_t buf
   switch (type) {
     case CType::CTYPES_VOID:
       return 0;
+
+    case CType::CTYPES_CHAR: {
+      if (bufsize < 1) {
+        return -1;
+      }
+      uint8_t val = 0;
+      if (value.IsString()) {
+        // Python: un bytes di 1 byte. In JS una stringa di 1 carattere (codice 0-255).
+        std::u16string str = value.As<Napi::String>().Utf16Value();
+        val = str.empty() ? 0 : static_cast<uint8_t>(str[0]);
+      } else if (value.IsBuffer()) {
+        Napi::Buffer<uint8_t> buf = value.As<Napi::Buffer<uint8_t>>();
+        val = buf.Length() > 0 ? buf.Data()[0] : 0;
+      } else {
+        val = static_cast<uint8_t>(AsNumberFast(value).Int32Value());
+      }
+      memcpy(buffer, &val, sizeof(val));
+      return 1;
+    }
 
     case CType::CTYPES_INT8: {
       if (bufsize < 1) {
@@ -435,6 +459,12 @@ Napi::Value CToJS(Napi::Env env, const void* buffer, CType type) {
     case CType::CTYPES_VOID:
       return env.Undefined();
 
+    case CType::CTYPES_CHAR: {
+      uint8_t val;
+      memcpy(&val, buffer, sizeof(val));
+      return Napi::String::New(env, std::u16string(1, static_cast<char16_t>(val)));
+    }
+
     case CType::CTYPES_INT8: {
       int8_t val;
       memcpy(&val, buffer, sizeof(val));
@@ -549,9 +579,16 @@ Napi::Value CToJS(Napi::Env env, const void* buffer, CType type) {
     }
 
     case CType::CTYPES_WCHAR: {
+      // Python c_wchar → str di 1 carattere.
       wchar_t val;
       memcpy(&val, buffer, sizeof(wchar_t));
-      return Napi::Number::New(env, static_cast<uint32_t>(val));
+      const uint32_t cp = static_cast<uint32_t>(val);
+      if (cp <= 0xFFFF) {
+        return Napi::String::New(env, std::u16string(1, static_cast<char16_t>(cp)));
+      }
+      const uint32_t v = cp - 0x10000;
+      const char16_t pair[2] = {static_cast<char16_t>(0xD800 + (v >> 10)), static_cast<char16_t>(0xDC00 + (v & 0x3FF))};
+      return Napi::String::New(env, std::u16string(pair, 2));
     }
 
     case CType::CTYPES_BOOL: {
@@ -610,6 +647,7 @@ Napi::Object CreateCType(Napi::Env env) {
   obj.Set("STRING", static_cast<int32_t>(CType::CTYPES_STRING));
   obj.Set("WSTRING", static_cast<int32_t>(CType::CTYPES_WSTRING));
   obj.Set("WCHAR", static_cast<int32_t>(CType::CTYPES_WCHAR));
+  obj.Set("CHAR", static_cast<int32_t>(CType::CTYPES_CHAR));
   obj.Set("BOOL", static_cast<int32_t>(CType::CTYPES_BOOL));
   obj.Set("SIZE_T", static_cast<int32_t>(CType::CTYPES_SIZE_T));
   obj.Set("SSIZE_T", static_cast<int32_t>(CType::CTYPES_SSIZE_T));

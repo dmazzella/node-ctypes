@@ -1,8 +1,8 @@
 // Registry — reusable Windows Registry wrapper for node-ctypes
 //
 // Python-ctypes-idiomatic: typed argtypes using wintypes, errcheck for
-// automatic error raising, plain JS strings for LPCWSTR args (via the
-// c_wchar_p struct-field keepalive).
+// automatic error raising, plain JS strings for LPCWSTR args, DWORD()/HKEY()
+// instances + byref() for output parameters.
 //
 // Usage:
 //   import { Registry, HKEY, REG } from "./registry/registry.js";
@@ -15,7 +15,7 @@
 //   key.setDword("Count", 123);
 //   key.close();
 
-import { WinDLL, wstring_at, c_void_p } from "node-ctypes";
+import { WinDLL, byref, cast, create_unicode_buffer, sizeof, c_void_p, c_wchar } from "node-ctypes";
 import { wintypes } from "node-ctypes";
 const { DWORD, LSTATUS, REGSAM, HKEY: HKEY_T, LPCWSTR, LPDWORD, LPBYTE, PHKEY } = wintypes;
 // ─── Root keys (predefined pseudo-handles) ──────────────────────────
@@ -120,27 +120,6 @@ function advapi32() {
   return lib;
 }
 
-// ─── DWORD scratch allocator ────────────────────────────────────────
-// RegGetValueW / RegCreateKeyExW etc. write back through byref. We allocate
-// a 4-byte Buffer for DWORD outputs and an 8-byte Buffer for HKEY outputs
-// (pointer-sized on Win64).
-
-function allocDword(initial = 0) {
-  const buf = Buffer.alloc(4);
-  buf.writeUInt32LE(initial >>> 0, 0);
-  return buf;
-}
-
-function allocHkey() {
-  // HKEY is pointer-sized. On Win64 this is 8 bytes; on Win32, 4.
-  const ptrSize = c_void_p._size;
-  return Buffer.alloc(ptrSize);
-}
-
-function readHkey(buf) {
-  return buf.length === 8 ? buf.readBigUInt64LE(0) : BigInt(buf.readUInt32LE(0));
-}
-
 // ─── RegistryKey — wraps an opened HKEY handle ─────────────────────
 
 class RegistryKey {
@@ -160,48 +139,43 @@ class RegistryKey {
 
   getString(valueName) {
     const api = advapi32();
-    const pdwType = allocDword();
-    const pcbData = allocDword();
+    const dwType = new DWORD();
+    const cbData = new DWORD();
 
     // Query size
-    let rc = api.RegGetValueW(this.#handle, null, valueName, RRF_RT_REG_SZ, pdwType, null, pcbData);
+    const rc = api.RegGetValueW(this.#handle, null, valueName, RRF_RT_REG_SZ, byref(dwType), null, byref(cbData));
     if (rc === ERROR_FILE_NOT_FOUND) return undefined;
+    if (!cbData.value) return "";
 
-    const needed = pcbData.readUInt32LE(0);
-    if (!needed) return "";
-
-    const outBuf = Buffer.alloc(needed);
-    pcbData.writeUInt32LE(needed, 0);
-    api.RegGetValueW(this.#handle, null, valueName, RRF_RT_REG_SZ, pdwType, outBuf, pcbData);
-
-    // wstring_at stops at the first null; no manual trim needed.
-    return wstring_at(outBuf);
+    const data = create_unicode_buffer(Number(cbData.value) / sizeof(c_wchar));
+    api.RegGetValueW(this.#handle, null, valueName, RRF_RT_REG_SZ, byref(dwType), data, byref(cbData));
+    return data.value;
   }
 
   setString(valueName, data) {
     const api = advapi32();
-    // REG_SZ data: UTF-16LE wide string including null terminator.
-    const wbuf = Buffer.from(data + "\0", "utf16le");
-    api.RegSetValueExW(this.#handle, valueName, 0, REG.SZ, wbuf, wbuf.length);
+    // REG_SZ data: wide string including the NUL terminator.
+    const buf = create_unicode_buffer(data);
+    api.RegSetValueExW(this.#handle, valueName, 0, REG.SZ, cast(buf, LPBYTE), sizeof(buf));
   }
 
   // ── DWORD (REG_DWORD) ──
 
   getDword(valueName) {
     const api = advapi32();
-    const outDword = allocDword();
-    const cbData = allocDword(4);
-    const pdwType = allocDword();
+    const data = new DWORD();
+    const cbData = new DWORD(sizeof(DWORD));
+    const dwType = new DWORD();
 
-    const rc = api.RegGetValueW(this.#handle, null, valueName, RRF_RT_REG_DWORD, pdwType, outDword, cbData);
+    const rc = api.RegGetValueW(this.#handle, null, valueName, RRF_RT_REG_DWORD, byref(dwType), byref(data), byref(cbData));
     if (rc === ERROR_FILE_NOT_FOUND) return undefined;
-    return outDword.readUInt32LE(0);
+    return Number(data.value);
   }
 
   setDword(valueName, data) {
     const api = advapi32();
-    const dword = allocDword(data);
-    api.RegSetValueExW(this.#handle, valueName, 0, REG.DWORD, dword, 4);
+    const dword = new DWORD(data);
+    api.RegSetValueExW(this.#handle, valueName, 0, REG.DWORD, cast(byref(dword), LPBYTE), sizeof(DWORD));
   }
 
   // ── Delete value ──
@@ -240,17 +214,17 @@ export class Registry {
    */
   static openKey(rootKey, subKey, { write = false, create = false } = {}) {
     const api = advapi32();
-    const phkResult = allocHkey();
+    const hkResult = new HKEY_T();
 
     if (create) {
-      const lpdwDisposition = allocDword();
-      api.RegCreateKeyExW(rootKey, subKey, 0, null, REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, null, phkResult, lpdwDisposition);
+      const dwDisposition = new DWORD();
+      api.RegCreateKeyExW(rootKey, subKey, 0, null, REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, null, byref(hkResult), byref(dwDisposition));
     } else {
       const access = write ? KEY_READ | KEY_WRITE : KEY_READ;
-      api.RegOpenKeyExW(rootKey, subKey, 0, access, phkResult);
+      api.RegOpenKeyExW(rootKey, subKey, 0, access, byref(hkResult));
     }
 
-    return new RegistryKey(readHkey(phkResult));
+    return new RegistryKey(hkResult.value);
   }
 
   /**
@@ -272,29 +246,25 @@ export class Registry {
    */
   static getValue(rootKey, subKey, valueName) {
     const api = advapi32();
-    const pdwType = allocDword();
-    const pcbData = allocDword();
+    const dwType = new DWORD();
+    const cbData = new DWORD();
 
     // Query size and type
-    let rc = api.RegGetValueW(rootKey, subKey, valueName, RRF_RT_ANY, pdwType, null, pcbData);
+    const rc = api.RegGetValueW(rootKey, subKey, valueName, RRF_RT_ANY, byref(dwType), null, byref(cbData));
     if (rc === ERROR_FILE_NOT_FOUND) return undefined;
 
-    const type = pdwType.readUInt32LE(0);
-
-    if (type === REG.DWORD) {
-      const outDword = allocDword();
-      const cb = allocDword(4);
-      api.RegGetValueW(rootKey, subKey, valueName, RRF_RT_REG_DWORD, pdwType, outDword, cb);
-      return outDword.readUInt32LE(0);
+    if (Number(dwType.value) === REG.DWORD) {
+      const data = new DWORD();
+      const cb = new DWORD(sizeof(DWORD));
+      api.RegGetValueW(rootKey, subKey, valueName, RRF_RT_REG_DWORD, byref(dwType), byref(data), byref(cb));
+      return Number(data.value);
     }
 
     // Default: treat as string (REG_SZ / REG_EXPAND_SZ)
-    const needed = pcbData.readUInt32LE(0);
-    if (!needed) return "";
-    const outBuf = Buffer.alloc(needed);
-    pcbData.writeUInt32LE(needed, 0);
-    api.RegGetValueW(rootKey, subKey, valueName, RRF_RT_REG_SZ, pdwType, outBuf, pcbData);
-    return wstring_at(outBuf);
+    if (!cbData.value) return "";
+    const data = create_unicode_buffer(Number(cbData.value) / sizeof(c_wchar));
+    api.RegGetValueW(rootKey, subKey, valueName, RRF_RT_REG_SZ, byref(dwType), data, byref(cbData));
+    return data.value;
   }
 
   /**

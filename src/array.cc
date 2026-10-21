@@ -20,13 +20,16 @@ ArrayInfo::ArrayInfo(CType element_type, size_t count, std::shared_ptr<StructInf
     switch (element_type) {
       case CType::CTYPES_INT8:
       case CType::CTYPES_UINT8:
+      case CType::CTYPES_CHAR:
       case CType::CTYPES_BOOL:
         alignment_ = 1;
         break;
       case CType::CTYPES_INT16:
       case CType::CTYPES_UINT16:
-      case CType::CTYPES_WCHAR:
         alignment_ = 2;
+        break;
+      case CType::CTYPES_WCHAR:
+        alignment_ = alignof(wchar_t);  // 2 su Windows, 4 su Unix
         break;
       case CType::CTYPES_INT32:
       case CType::CTYPES_UINT32:
@@ -131,7 +134,7 @@ bool ArrayInfo::JSToArray(Napi::Env env, Napi::Value val, void* buffer, size_t b
     Napi::Buffer<uint8_t> buf = val.As<Napi::Buffer<uint8_t>>();
     size_t copy_size = std::min(buf.Length(), size_);
     memcpy(buffer, buf.Data(), copy_size);
-  } else if (val.IsString() && element_type_ == CType::CTYPES_INT8) {
+  } else if (val.IsString() && (element_type_ == CType::CTYPES_INT8 || element_type_ == CType::CTYPES_CHAR)) {
     // Stringa → char array
     std::string str = val.As<Napi::String>().Utf8Value();
     size_t copy_len = std::min(str.length(), count_ - 1);

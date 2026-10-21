@@ -38,8 +38,9 @@ std::string GetErrorMessage(const uint32_t errorCode) {
 }
 
 // Platform-specific implementations
-void* LoadSharedLibrary(const std::string& path, std::string& error) {
+void* LoadSharedLibrary(const std::string& path, std::string& error, int mode) {
 #ifdef _WIN32
+  (void)mode;
   HMODULE handle = LoadLibraryExA(path.c_str(), NULL, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_USER_DIRS);
   if (!handle) {
     DWORD err = GetLastError();
@@ -49,7 +50,7 @@ void* LoadSharedLibrary(const std::string& path, std::string& error) {
   }
   return static_cast<void*>(handle);
 #else
-  void* handle = dlopen(path.c_str(), RTLD_LAZY | RTLD_LOCAL);
+  void* handle = dlopen(path.c_str(), RTLD_LAZY | mode);
   if (!handle) {
     error = dlerror();
     return nullptr;
@@ -123,6 +124,16 @@ Library::Library(const Napi::CallbackInfo& info)
     return;
   }
 
+  // Python ctypes: CDLL(name, mode) — RTLD_LOCAL di default.
+#ifdef _WIN32
+  int mode = 0;
+#else
+  int mode = RTLD_LOCAL;
+#endif
+  if (info.Length() > 1 && info[1].IsNumber()) {
+    mode = info[1].As<Napi::Number>().Int32Value();
+  }
+
   std::string error;
 
   // Se path è vuoto, carica l'eseguibile corrente (RTLD_DEFAULT su Unix)
@@ -162,9 +173,9 @@ Library::Library(const Napi::CallbackInfo& info)
       Napi::Error::New(env, std::format("Failed to set DLL directory: {}", ex.what())).ThrowAsJavaScriptException();
       return;
     }
-    handle_ = LoadSharedLibrary(path_, error);
+    handle_ = LoadSharedLibrary(path_, error, mode);
 #else
-    handle_ = LoadSharedLibrary(path_, error);
+    handle_ = LoadSharedLibrary(path_, error, mode);
 #endif
   }
 

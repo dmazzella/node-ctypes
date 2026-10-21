@@ -9,6 +9,46 @@ namespace ctypes {
 // ========================================================================
 static constexpr size_t kMaxInlineCallbackArgs = 8;
 
+namespace {
+
+// Chiama la funzione JS del callback. Se lancia, l'eccezione arriva come
+// Napi::Error (NAPI_CPP_EXCEPTIONS), che la recupera e la rimuove dall'env:
+// ritorna false e lascia il messaggio in error_msg.
+bool CallJSCallback(Napi::Env env,
+                    const Napi::Function& fn,
+                    size_t nargs,
+                    const napi_value* args,
+                    Napi::Value& result,
+                    std::string& error_msg) {
+  try {
+    result = fn.Call(env.Undefined(), nargs, args);
+    return true;
+  } catch (const Napi::Error& e) {
+    if (!e.Message().empty()) {
+      error_msg = e.Message();
+    }
+    return false;
+  }
+}
+
+// Fallback senza error handler: process.emitWarning(message, type).
+void EmitCallbackWarning(Napi::Env env, const std::string& message, const char* type) {
+  try {
+    Napi::Value process = env.Global().Get("process");
+    if (!process.IsObject()) {
+      return;
+    }
+    Napi::Value emit_warning = process.As<Napi::Object>().Get("emitWarning");
+    if (emit_warning.IsFunction()) {
+      emit_warning.As<Napi::Function>().Call(process, {Napi::String::New(env, message), Napi::String::New(env, type)});
+    }
+  } catch (const Napi::Error&) {
+    // Il warning è best-effort: non deve propagare dentro il frame C del callback.
+  }
+}
+
+}  // namespace
+
 // ========================================================================
 // Callback - Solo main thread, semplice e veloce
 // ========================================================================
@@ -46,26 +86,9 @@ static void CallbackHandler(ffi_cif* cif, void* ret, void** args, void* user_dat
     js_args[i] = CToJS(env, args[i], data->arg_types[i]);
   }
 
-  // Chiama la funzione JS usando napi_call_function per evitare copia vector
-  napi_value result_val;
-  napi_value undefined;
-  napi_get_undefined(env, &undefined);
-  napi_status call_status =
-    napi_call_function(env, undefined, data->js_function_ref.Value(), cif->nargs, js_args, &result_val);
-
-  // Gestisce errori/eccezioni
-  if (call_status != napi_ok) {
-    // Estrae messaggio di errore dall'eccezione JS
-    std::string error_msg = "Unknown error in callback";
-    bool is_pending;
-    if (napi_is_exception_pending(env, &is_pending) == napi_ok && is_pending) {
-      napi_value exception;
-      if (napi_get_and_clear_last_exception(env, &exception) == napi_ok) {
-        Napi::Error err(env, exception);
-        error_msg = err.Message();
-      }
-    }
-
+  Napi::Value result;
+  std::string error_msg = "Unknown error in callback";
+  if (!CallJSCallback(env, data->js_function_ref.Value(), cif->nargs, js_args, result, error_msg)) {
     // Salva l'ultimo errore
     {
       std::lock_guard<std::mutex> lock(data->error_mutex);
@@ -82,17 +105,7 @@ static void CallbackHandler(ffi_cif* cif, void* ret, void** args, void* user_dat
       }
     } else {
       // Fallback: emetti warning (visibile in Node.js)
-      napi_value process, emit_warning;
-      if (napi_get_global(env, &process) == napi_ok &&
-          napi_get_named_property(env, process, "emitWarning", &emit_warning) == napi_ok) {
-        napi_value warning_msg_val;
-        napi_create_string_utf8(env, error_msg.c_str(), NAPI_AUTO_LENGTH, &warning_msg_val);
-        napi_value warning_type;
-        napi_create_string_utf8(env, "CallbackError", NAPI_AUTO_LENGTH, &warning_type);
-        napi_value warn_args[2] = {warning_msg_val, warning_type};
-        napi_value warn_result;
-        napi_call_function(env, process, emit_warning, 2, warn_args, &warn_result);
-      }
+      EmitCallbackWarning(env, error_msg, "CallbackError");
     }
 
     // Ritorna valore zero per evitare comportamenti indefiniti in C
@@ -107,7 +120,6 @@ static void CallbackHandler(ffi_cif* cif, void* ret, void** args, void* user_dat
   // `ret` è fornito da libffi ed è abbastanza grande per il tipo dichiarato.
   if (data->return_type != CType::CTYPES_VOID) {
     size_t ret_size = CTypeSize(data->return_type);
-    Napi::Value result(env, result_val);
     int written = JSToC(env, result, data->return_type, static_cast<uint8_t*>(ret), ret_size);
     if (written <= 0) {
       memset(ret, 0, ret_size);
@@ -333,26 +345,9 @@ static void ThreadSafeCallbackHandler(ffi_cif* cif, void* ret, void** args, void
       js_args[i] = CToJS(env, args[i], data->arg_types[i]);
     }
 
-    // Chiama la funzione JS usando napi_call_function per evitare copia vector
-    napi_value result_val;
-    napi_value undefined;
-    napi_get_undefined(env, &undefined);
-    napi_status call_status =
-      napi_call_function(env, undefined, data->js_function_ref.Value(), cif->nargs, js_args, &result_val);
-
-    // Gestisce errori/eccezioni
-    if (call_status != napi_ok) {
-      // Estrae messaggio di errore dall'eccezione JS
-      std::string error_msg = "Unknown error in thread-safe callback";
-      bool is_pending;
-      if (napi_is_exception_pending(env, &is_pending) == napi_ok && is_pending) {
-        napi_value exception;
-        if (napi_get_and_clear_last_exception(env, &exception) == napi_ok) {
-          Napi::Error err(env, exception);
-          error_msg = err.Message();
-        }
-      }
-
+    Napi::Value result;
+    std::string error_msg = "Unknown error in thread-safe callback";
+    if (!CallJSCallback(env, data->js_function_ref.Value(), cif->nargs, js_args, result, error_msg)) {
       {
         std::lock_guard<std::mutex> lock(data->result_mutex);
         data->last_error = error_msg;
@@ -365,18 +360,7 @@ static void ThreadSafeCallbackHandler(ffi_cif* cif, void* ret, void** args, void
         } catch (...) {
         }
       } else {
-        // Emetti warning
-        napi_value process, emit_warning;
-        if (napi_get_global(env, &process) == napi_ok &&
-            napi_get_named_property(env, process, "emitWarning", &emit_warning) == napi_ok) {
-          napi_value warning_msg_val;
-          napi_create_string_utf8(env, error_msg.c_str(), NAPI_AUTO_LENGTH, &warning_msg_val);
-          napi_value warning_type;
-          napi_create_string_utf8(env, "ThreadSafeCallbackError", NAPI_AUTO_LENGTH, &warning_type);
-          napi_value warn_args[2] = {warning_msg_val, warning_type};
-          napi_value warn_result;
-          napi_call_function(env, process, emit_warning, 2, warn_args, &warn_result);
-        }
+        EmitCallbackWarning(env, error_msg, "ThreadSafeCallbackError");
       }
 
       if (data->return_type != CType::CTYPES_VOID) {
@@ -390,7 +374,6 @@ static void ThreadSafeCallbackHandler(ffi_cif* cif, void* ret, void** args, void
       // allocare un vector temporaneo e fare memcpy — stesso fix della
       // Callback main-thread path.
       size_t ret_size = CTypeSize(data->return_type);
-      Napi::Value result(env, result_val);
       int written = JSToC(env, result, data->return_type, static_cast<uint8_t*>(ret), ret_size);
       if (written <= 0) {
         memset(ret, 0, ret_size);
@@ -432,25 +415,9 @@ static void ThreadSafeCallbackHandler(ffi_cif* cif, void* ret, void** args, void
         js_args[i] = CToJS(env, args_copy[i].data(), data->arg_types[i]);
       }
 
-      // Chiama la funzione JS usando napi_call_function per evitare copia vector
-      napi_value result_val;
-      napi_value undefined;
-      napi_get_undefined(env, &undefined);
-      napi_status call_status = napi_call_function(env, undefined, js_callback, nargs, js_args, &result_val);
-
-      // Gestisce errori/eccezioni
-      if (call_status != napi_ok) {
-        // Estrae messaggio di errore dall'eccezione JS
-        std::string error_msg = "Unknown error in thread-safe callback (external thread)";
-        bool is_pending;
-        if (napi_is_exception_pending(env, &is_pending) == napi_ok && is_pending) {
-          napi_value exception;
-          if (napi_get_and_clear_last_exception(env, &exception) == napi_ok) {
-            Napi::Error err(env, exception);
-            error_msg = err.Message();
-          }
-        }
-
+      Napi::Value result;
+      std::string error_msg = "Unknown error in thread-safe callback (external thread)";
+      if (!CallJSCallback(env, js_callback, nargs, js_args, result, error_msg)) {
         {
           std::lock_guard<std::mutex> lock(data->result_mutex);
           data->last_error = error_msg;
@@ -463,18 +430,7 @@ static void ThreadSafeCallbackHandler(ffi_cif* cif, void* ret, void** args, void
           } catch (...) {
           }
         } else {
-          // Emetti warning
-          napi_value process, emit_warning;
-          if (napi_get_global(env, &process) == napi_ok &&
-              napi_get_named_property(env, process, "emitWarning", &emit_warning) == napi_ok) {
-            napi_value warning_msg_val;
-            napi_create_string_utf8(env, error_msg.c_str(), NAPI_AUTO_LENGTH, &warning_msg_val);
-            napi_value warning_type;
-            napi_create_string_utf8(env, "ThreadSafeCallbackError", NAPI_AUTO_LENGTH, &warning_type);
-            napi_value warn_args[2] = {warning_msg_val, warning_type};
-            napi_value warn_result;
-            napi_call_function(env, process, emit_warning, 2, warn_args, &warn_result);
-          }
+          EmitCallbackWarning(env, error_msg, "ThreadSafeCallbackError");
         }
 
         // Segnala errore e ritorna
@@ -489,10 +445,9 @@ static void ThreadSafeCallbackHandler(ffi_cif* cif, void* ret, void** args, void
       // Salva risultato
       {
         std::lock_guard<std::mutex> lock(data->result_mutex);
-        if (data->return_type != CType::CTYPES_VOID && result_val != nullptr) {
+        if (data->return_type != CType::CTYPES_VOID && !result.IsEmpty()) {
           size_t ret_size = CTypeSize(data->return_type);
           data->result_buffer.resize(ret_size);  // Ensure buffer is large enough
-          Napi::Value result(env, result_val);
           JSToC(env, result, data->return_type, data->result_buffer.data(), data->result_buffer.size());
         }
         data->result_ready.store(true, std::memory_order_release);

@@ -72,11 +72,49 @@ describe("wintypes aliases (Python ctypes.wintypes parity)", function () {
     assert.strictEqual(w.ULONG_PTR, ctypes.c_size_t);
   });
 
-  it("pointer-to-primitive aliases reduce to c_void_p", function () {
+  it("character types as Python (CHAR = c_char)", function () {
     const w = ctypes.wintypes;
-    for (const name of ["PBYTE", "LPBYTE", "PDWORD", "LPDWORD", "PHKEY"]) {
-      assert.strictEqual(w[name], ctypes.c_void_p, `${name} === c_void_p`);
-    }
+    assert.strictEqual(w.CHAR, ctypes.c_char);
+    assert.strictEqual(w.WCHAR, ctypes.c_wchar);
+  });
+
+  it("pointer types are POINTER(T) as Python", function () {
+    const w = ctypes.wintypes;
+    assert.strictEqual(w.LPDWORD._pointerTo, w.DWORD);
+    assert.strictEqual(w.PDWORD, w.LPDWORD);
+    assert.strictEqual(w.LPBYTE._pointerTo, w.BYTE);
+    assert.strictEqual(w.PHKEY._pointerTo, w.HKEY);
+    assert.strictEqual(w.LPRECT._pointerTo, w.RECT);
+    assert.strictEqual(w.LPMSG._pointerTo, w.MSG);
+
+    // byref(DWORD()) is accepted where LPDWORD is expected; NULL reads as null.
+    const n = new w.DWORD(7);
+    const p = ctypes.cast(ctypes.byref(n), w.LPDWORD);
+    assert.strictEqual(p[0], 7n);
+  });
+
+  it("structures as Python ctypes.wintypes", function () {
+    const w = ctypes.wintypes;
+    const rect = new w.RECT(1, 2, 3, 4);
+    assert.deepStrictEqual([rect.left, rect.bottom], [1n, 4n]);
+    assert.strictEqual(ctypes.sizeof(w.RECT), 4 * ctypes.sizeof(ctypes.c_long));
+    assert.strictEqual(w.tagRECT, w.RECT);
+    assert.strictEqual(w.POINTL, w.POINT);
+    assert.strictEqual(w.SIZEL, w.SIZE);
+    const msg = new w.MSG();
+    assert.strictEqual(msg.hWnd, null);
+    assert.strictEqual(new w.SMALL_RECT(1, 2, 3, 4).Bottom, 4);
+    const find = new w.WIN32_FIND_DATAW();
+    find.cFileName = "notepad.exe";
+    assert.strictEqual(find.cFileName, "notepad.exe");
+    assert.strictEqual(w.MAX_PATH, 260);
+    assert.strictEqual(w.RGB(1, 2, 3), 0x030201);
+  });
+
+  it("VARIANT_BOOL reads as a boolean (VARIANT_TRUE = -1)", function () {
+    const v = new ctypes.wintypes.VARIANT_BOOL(true);
+    assert.strictEqual(v.value, true);
+    assert.strictEqual(v._buffer.readInt16LE(0), -1);
   });
 
   it("registry types", function () {

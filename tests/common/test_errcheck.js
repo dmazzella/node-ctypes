@@ -258,9 +258,11 @@ describe("errcheck (Python ctypes compatible)", function () {
       };
 
       const buf = ctypes.create_string_buffer(100);
-      sprintf(buf, "Number: %d", ctypes.c_int32, 42);
+      const written = sprintf(buf, "Number: %d", 42);
 
       assert.strictEqual(callCount, 1);
+      assert.strictEqual(written, 10);
+      assert.strictEqual(buf.toString("latin1", 0, written), "Number: 42");
     });
   });
 
@@ -280,9 +282,11 @@ describe("errcheck (Python ctypes compatible)", function () {
       };
 
       const buf = ctypes.create_string_buffer(100);
-      _snprintf(buf, 100, "Number: %d", ctypes.c_int32, 42);
+      const written = _snprintf(buf, 100, "Number: %d", 42);
 
       assert.strictEqual(callCount, 1);
+      assert.strictEqual(written, 10);
+      assert.strictEqual(buf.toString("latin1", 0, written), "Number: 42");
     });
   });
 

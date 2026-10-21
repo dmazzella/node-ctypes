@@ -17,7 +17,7 @@
 //   obj.Release();
 //   CoUninitialize();
 
-import { OleDLL, WINFUNCTYPE, Structure, array, ptrToBuffer, POINTER_SIZE, HRESULT as _HRESULT } from "node-ctypes";
+import { OleDLL, WINFUNCTYPE, Structure, POINTER, array, byref, cast, c_void_p, HRESULT as _HRESULT } from "node-ctypes";
 import { wintypes } from "node-ctypes";
 const { DWORD, WORD, BYTE, LPVOID } = wintypes;
 // ═══════════════════════════════════════════════════════════════════════
@@ -66,7 +66,7 @@ export class GUID extends Structure {
    * @returns {string} e.g. "{00000000-0000-0000-C000-000000000046}"
    */
   toString() {
-    const d1 = (this.Data1 >>> 0).toString(16).padStart(8, "0");
+    const d1 = this.Data1.toString(16).padStart(8, "0"); // DWORD: BigInt
     const d2 = (this.Data2 & 0xffff).toString(16).padStart(4, "0");
     const d3 = (this.Data3 & 0xffff).toString(16).padStart(4, "0");
     let d4 = "";
@@ -277,17 +277,13 @@ export class COMPointer {
     if (this._vtable) return;
 
     const methods = this._interface._allMethods;
-    const slotSize = POINTER_SIZE; // 8 on x64, 4 on x86
 
-    // Read vtable pointer (first pointer-sized bytes of object)
-    const objBuf = ptrToBuffer(this._ptr, slotSize);
-    const vtableAddr = slotSize === 8 ? objBuf.readBigUInt64LE(0) : BigInt(objBuf.readUInt32LE(0));
-
-    // Read all vtable slots
-    const vtableBuf = ptrToBuffer(vtableAddr, methods.length * slotSize);
+    // The object starts with the vtable pointer, an array of function
+    // pointers (Python: cast(ptr, POINTER(POINTER(c_void_p)))[0][i]).
+    const vtable = cast(this._ptr, POINTER(POINTER(c_void_p)))[0];
 
     this._vtable = methods.map((m, i) => {
-      const addr = slotSize === 8 ? vtableBuf.readBigUInt64LE(i * slotSize) : BigInt(vtableBuf.readUInt32LE(i * slotSize));
+      const addr = vtable[i];
       const proto = _getProto(m.restype, m.argtypes);
       const fn = proto(addr);
       // Auto-throw on COM-failure HRESULT so callers don't need checkHR everywhere.
@@ -327,11 +323,10 @@ export class COMPointer {
    * @returns {COMPointer} New pointer for the requested interface
    */
   QueryInterface(targetInterface) {
-    const ppOut = Buffer.alloc(POINTER_SIZE);
+    const ppv = new c_void_p();
     // vtable errcheck throws on failure; no manual check needed.
-    this.call("QueryInterface", targetInterface._iid, ppOut);
-    const outPtr = POINTER_SIZE === 8 ? ppOut.readBigUInt64LE(0) : BigInt(ppOut.readUInt32LE(0));
-    return new COMPointer(outPtr, targetInterface);
+    this.call("QueryInterface", targetInterface._iid, byref(ppv));
+    return new COMPointer(ppv.value, targetInterface);
   }
 
   /** AddRef and return new refcount */
@@ -360,15 +355,13 @@ const _ole32 = new OleDLL("ole32.dll");
 
 // CoInitializeEx may legitimately return S_FALSE (1) meaning "already
 // initialized" — OleDLL only throws on NEGATIVE HRESULT, so S_FALSE passes.
-const _CoInitializeEx = _ole32.func("CoInitializeEx", HRESULT, [LPVOID, DWORD]);
-const _CoUninitialize = _ole32.func("CoUninitialize", LPVOID, []);
-const _CoCreateInstance = _ole32.func("CoCreateInstance", HRESULT, [
-  LPVOID, // rclsid
-  LPVOID, // pUnkOuter
-  DWORD, // dwClsContext
-  LPVOID, // riid
-  LPVOID, // ppv (output)
-]);
+_ole32.CoInitializeEx.argtypes = [LPVOID, DWORD];
+_ole32.CoInitializeEx.restype = HRESULT;
+_ole32.CoUninitialize.argtypes = [];
+_ole32.CoUninitialize.restype = null;
+// CoCreateInstance(rclsid, pUnkOuter, dwClsContext, riid, ppv)
+_ole32.CoCreateInstance.argtypes = [LPVOID, LPVOID, DWORD, LPVOID, LPVOID];
+_ole32.CoCreateInstance.restype = HRESULT;
 
 // COINIT flags
 export const COINIT_MULTITHREADED = 0x0;
@@ -387,12 +380,12 @@ export const CLSCTX_ALL = 0x17;
 export function CoInitializeEx(flags = COINIT_MULTITHREADED) {
   // OleDLL + HRESULT → throws automatically on failure. S_FALSE (1,
   // "already initialized") is positive and passes through.
-  return Number(_CoInitializeEx(null, flags));
+  return Number(_ole32.CoInitializeEx(null, flags));
 }
 
 /** Uninitialize COM runtime. */
 export function CoUninitialize() {
-  _CoUninitialize();
+  _ole32.CoUninitialize();
 }
 
 /**
@@ -405,11 +398,9 @@ export function CoUninitialize() {
  */
 export function CoCreateInstance(clsid, interfaceDef, clsctx = CLSCTX_INPROC_SERVER) {
   const clsidGuid = typeof clsid === "string" ? new GUID(clsid) : clsid;
-  const ppv = Buffer.alloc(POINTER_SIZE);
+  const ppv = new c_void_p();
 
   // OleDLL + HRESULT: throws on failure automatically.
-  _CoCreateInstance(clsidGuid, null, clsctx, interfaceDef._iid, ppv);
-
-  const ptr = POINTER_SIZE === 8 ? ppv.readBigUInt64LE(0) : BigInt(ppv.readUInt32LE(0));
-  return new COMPointer(ptr, interfaceDef);
+  _ole32.CoCreateInstance(clsidGuid, null, clsctx, interfaceDef._iid, byref(ppv));
+  return new COMPointer(ppv.value, interfaceDef);
 }

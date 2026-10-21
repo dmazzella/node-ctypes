@@ -28,9 +28,10 @@ enum class CType : int32_t {
   CTYPES_STRUCT = 20,  // struttura composta (come CPython Structure)
   CTYPES_UNION = 21,   // union composta (come CPython Union)
   CTYPES_ARRAY = 22,   // array a dimensione fissa (come CPython c_int * 5)
+  CTYPES_CHAR = 23,    // `char` come carattere (Python c_char → bytes di 1 byte)
 
   // Sentinel per validazione
-  CTYPES_COUNT = 23
+  CTYPES_COUNT = 24
 };
 
 // Converte int32 -> CType con validazione

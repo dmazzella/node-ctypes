@@ -28,7 +28,7 @@
 //
 //   Ldap.close();
 
-import { WinDLL, Structure, byref, sizeof, readValue, ptrToBuffer, addressof, create_unicode_buffer, wstring_at, c_void_p, c_void, c_uint32, c_int32, POINTER_SIZE } from "node-ctypes";
+import { WinDLL, Structure, POINTER, array, byref, cast, pointer, memmove, create_string_buffer, create_unicode_buffer, wstring_at, c_void_p, c_void, c_uint32, c_wchar_p } from "node-ctypes";
 import { wintypes } from "node-ctypes";
 const { BOOL, DWORD, INT, LONG, ULONG, LPCWSTR, LPVOID, PVOID, HANDLE } = wintypes;
 // LDAP-specific type aliases (all void* at the FFI level; semantic documentation
@@ -36,8 +36,6 @@ const { BOOL, DWORD, INT, LONG, ULONG, LPCWSTR, LPVOID, PVOID, HANDLE } = wintyp
 const LDAP = HANDLE; // LDAP* connection handle
 const LDAPMessage = LPVOID; // LDAPMessage*
 const BerElement = LPVOID; // BerElement*
-const PBERVAL = LPVOID; // berval* (LDAP_BERVAL*)
-const PLDAPMod = LPVOID; // LDAPModW*
 
 // ─── LDAP Constants ─────────────────────────────────────────────────
 
@@ -110,6 +108,16 @@ class LDAP_BERVAL extends Structure {
     ["bv_val", LPVOID],
   ];
 }
+const PBERVAL = POINTER(LDAP_BERVAL);
+
+// LDAPModW with string values (mod_vals.modv_strvals)
+class LDAPModW extends Structure {
+  static _fields_ = [
+    ["mod_op", ULONG],
+    ["mod_type", c_wchar_p],
+    ["mod_vals", POINTER(c_wchar_p)],
+  ];
+}
 
 class SEC_WINNT_AUTH_IDENTITY_W extends Structure {
   static _fields_ = [
@@ -175,7 +183,7 @@ function wldap32() {
 
     // Values
     _wldap32.ldap_get_values_lenW.argtypes = [LDAP, LDAPMessage, LPCWSTR];
-    _wldap32.ldap_get_values_lenW.restype = LPVOID; // berval**
+    _wldap32.ldap_get_values_lenW.restype = POINTER(PBERVAL); // berval**
 
     _wldap32.ldap_count_values_len.argtypes = [LPVOID];
     _wldap32.ldap_count_values_len.restype = ULONG;
@@ -267,42 +275,27 @@ function check(rc, fn) {
 
 // ─── Pointer / memory helpers ───────────────────────────────────────
 
-/** Build a NULL-terminated array of wide-string pointers for LDAP attr list. */
+/**
+ * NULL-terminated array of wide strings for the LDAP attr list
+ * (Python: (c_wchar_p * (n + 1))(*properties, None)).
+ */
 function buildAttrList(properties) {
   if (!properties || properties.length === 0) return null;
-
-  const bufs = properties.map((p) => create_unicode_buffer(p));
-  const ptrArray = Buffer.alloc((properties.length + 1) * POINTER_SIZE);
-
-  for (let i = 0; i < bufs.length; i++) {
-    const addr = addressof(bufs[i]);
-    if (POINTER_SIZE === 8) {
-      ptrArray.writeBigUInt64LE(addr, i * POINTER_SIZE);
-    } else {
-      ptrArray.writeUInt32LE(Number(addr), i * POINTER_SIZE);
-    }
-  }
-  // Keep references so GC doesn't collect the string buffers
-  ptrArray._refs = bufs;
-  return ptrArray;
+  return array(c_wchar_p, properties.length + 1)(...properties, null);
 }
 
 /** Read a null-terminated wide string from a native pointer address. */
 function readWideString(addr) {
-  if (!addr || addr === 0n) return null;
-  return wstring_at(addr);
+  return addr ? wstring_at(addr) : null;
 }
 
-/** Read a berval struct from the given address and return its data as a Buffer. */
-function readBervalData(bervalAddr) {
-  const bvSize = sizeof(LDAP_BERVAL);
-  const buf = ptrToBuffer(bervalAddr, bvSize);
-  const bv = new LDAP_BERVAL(buf);
-  const len = bv.bv_len;
-  const valAddr = bv.bv_val;
-
-  if (!valAddr || valAddr === 0n || len === 0) return Buffer.alloc(0);
-  return Buffer.from(ptrToBuffer(valAddr, len));
+/** Copy the data of a berval into a Buffer (Python: string_at(bv_val, bv_len)). */
+function readBervalData(bv) {
+  const len = Number(bv.bv_len);
+  if (!bv.bv_val || len === 0) return Buffer.alloc(0);
+  const data = create_string_buffer(len);
+  memmove(data, bv.bv_val, len);
+  return data.raw;
 }
 
 // ─── Value conversion helpers ───────────────────────────────────────
@@ -312,19 +305,11 @@ function sidToString(sidBuffer) {
   const api = advapi32();
   const k32 = kernel32();
 
-  // Copy SID bytes into a native buffer
-  const sidBuf = Buffer.alloc(sidBuffer.length);
-  sidBuffer.copy(sidBuf);
+  const strSid = new c_void_p();
+  if (!api.ConvertSidToStringSidW(sidBuffer, byref(strSid)) || !strSid.value) return null;
 
-  const strSidPtr = new c_void_p();
-  const ok = api.ConvertSidToStringSidW(sidBuf, byref(strSidPtr));
-  if (!ok) return null;
-
-  const addr = strSidPtr.value;
-  if (!addr || addr === 0n) return null;
-
-  const str = wstring_at(addr);
-  k32.LocalFree(addr);
+  const str = wstring_at(strSid.value);
+  k32.LocalFree(strSid.value);
   return str;
 }
 
@@ -334,15 +319,8 @@ function guidToString(guidBuffer) {
 
   const api = ole32();
   const outBuf = create_unicode_buffer(39); // 38 chars + NUL
-
-  const guidBuf = Buffer.alloc(16);
-  guidBuffer.copy(guidBuf, 0, 0, 16);
-
-  const len = api.StringFromGUID2(guidBuf, outBuf, 39);
-  if (len === 0) return null;
-
-  // wstring_at stops at the first NUL — no manual trim needed.
-  return wstring_at(outBuf);
+  if (api.StringFromGUID2(guidBuffer, outBuf, 39) === 0) return null;
+  return outBuf.value;
 }
 
 /** Parse LDAP Generalized Time → ISO 8601 string. */
@@ -659,7 +637,7 @@ function ldapConnect(host, options = {}) {
   // host: plain JS string passes through LPCWSTR argtype via the c_wchar_p
   // keepalive mechanism; Python-ctypes parity.
   const ld = ldap.ldap_initW(host || null, options.port || LDAP_PORT);
-  if (!ld || ld === 0n) {
+  if (!ld) {
     throw new Error(`ldap_initW failed: could not connect to ${host || "default"}`);
   }
 
@@ -706,15 +684,9 @@ function ldapConnect(host, options = {}) {
   }
 }
 
-/** Build a NULL-terminated array with a single control pointer (for server controls). */
+/** NULL-terminated array with a single control pointer (Python: (c_void_p * 2)(control, None)). */
 function buildControlsArray(controlPtr) {
-  const arr = Buffer.alloc(2 * POINTER_SIZE); // [controlPtr, NULL]
-  if (POINTER_SIZE === 8) {
-    arr.writeBigUInt64LE(controlPtr, 0);
-  } else {
-    arr.writeUInt32LE(Number(controlPtr), 0);
-  }
-  return arr;
+  return array(c_void_p, 2)(controlPtr, null);
 }
 
 // ─── Schema loader ──────────────────────────────────────────────────
@@ -815,12 +787,12 @@ export function findObjects(ld, searchResult, maxObjects = -1) {
 
   let entry = ldap.ldap_first_entry(ld, searchResult);
 
-  while (entry && entry !== 0n) {
+  while (entry) {
     const obj = {};
 
     // ── Distinguished name ──
     const dnPtr = ldap.ldap_get_dnW(ld, entry);
-    if (dnPtr && dnPtr !== 0n) {
+    if (dnPtr) {
       const dn = readWideString(dnPtr);
       if (dn) obj.distinguishedName = [dn];
       ldap.ldap_memfreeW(dnPtr);
@@ -830,34 +802,24 @@ export function findObjects(ld, searchResult, maxObjects = -1) {
     const berElem = new c_void_p();
     let attrPtr = ldap.ldap_first_attributeW(ld, entry, byref(berElem));
 
-    while (attrPtr && attrPtr !== 0n) {
+    while (attrPtr) {
       const attrName = readWideString(attrPtr);
       if (!attrName) {
         attrPtr = ldap.ldap_next_attributeW(ld, entry, berElem.value);
         continue;
       }
 
-      // Get attribute values (berval array) — attrName as plain JS string
-      const valuesPtr = ldap.ldap_get_values_lenW(ld, entry, attrName);
+      // berval** (NULL-terminated array of berval*), as Python: vals[i].contents
+      const vals = ldap.ldap_get_values_lenW(ld, entry, attrName);
 
-      if (valuesPtr && valuesPtr !== 0n) {
-        // ldap_count_values_len returns ULONG → BigInt; normalize to Number
-        // for arithmetic with POINTER_SIZE (which is a plain Number).
-        const count = Number(ldap.ldap_count_values_len(valuesPtr));
+      if (vals) {
+        const count = Number(ldap.ldap_count_values_len(vals));
         const values = [];
 
-        if (count > 0) {
-          // valuesPtr → array of berval* pointers
-          const ptrBuf = ptrToBuffer(valuesPtr, count * POINTER_SIZE);
-
-          for (let i = 0; i < count; i++) {
-            const bervalAddr = readValue(ptrBuf, c_void_p, i * POINTER_SIZE);
-            if (!bervalAddr || bervalAddr === 0n) break;
-
-            const rawData = readBervalData(bervalAddr);
-            if (rawData.length > 0) {
-              values.push(interpretValue(attrName, rawData));
-            }
+        for (let i = 0; i < count && vals[i]; i++) {
+          const rawData = readBervalData(vals[i].contents);
+          if (rawData.length > 0) {
+            values.push(interpretValue(attrName, rawData));
           }
         }
 
@@ -865,14 +827,14 @@ export function findObjects(ld, searchResult, maxObjects = -1) {
           obj[attrName] = values;
         }
 
-        ldap.ldap_value_free_len(valuesPtr);
+        ldap.ldap_value_free_len(vals);
       }
 
       attrPtr = ldap.ldap_next_attributeW(ld, entry, berElem.value);
     }
 
     // Free BerElement
-    if (berElem.value && berElem.value !== 0n) {
+    if (berElem.value) {
       ldap.ber_free(berElem.value, 0);
     }
 
@@ -895,87 +857,38 @@ export function findObjects(ld, searchResult, maxObjects = -1) {
 export function queryEnd(ld, searchResult) {
   const ldap = wldap32();
 
-  if (searchResult && searchResult !== 0n) {
+  if (searchResult) {
     ldap.ldap_msgfree(searchResult);
   }
-  if (ld && ld !== 0n) {
+  if (ld) {
     ldap.ldap_unbind(ld);
   }
 }
 
 // ─── LDAPModW builder ────────────────────────────────────────────────
-//
-// LDAPModW layout (x64): mod_op(4) + pad(4) + mod_type(8) + mod_vals(8) = 24
-// LDAPModW layout (x86): mod_op(4) + mod_type(4) + mod_vals(4) = 12
-
-const LDAPMOD_SIZE = POINTER_SIZE === 8 ? 24 : 12;
-const LDAPMOD_OFF_TYPE = POINTER_SIZE === 8 ? 8 : 4;
-const LDAPMOD_OFF_VALS = POINTER_SIZE === 8 ? 16 : 8;
-
-function writePtr(buf, offset, ptr) {
-  if (POINTER_SIZE === 8) {
-    buf.writeBigUInt64LE(typeof ptr === "bigint" ? ptr : BigInt(ptr), offset);
-  } else {
-    buf.writeUInt32LE(Number(ptr), offset);
-  }
-}
 
 /**
- * Build a single LDAPModW struct as a Buffer.
+ * Build a single LDAPModW. Values are a NULL-terminated array of wide strings
+ * (omit or empty for DELETE of the entire attribute). Strings and arrays are
+ * kept alive by the structure, as Python ctypes `_objects`.
  * @param {number} op     - MOD_OP.ADD | MOD_OP.DELETE | MOD_OP.REPLACE
  * @param {string} attr   - Attribute name
- * @param {string[]} [values] - Values (omit or empty for DELETE of entire attribute)
- * @returns {Buffer} The LDAPModW struct (with ._refs to prevent GC)
+ * @param {string[]} [values]
+ * @returns {LDAPModW}
  */
 function buildLdapMod(op, attr, values) {
-  const mod = Buffer.alloc(LDAPMOD_SIZE);
-
-  // mod_op
-  mod.writeUInt32LE(op, 0);
-
-  // mod_type — wide string pointer
-  const attrBuf = create_unicode_buffer(attr);
-  writePtr(mod, LDAPMOD_OFF_TYPE, addressof(attrBuf));
-
-  // mod_vals — NULL-terminated array of wide string pointers
-  let valsArray = null;
-  const refs = [attrBuf];
-
-  if (values && values.length > 0) {
-    valsArray = Buffer.alloc((values.length + 1) * POINTER_SIZE); // +1 for NULL terminator
-    for (let i = 0; i < values.length; i++) {
-      const valBuf = create_unicode_buffer(String(values[i]));
-      refs.push(valBuf);
-      writePtr(valsArray, i * POINTER_SIZE, addressof(valBuf));
-    }
-    // Last slot is already 0 (NULL) from Buffer.alloc
-    writePtr(mod, LDAPMOD_OFF_VALS, addressof(valsArray));
-    refs.push(valsArray);
-  } else {
-    // NULL pointer — delete entire attribute or no values
-    writePtr(mod, LDAPMOD_OFF_VALS, 0n);
-  }
-
-  mod._refs = refs;
-  return mod;
+  const vals = values && values.length > 0 ? array(c_wchar_p, values.length + 1)(...values.map(String), null) : null;
+  return new LDAPModW(op, attr, vals ? cast(vals, POINTER(c_wchar_p)) : null);
 }
 
 /**
- * Build the NULL-terminated array of LDAPModW* for ldap_modify_sW.
+ * NULL-terminated array of LDAPModW* for ldap_modify_sW
+ * (Python: (POINTER(LDAPModW) * (n + 1))(*map(pointer, mods), None)).
  * @param {Array<{op: number, attr: string, values?: string[]}>} modifications
- * @returns {Buffer}
  */
 function buildModsArray(modifications) {
-  const mods = modifications.map((m) => buildLdapMod(m.op, m.attr, m.values));
-  const arr = Buffer.alloc((mods.length + 1) * POINTER_SIZE);
-
-  for (let i = 0; i < mods.length; i++) {
-    writePtr(arr, i * POINTER_SIZE, addressof(mods[i]));
-  }
-  // Last slot is NULL from Buffer.alloc
-
-  arr._refs = mods;
-  return arr;
+  const mods = modifications.map((m) => pointer(buildLdapMod(m.op, m.attr, m.values)));
+  return array(POINTER(LDAPModW), mods.length + 1)(...mods, null);
 }
 
 // ─── Modify ──────────────────────────────────────────────────────────
@@ -1087,7 +1000,7 @@ export function query(filter, basePath, scope = SCOPE.SUBTREE, properties = [], 
       ldap.ldap_control_freeW(pageControlPtr.value);
 
       // ldap_parse_resultW returned ULONG as BigInt — compare via Number.
-      if (Number(rc) !== LDAP_SUCCESS || !returnedControlsPtr.value || returnedControlsPtr.value === 0n) {
+      if (Number(rc) !== LDAP_SUCCESS || !returnedControlsPtr.value) {
         break;
       }
 
@@ -1102,12 +1015,10 @@ export function query(filter, basePath, scope = SCOPE.SUBTREE, properties = [], 
       if (Number(rc) !== LDAP_SUCCESS) break;
 
       // 7. Check if cookie is empty (no more pages)
-      if (!newCookiePtr.value || newCookiePtr.value === 0n) break;
+      if (!newCookiePtr.value) break;
 
-      // Read cookie berval to check bv_len
-      const cookieBuf = ptrToBuffer(newCookiePtr.value, sizeof(LDAP_BERVAL));
-      const cookieBv = new LDAP_BERVAL(cookieBuf);
-      if (cookieBv.bv_len === 0) {
+      // Empty cookie (bv_len 0) → no more pages
+      if (!LDAP_BERVAL.from_address(newCookiePtr.value).bv_len) {
         // free the empty cookie berval
         ldap.ber_bvfree(newCookiePtr.value);
         break;

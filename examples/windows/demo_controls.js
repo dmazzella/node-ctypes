@@ -1,9 +1,9 @@
 // Windows Controls Showcase Demo
 // A compact demo that creates a window with a wide set of common Win32 controls
 
-import { WinDLL, Structure, POINTER, WINFUNCTYPE, sizeof, create_unicode_buffer, wstring_at, byref, c_void } from "node-ctypes";
+import { WinDLL, Structure, POINTER, WINFUNCTYPE, sizeof, create_unicode_buffer, byref, c_void } from "node-ctypes";
 import { wintypes } from "node-ctypes";
-const { ATOM, BOOL, DWORD, HWND, HBRUSH, HCURSOR, HFONT, HICON, HINSTANCE, HMENU, HMODULE, HRGN, INT, LONG, LPCWSTR, LPWSTR, LPVOID, LRESULT, UINT, UINT_PTR, WPARAM, LPARAM } = wintypes;
+const { ATOM, BOOL, DWORD, HWND, HBRUSH, HCURSOR, HFONT, HICON, HINSTANCE, HMENU, HMODULE, HRGN, INT, LPCWSTR, LPWSTR, LPVOID, LRESULT, UINT, UINT_PTR, WPARAM, LPARAM, POINT, RECT, MSG } = wintypes;
 // LRESULT CALLBACK WindowProc(HWND, UINT, WPARAM, LPARAM)
 const WNDPROC = WINFUNCTYPE(LRESULT, HWND, UINT, WPARAM, LPARAM);
 
@@ -129,6 +129,8 @@ const ICC_BAR_CLASSES = 0x00000004;
 const ICC_UPDOWN_CLASS = 0x00000040;
 const ICC_TRACKBAR_CLASSES = 0x00000001;
 
+// POINT, RECT and MSG come from wintypes (Python: ctypes.wintypes).
+
 class INITCOMMONCONTROLSEX extends Structure {
   static _fields_ = [
     ["dwSize", DWORD],
@@ -136,18 +138,11 @@ class INITCOMMONCONTROLSEX extends Structure {
   ];
 }
 
-class POINT extends Structure {
-  static _fields_ = [
-    ["x", LONG],
-    ["y", LONG],
-  ];
-}
-
 class WNDCLASSEX extends Structure {
   static _fields_ = [
     ["cbSize", UINT],
     ["style", UINT],
-    ["lpfnWndProc", LPVOID],
+    ["lpfnWndProc", WNDPROC],
     ["cbClsExtra", INT],
     ["cbWndExtra", INT],
     ["hInstance", HINSTANCE],
@@ -157,26 +152,6 @@ class WNDCLASSEX extends Structure {
     ["lpszMenuName", LPCWSTR],
     ["lpszClassName", LPCWSTR],
     ["hIconSm", HICON],
-  ];
-}
-
-class MSG extends Structure {
-  static _fields_ = [
-    ["hwnd", HWND],
-    ["message", UINT],
-    ["wParam", WPARAM],
-    ["lParam", LPARAM],
-    ["time", DWORD],
-    ["pt", POINT],
-  ];
-}
-
-class RECT extends Structure {
-  static _fields_ = [
-    ["left", LONG],
-    ["top", LONG],
-    ["right", LONG],
-    ["bottom", LONG],
   ];
 }
 
@@ -290,6 +265,11 @@ user32.EndDeferWindowPos.restype = BOOL;
 
 user32.SendMessageW.argtypes = [HWND, UINT, WPARAM, LPARAM];
 user32.SendMessageW.restype = LRESULT;
+
+// SendMessageW with a string / TOOLINFOW as lParam: same export, typed
+// prototypes (Python: WINFUNCTYPE(...)(("SendMessageW", user32))).
+const SendMessageStrW = WINFUNCTYPE(LRESULT, HWND, UINT, WPARAM, LPCWSTR)(["SendMessageW", user32]);
+const SendMessageToolW = WINFUNCTYPE(LRESULT, HWND, UINT, WPARAM, POINTER(TOOLINFOW))(["SendMessageW", user32]);
 
 user32.PostMessageW.argtypes = [HWND, UINT, WPARAM, LPARAM];
 user32.PostMessageW.restype = BOOL;
@@ -466,9 +446,8 @@ function WindowProc(hwnd, msg, wParam, lParam) {
     case WM_HSCROLL: {
       // Trackbar sends WM_HSCROLL when value changes
       if (isUpdatingSpin) return 0;
-      const lpNum = BigInt(lParam || 0);
-      const tkNum = BigInt(hwndTrack || 0);
-      if (lpNum !== 0n && tkNum !== 0n && lpNum === tkNum) {
+      // lParam is the trackbar handle (LPARAM and HWND are both BigInt)
+      if (lParam && lParam === hwndTrack) {
         const tpos = Number(user32.SendMessageW(hwndTrack, TBM_GETPOS, 0, 0) || 0);
         const pos = Math.max(0, Math.min(100, tpos));
         if (pos !== lastSpinPos) {
@@ -535,9 +514,8 @@ function WindowProc(hwnd, msg, wParam, lParam) {
           if (notification === EN_CHANGE) {
             const textControl = user32.GetDlgItem(hwndMain, ID_TEXT_INPUT);
             const buf = create_unicode_buffer(256);
-            const len = Number(user32.GetWindowTextW(textControl, buf, 256));
-            if (len > 0) {
-              console.log("Text input changed:", wstring_at(buf, len));
+            if (user32.GetWindowTextW(textControl, buf, 256) > 0) {
+              console.log("Text input changed:", buf.value);
             } else {
               console.log("Text input cleared");
             }
@@ -547,9 +525,8 @@ function WindowProc(hwnd, msg, wParam, lParam) {
           if (notification === EN_CHANGE && !isUpdatingSpin) {
             const hEdit = user32.GetDlgItem(hwndMain, ID_SPIN_EDIT);
             const buf = create_unicode_buffer(64);
-            const len = Number(user32.GetWindowTextW(hEdit, buf, 64));
-            const text = len > 0 ? wstring_at(buf, len) : "";
-            let num = parseInt(text, 10);
+            user32.GetWindowTextW(hEdit, buf, 64);
+            let num = parseInt(buf.value, 10);
             if (Number.isNaN(num)) num = 0;
             num = Math.max(0, Math.min(100, num));
             if (num !== lastSpinPos) {
@@ -575,9 +552,9 @@ function WindowProc(hwnd, msg, wParam, lParam) {
       if (progressPos > 100) progressPos = 0;
       user32.SendMessageW(hwndProgressBar, PBM_SETRANGE, 0, MAKELONG(0, 100));
       user32.SendMessageW(hwndProgressBar, PBM_SETPOS, progressPos, 0);
-      user32.InvalidateRect(hwndProgressBar, 0, 1);
+      user32.InvalidateRect(hwndProgressBar, null, 1);
       user32.UpdateWindow(hwndProgressBar);
-      user32.RedrawWindow(hwndProgressBar, 0, 0, 0x85);
+      user32.RedrawWindow(hwndProgressBar, null, null, 0x85);
       return 0;
     }
     case WM_NOTIFY: {
@@ -586,8 +563,7 @@ function WindowProc(hwnd, msg, wParam, lParam) {
         let pos = Number(user32.SendMessageW(hwndSpin, UDM_GETPOS32, 0, 0) || 0);
         if (!pos && hwndSpinEdit) {
           const buf = create_unicode_buffer(64);
-          const len = Number(user32.GetWindowTextW(hwndSpinEdit, buf, 64));
-          if (len > 0) pos = parseInt(wstring_at(buf, len), 10) || 0;
+          if (user32.GetWindowTextW(hwndSpinEdit, buf, 64) > 0) pos = parseInt(buf.value, 10) || 0;
         }
         pos = Math.max(0, Math.min(100, pos));
         if (pos !== lastSpinPos) {
@@ -643,7 +619,7 @@ async function createControlsDemo() {
   windowClass.lpszClassName = className;
   // Python idiom: WNDPROC(fn) wraps JS function as a stdcall callback
   windowProcCallback = WNDPROC(WindowProc);
-  windowClass.lpfnWndProc = windowProcCallback.pointer;
+  windowClass.lpfnWndProc = windowProcCallback;
 
   // Register and create window
   const atom = user32.RegisterClassExW(byref(windowClass));
@@ -686,16 +662,16 @@ async function createControlsDemo() {
   hwndComboGroupBox = user32.CreateWindowExW(0, "BUTTON", "Combo / List", WS_CHILD | WS_VISIBLE | BS_GROUPBOX, rightX, gbY, rightW, 180, hwnd, 3003, hInstance, null);
   hwndCombobox = user32.CreateWindowExW(0, "COMBOBOX", null, WS_CHILD | WS_VISIBLE | CBS_DROPDOWN | CBS_HASSTRINGS | WS_TABSTOP, rightX + 12, gbY + 28, rightW - 24, 300, hwnd, ID_COMBOBOX, hInstance, null);
   // populate combobox
-  user32.SendMessageW(hwndCombobox, CB_ADDSTRING, 0, create_unicode_buffer("First option"));
-  user32.SendMessageW(hwndCombobox, CB_ADDSTRING, 0, create_unicode_buffer("Second option"));
-  user32.SendMessageW(hwndCombobox, CB_ADDSTRING, 0, create_unicode_buffer("Third option"));
+  SendMessageStrW(hwndCombobox, CB_ADDSTRING, 0, "First option");
+  SendMessageStrW(hwndCombobox, CB_ADDSTRING, 0, "Second option");
+  SendMessageStrW(hwndCombobox, CB_ADDSTRING, 0, "Third option");
   user32.SendMessageW(hwndCombobox, CB_SETCURSEL, 0, 0);
 
   hwndListGroupBox = user32.CreateWindowExW(0, "BUTTON", "List Box", WS_CHILD | WS_VISIBLE | BS_GROUPBOX, rightX, gbY + 200, rightW, 220, hwnd, 3004, hInstance, null);
   hwndListBox = user32.CreateWindowExW(0, "LISTBOX", null, WS_CHILD | WS_VISIBLE | LBS_NOTIFY | LBS_SORT | LBS_HASSTRINGS | WS_TABSTOP, rightX + 12, gbY + 224, rightW - 24, 180, hwnd, ID_LISTBOX, hInstance, null);
-  user32.SendMessageW(hwndListBox, LB_ADDSTRING, 0, create_unicode_buffer("Item A"));
-  user32.SendMessageW(hwndListBox, LB_ADDSTRING, 0, create_unicode_buffer("Item B"));
-  user32.SendMessageW(hwndListBox, LB_ADDSTRING, 0, create_unicode_buffer("Item C"));
+  SendMessageStrW(hwndListBox, LB_ADDSTRING, 0, "Item A");
+  SendMessageStrW(hwndListBox, LB_ADDSTRING, 0, "Item B");
+  SendMessageStrW(hwndListBox, LB_ADDSTRING, 0, "Item C");
 
   // Progress bar
   hwndProgressGroupBox = user32.CreateWindowExW(0, "BUTTON", "Progress", WS_CHILD | WS_VISIBLE | BS_GROUPBOX, rightX, gbY + 440, rightW, 80, hwnd, 3005, hInstance, null);
@@ -749,7 +725,7 @@ async function createControlsDemo() {
     // buffer and is kept alive on `ti` for the duration of this call (Python
     // ctypes `_objects` parity). Windows copies the text during TTM_ADDTOOLW.
     ti.lpszText = text;
-    user32.SendMessageW(hwndTooltip, TTM_ADDTOOLW, 0, byref(ti));
+    SendMessageToolW(hwndTooltip, TTM_ADDTOOLW, 0, ti);
   }
 
   // Font

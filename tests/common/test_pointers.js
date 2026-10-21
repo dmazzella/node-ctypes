@@ -67,7 +67,7 @@ test("POINTER .contents property", async (t) => {
     buf.writeInt32LE(42, 0);
 
     const p = IntPtr.fromBuffer(buf);
-    assert.strictEqual(p.contents, 42, ".contents should read the value");
+    assert.strictEqual(p.contents.value, 42, ".contents should read the value");
   });
 
   await t.test(".contents writes value at pointer address", () => {
@@ -78,7 +78,7 @@ test("POINTER .contents property", async (t) => {
     const p = IntPtr.fromBuffer(buf);
     p.contents = 100;
     assert.strictEqual(buf.readInt32LE(0), 100, "Buffer should be modified");
-    assert.strictEqual(p.contents, 100, ".contents should read new value");
+    assert.strictEqual(p.contents.value, 100, ".contents should read new value");
   });
 
   await t.test(".contents throws on NULL pointer", () => {
@@ -140,8 +140,8 @@ test("POINTER deref() method", async (t) => {
     buf.writeInt32LE(42, 0);
 
     const p = IntPtr.fromBuffer(buf);
-    assert.strictEqual(p.deref(), 42);
-    assert.strictEqual(p.deref(), p.contents);
+    assert.strictEqual(p.deref().value, 42);
+    assert.strictEqual(p.deref().value, p.contents.value);
   });
 });
 
@@ -157,10 +157,10 @@ test("POINTER set() method", async (t) => {
     assert.ok(p.isNull);
 
     p.set(buf1);
-    assert.strictEqual(p.contents, 42);
+    assert.strictEqual(p.contents.value, 42);
 
     p.set(buf2);
-    assert.strictEqual(p.contents, 100);
+    assert.strictEqual(p.contents.value, 100);
   });
 
   await t.test("set() can set to address", () => {
@@ -177,7 +177,7 @@ test("pointer() function", async (t) => {
     const p = pointer(x);
     assert.ok(p, "pointer should return an instance");
     assert.ok(!p.isNull, "Pointer should not be NULL");
-    assert.strictEqual(p.contents, 42, ".contents should read the value");
+    assert.strictEqual(p.contents.value, 42, ".contents should read the value");
   });
 
   await t.test("pointer() modifying contents modifies original", () => {
@@ -234,9 +234,10 @@ test("POINTER with different types", async (t) => {
     buf[2] = 67; // 'C'
 
     const p = CharPtr.fromBuffer(buf);
-    assert.strictEqual(p[0], 65);
-    assert.strictEqual(p[1], 66);
-    assert.strictEqual(p[2], 67);
+    // Python: p[0] == b'A'
+    assert.strictEqual(p[0], "A");
+    assert.strictEqual(p[1], "B");
+    assert.strictEqual(p[2], "C");
   });
 });
 
@@ -307,7 +308,7 @@ test("cast(Buffer, POINTER(T)) semantic", async (t) => {
     const buf = Buffer.alloc(4);
     buf.writeInt32LE(0x12345678, 0);
     const p = cast(buf, POINTER(c_int32));
-    assert.strictEqual(p.contents, 0x12345678);
+    assert.strictEqual(p.contents.value, 0x12345678);
   });
 
   await t.test("cast(BigInt, POINTER(T)) from address value", () => {

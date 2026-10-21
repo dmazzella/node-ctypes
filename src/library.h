@@ -52,7 +52,9 @@ class Library : public Napi::ObjectWrap<Library> {
 };
 
 // Helper per caricare una libreria (wrapper di livello inferiore)
-void* LoadSharedLibrary(const std::string& path, std::string& error);
+// `mode` è il flag di visibilità dei simboli per dlopen (RTLD_LOCAL / RTLD_GLOBAL,
+// Python ctypes `CDLL(name, mode)`); ignorato su Windows come in Python.
+void* LoadSharedLibrary(const std::string& path, std::string& error, int mode);
 void* GetSymbolAddress(void* handle, const std::string& name, std::string& error);
 bool CloseSharedLibrary(void* handle);
 

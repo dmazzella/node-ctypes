@@ -47,7 +47,7 @@
  *
  * const x = new c_int32(42);
  * const p = pointer(x);
- * console.log(p.contents);  // 42
+ * console.log(p.contents.value);  // 42
  * ```
  *
  * @packageDocumentation
@@ -91,6 +91,8 @@ export interface CTypeValues {
   readonly STRUCT: number;
   readonly UNION: number;
   readonly ARRAY: number;
+  /** `char` as a 1-byte character (Python `c_char`). */
+  readonly CHAR: number;
   readonly COUNT: number;
 }
 
@@ -106,6 +108,22 @@ export const CType: CTypeValues;
  */
 export type AnyType = SimpleCDataConstructor | number | StructDef | UnionDef;
 
+/**
+ * A {@link Structure} or {@link Union} subclass used as a type
+ * (e.g. `class Point extends Structure { ... }` passed as `Point`).
+ * @category Types
+ */
+export type StructureClass = abstract new (...args: any[]) => Structure<any>;
+
+/**
+ * Any type accepted in a function signature (`argtypes` / `restype`):
+ * {@link AnyType}, a Structure/Union class (struct by value), a
+ * {@link POINTER} type, an {@link array} type or a {@link CFUNCTYPE} prototype
+ * (function pointer).
+ * @category Types
+ */
+export type FFIType = AnyType | StructureClass | PointerTypeDef | ArrayTypeDef | FuncPtrFactory;
+
 // =============================================================================
 // Library & Function
 // =============================================================================
@@ -116,7 +134,7 @@ export type AnyType = SimpleCDataConstructor | number | StructDef | UnionDef;
  * @example
  * ```javascript
  * import { Version } from 'node-ctypes';
- * console.log(Version.toString());  // "1.5.0"
+ * console.log(Version.toString());  // "2.0.0"
  * ```
  *
  * @category Library Loading
@@ -138,8 +156,14 @@ export class Version {
 export class Library {
   constructor(path: string | null);
   /** Typed overload: narrows args/return when argTypes is a literal tuple. */
-  func<TRet extends AnyType, const TArgs extends readonly AnyType[]>(name: string, returnType: TRet, argTypes: TArgs, options?: FunctionOptions): TypedFFIFunction<TArgs, TRet>;
-  func(name: string, returnType: AnyType, argTypes?: AnyType[], options?: FunctionOptions): FFIFunction;
+  func<TRet extends FFIType | null, const TArgs extends readonly FFIType[]>(name: string, returnType: TRet, argTypes: TArgs, options?: FunctionOptions): NativeFFIFunction<TArgs, TRet>;
+  func(name: string, returnType: FFIType | null, argTypes?: FFIType[], options?: FunctionOptions): NativeFFIFunction;
+
+  /**
+   * Create a native callback. Note the argument order (return type, argument
+   * types, function), which differs from {@link callback} and {@link CDLL.callback}.
+   */
+  callback(returnType: AnyType, argTypes: AnyType[], fn: Function): Callback;
 
   /**
    * Get the address of a symbol in the library.
@@ -182,7 +206,7 @@ export interface FunctionOptions {
 export type ErrcheckCallback = (result: any, func: CallableFunction, args: any[]) => any;
 
 /**
- * A callable FFI function returned by {@link Library.func} or {@link CDLL.func}.
+ * A callable FFI function returned by {@link CDLL.func}.
  * @category Library Loading
  */
 export interface FFIFunction {
@@ -199,14 +223,45 @@ export interface FFIFunction {
   readonly address: bigint;
 
   /**
-   * Error checking callback, called after every invocation.
+   * Error checking callback, called after every invocation (`null` when not set).
    * @see {@link ErrcheckCallback}
    */
   errcheck: ErrcheckCallback | null;
 }
 
 /**
- * Strongly-typed FFI function returned by `CDLL.func`/`Library.func` when the
+ * Low-level native function handle returned by {@link Library.func}.
+ *
+ * Unlike the functions returned by {@link CDLL.func}, it is not directly
+ * callable: invoke it with {@link NativeFFIFunction.call | call()}.
+ *
+ * @category Library Loading
+ */
+export interface NativeFFIFunction<TArgs extends readonly FFIType[] = FFIType[], TRet extends FFIType | null = FFIType> {
+  /** Call the native function synchronously. */
+  call(...args: FFIArgs<TArgs>): FFIReturn<TRet>;
+
+  /** Call the native function asynchronously on a worker thread. */
+  callAsync(...args: FFIArgs<TArgs>): Promise<FFIReturn<TRet>>;
+
+  /** Set (or clear with `null`) the error checking callback. */
+  setErrcheck(callback: ErrcheckCallback | null): void;
+
+  /** `GetLastError()` (Windows) or `errno` captured after the last call, with `use_last_error`. */
+  getCapturedLastError(): number;
+
+  /** `errno` captured after the last call, with `use_errno`. */
+  getCapturedErrno(): number;
+
+  /** The function name, or its hex address for raw function pointers. */
+  readonly name: string;
+
+  /** The function address as BigInt. */
+  readonly address: bigint;
+}
+
+/**
+ * Strongly-typed FFI function returned by `CDLL.func` when the
  * argument types and return type are given as a literal tuple and constant respectively.
  *
  * Args and return are narrowed from the supplied CType constructors.
@@ -214,9 +269,9 @@ export interface FFIFunction {
  *
  * @category Library Loading
  */
-export interface TypedFFIFunction<TArgs extends readonly AnyType[], TRet extends AnyType> {
-  (...args: ArgsFromCTypes<TArgs>): JsFromCType<TRet>;
-  callAsync(...args: ArgsFromCTypes<TArgs>): Promise<JsFromCType<TRet>>;
+export interface TypedFFIFunction<TArgs extends readonly FFIType[], TRet extends FFIType | null> {
+  (...args: FFIArgs<TArgs>): FFIReturn<TRet>;
+  callAsync(...args: FFIArgs<TArgs>): Promise<FFIReturn<TRet>>;
   readonly funcName: string;
   readonly address: bigint;
   errcheck: ErrcheckCallback | null;
@@ -257,6 +312,14 @@ export interface TypedFFIFunction<TArgs extends readonly AnyType[], TRet extends
  */
 export interface LibraryOptions {
   /**
+   * `dlopen` flags combined with `RTLD_LAZY` (e.g. {@link RTLD_GLOBAL}).
+   * Ignored on Windows. Default: {@link DEFAULT_MODE}.
+   *
+   * Python ctypes parity: the `mode` argument of `CDLL(name, mode)`.
+   */
+  mode?: number;
+
+  /**
    * Maximum size of the internal function cache. Default: 1000.
    */
   cacheSize?: number;
@@ -282,9 +345,10 @@ export interface LibraryOptions {
 export class CDLL {
   /**
    * @param path - Path to the shared library, or `null` to load the current process
-   * @param options - Optional library settings (cache size, use_last_error, use_errno)
+   * @param options - `dlopen` mode (as Python's `CDLL(name, mode)`) or library
+   *   settings (mode, cache size, use_last_error, use_errno)
    */
-  constructor(path: string | null, options?: LibraryOptions);
+  constructor(path: string | null, options?: number | LibraryOptions);
 
   /**
    * Get a callable function from the library.
@@ -296,8 +360,8 @@ export class CDLL {
    * @returns A callable function
    */
   /** Typed overload: narrows args/return when argTypes is a literal tuple. */
-  func<TRet extends AnyType, const TArgs extends readonly AnyType[]>(name: string, returnType: TRet, argTypes: TArgs, options?: FunctionOptions): TypedFFIFunction<TArgs, TRet>;
-  func(name: string, returnType: AnyType, argTypes?: AnyType[], options?: FunctionOptions): CallableFunction & { callAsync(...args: any[]): Promise<any>; errcheck: ErrcheckCallback | null };
+  func<TRet extends FFIType | null, const TArgs extends readonly FFIType[]>(name: string, returnType: TRet, argTypes: TArgs, options?: FunctionOptions): TypedFFIFunction<TArgs, TRet>;
+  func(name: string, returnType: FFIType | null, argTypes?: FFIType[], options?: FunctionOptions): FFIFunction;
 
   /**
    * Get the address of a symbol.
@@ -308,6 +372,15 @@ export class CDLL {
 
   /** Close the library and clear the function cache. */
   close(): void;
+
+  /** Close the library at the end of a `using` block. */
+  [Symbol.dispose](): void;
+
+  /**
+   * Create a native callback bound to this library's context.
+   * Call `release()` when it is no longer needed.
+   */
+  callback(fn: Function, returnType: AnyType | null, argTypes?: AnyType[]): Callback;
 
   /**
    * Read the snapshotted `GetLastError()` (Windows) or `errno` from the most
@@ -362,12 +435,12 @@ export interface FunctionWrapper {
   callAsync(...args: any[]): Promise<any>;
 
   /** Argument types. Set before calling. */
-  argtypes: AnyType[];
+  argtypes: FFIType[];
 
-  /** Return type. Set before calling. */
-  restype: AnyType;
+  /** Return type (`null` for `void`, as Python's `None`). Set before calling. */
+  restype: FFIType | null;
 
-  /** Optional error checking callback. */
+  /** Optional error checking callback (`null` when not set). */
   errcheck: ErrcheckCallback | null;
 }
 
@@ -389,7 +462,7 @@ export interface FunctionWrapper {
  * @category Library Loading
  */
 export class WinDLL extends CDLL {
-  constructor(path: string, options?: LibraryOptions);
+  constructor(path: string, options?: number | LibraryOptions);
 }
 
 /**
@@ -439,7 +512,35 @@ export const HRESULT: SimpleCDataConstructor<"int32"> & { _isHResult: true };
  *
  * @category Library Loading
  */
-export const cdll: { [libName: string]: CDLL };
+export const cdll: LibraryNamespace<CDLL>;
+
+/**
+ * Lazy library namespace: attribute access loads (and caches) the library,
+ * `LoadLibrary(name)` always creates a new instance.
+ *
+ * Python equivalent: `ctypes.LibraryLoader` instances (`cdll`, `windll`, ...)
+ *
+ * @category Library Loading
+ */
+export type LibraryNamespace<T extends CDLL> = { [libName: string]: T } & {
+  /** Load a library (new instance each time). Python: `cdll.LoadLibrary(name)`. */
+  LoadLibrary(name: string | null, options?: number | LibraryOptions): T;
+};
+
+/**
+ * Create a lazy library namespace for a DLL class.
+ *
+ * Python equivalent: `ctypes.LibraryLoader(dlltype)`
+ *
+ * @example
+ * ```javascript
+ * const mydll = new LibraryLoader(CDLL);
+ * const libm = mydll.LoadLibrary(find_library("m"));
+ * ```
+ *
+ * @category Library Loading
+ */
+export const LibraryLoader: new <T extends CDLL>(dlltype: new (path: string, ...args: any[]) => T) => LibraryNamespace<T>;
 
 /**
  * Lazy-loading namespace for WinDLL libraries (Windows only).
@@ -449,7 +550,7 @@ export const cdll: { [libName: string]: CDLL };
  *
  * @category Library Loading
  */
-export const windll: { [libName: string]: WinDLL } | undefined;
+export const windll: LibraryNamespace<WinDLL> | undefined;
 
 /**
  * Lazy-loading namespace for OleDLL libraries (Windows only).
@@ -459,7 +560,7 @@ export const windll: { [libName: string]: WinDLL } | undefined;
  *
  * @category Library Loading
  */
-export const oledll: { [libName: string]: OleDLL } | undefined;
+export const oledll: LibraryNamespace<OleDLL> | undefined;
 
 // =============================================================================
 // Callbacks
@@ -477,8 +578,14 @@ export interface CallbackWrapper {
   /** The callback function pointer, passable to native functions. */
   readonly pointer: bigint;
 
+  /** Same as `pointer`: lets the callback be passed directly as an argument. */
+  readonly _as_parameter_: bigint;
+
   /** Release the callback and free native resources. Must be called when done. */
   release(): void;
+
+  /** Release the callback at the end of a `using` block. */
+  [Symbol.dispose](): void;
 }
 
 /**
@@ -487,8 +594,21 @@ export interface CallbackWrapper {
  */
 export class Callback {
   constructor(fn: Function, returnType: AnyType, argTypes?: AnyType[]);
+  /** The callback function pointer, passable to native functions. */
   readonly pointer: bigint;
+  /** Same as {@link Callback.pointer}. */
+  getPointer(): bigint;
+  /** Same as `pointer`: lets the callback be passed directly as an argument. */
+  readonly _as_parameter_: bigint;
+  /** Release the callback and free native resources. Must be called when done. */
   release(): void;
+  /**
+   * Handler called with the error message when the JS function throws.
+   * Without a handler the error is reported with `process.emitWarning`.
+   */
+  setErrorHandler(handler: (message: string) => void): void;
+  /** Message of the last exception thrown by the JS function, or `null`. */
+  getLastError(): string | null;
 }
 
 /**
@@ -531,7 +651,7 @@ export interface FieldDef {
  *
  * @category Structures
  */
-export interface StructDef {
+export interface StructDef<F extends Record<string, FieldSpec> = Record<string, any>> {
   /** Total size of the struct in bytes. */
   readonly size: number;
   /** Alignment requirement in bytes. */
@@ -544,19 +664,27 @@ export interface StructDef {
   readonly _isStructType: true;
 
   /** Allocate a buffer and optionally initialize field values. */
-  create(values?: Record<string, any>): Buffer;
+  create(values?: FieldsInput<F>): Buffer;
   /** Read a field value from a buffer. */
-  get(buf: Buffer, fieldName: string): any;
+  get<K extends keyof F & string>(buf: Buffer, fieldName: K): FieldValue<F, K>;
   /** Write a field value to a buffer. */
-  set(buf: Buffer, fieldName: string, value: any): void;
+  set<K extends keyof F & string>(buf: Buffer, fieldName: K, value: FieldArg<F, K>): void;
   /** Convert all fields to a plain JavaScript object. */
-  toObject(buf: Buffer): Record<string, any>;
+  toObject(buf: Buffer): FieldsObject<F>;
   /** Get a view of a nested struct's buffer region. */
   getNestedBuffer(buf: Buffer, fieldName: string): Buffer;
 }
 
+/**
+ * One entry of `_fields_`: `[name, type]` or `[name, type, bits]` for bit fields.
+ * The loose element form lets `static _fields_ = [["x", c_int]]` compile
+ * without `as const`, as written in Python.
+ * @category Structures
+ */
+export type FieldEntry = readonly [string, FieldSpec] | readonly [string, FieldSpec, number] | ReadonlyArray<string | number | FieldSpec>;
+
 /** @category Structures */
-export type FieldSpec = AnyType | StructDef | ArrayTypeDef | BitFieldDef | AnonymousField | PointerTypeDef;
+export type FieldSpec = AnyType | StructDef | ArrayTypeDef | BitFieldDef | AnonymousField | PointerTypeDef | StructureClass | FuncPtrFactory;
 
 /**
  * Map a field/arg type (CType constructor, struct, array, bitfield, pointer) to its
@@ -565,7 +693,21 @@ export type FieldSpec = AnyType | StructDef | ArrayTypeDef | BitFieldDef | Anony
  * @category Types
  */
 export type JsFromCType<T> =
-  T extends SimpleCDataConstructor<infer Tag> ? JsFromTag<Tag> : T extends BitFieldDef ? number : T extends PointerTypeDef ? PointerInstance : T extends StructDef ? any : T extends UnionDef ? any : T extends ArrayTypeDef ? any : any;
+  T extends SimpleCDataConstructor<infer Tag>
+    ? JsFromTag<Tag>
+    : T extends BitFieldDef
+      ? number
+      : T extends PointerTypeDef<infer B>
+        ? PointerInstance<B> | null
+        : T extends FuncPtrFactory
+          ? ((...args: any[]) => any) | null
+          : T extends StructureClass
+            ? InstanceType<T>
+            : T extends StructDef<infer F>
+              ? FieldsObject<F>
+              : T extends ArrayTypeDef<infer E>
+                ? CharArrayValue<E, ArrayInstance<E>>
+                : any;
 
 /**
  * Map a field/arg type to accepted JavaScript **input** types (for writes / function args).
@@ -579,22 +721,100 @@ export type JsArgFromCType<T> =
     : T extends BitFieldDef
       ? number
       : T extends PointerTypeDef
-        ? PointerInstance | Buffer | bigint | null
-        : T extends StructDef
-          ? Buffer | { _buffer: Buffer } | Record<string, any>
-          : T extends UnionDef
+        ? PointerInstance | Buffer | bigint | null | { readonly _buffer: Buffer }
+        : T extends FuncPtrFactory
+          ? { readonly _as_parameter_: unknown } | bigint | null
+          : T extends StructDef
             ? Buffer | { _buffer: Buffer } | Record<string, any>
-            : T extends ArrayTypeDef
-              ? Buffer | ReadonlyArray<any>
-              : any;
+            : T extends UnionDef
+              ? Buffer | { _buffer: Buffer } | Record<string, any>
+              : T extends ArrayTypeDef<infer E>
+                ? Buffer | ReadonlyArray<any> | CharArrayValue<E, never>
+                : any;
 
 type FieldsToInstance<F extends Record<string, FieldSpec>> = {
   [K in keyof F]: JsFromCType<F[K]>;
 };
 
+/** `true` when `T` is `any`. */
+type IsAny<T> = 0 extends 1 & T ? true : false;
+
+/** Field values of a definition; `any` when the fields are not statically known. */
+type FieldsObject<F extends Record<string, FieldSpec>> = string extends keyof F ? Record<string, any> : FieldsToInstance<F>;
+
+/** Initial values accepted by `create()`. */
+type FieldsInput<F extends Record<string, FieldSpec>> = string extends keyof F ? Record<string, any> : { [K in keyof F]?: JsArgFromCType<F[K]> };
+
+/** Value read from field `K`. */
+type FieldValue<F extends Record<string, FieldSpec>, K extends keyof F> = string extends keyof F ? any : JsFromCType<F[K]>;
+
+/** Value accepted when writing field `K`. */
+type FieldArg<F extends Record<string, FieldSpec>, K extends keyof F> = string extends keyof F ? any : JsArgFromCType<F[K]>;
+
+/**
+ * Element read from an array of `E`. Narrowed only to `number`: arrays are
+ * also Buffers, whose numeric index is `number`, so other element types stay `any`.
+ */
+type ArrayElement<E> = IsAny<E> extends true ? any : JsFromCType<E> extends number ? number : any;
+
+/** Element accepted when writing an array of `E`. */
+type ArrayElementArg<E> = IsAny<E> extends true ? any : E extends StructureClass ? Buffer | Record<string, any> : JsArgFromCType<E>;
+
+/** Value read through a pointer to `T` (`p[i]`): the value for simple types, a live instance for structures. */
+type PointerValue<T> = IsAny<T> extends true ? any : T extends StructureClass ? InstanceType<T> : JsFromCType<T>;
+
+/** `p.contents`: a live instance on the pointed memory (Python parity). */
+type PointerContents<T> = IsAny<T> extends true ? any : T extends SimpleCDataConstructor<infer Tag> ? SimpleCDataInstance<JsFromTag<Tag>> : T extends StructureClass ? InstanceType<T> : JsFromCType<T>;
+
+/** `string` for `c_char`/`c_wchar` arrays (read as text, as Python), otherwise `Else`. */
+type CharArrayValue<E, Else> = IsAny<E> extends true ? Else : [E] extends [SimpleCDataConstructor<"char">] ? string : [E] extends [SimpleCDataConstructor<"wchar">] ? string : Else;
+
+/**
+ * Array instance: a Buffer with index access; `c_char` arrays also expose
+ * `.value`/`.raw` and `c_wchar` arrays `.value`, as in Python.
+ * @category Structures
+ */
+export type ArrayInstance<E = any> = Buffer & ArrayProxy<ArrayElement<E>> & (IsAny<E> extends true ? {} : [E] extends [SimpleCDataConstructor<"char">] ? CharBufferValue : [E] extends [SimpleCDataConstructor<"wchar">] ? WideBufferValue : {});
+
+/**
+ * Text accessors of `c_char` buffers (arrays, {@link create_string_buffer}).
+ * @category Memory
+ */
+export interface CharBufferValue {
+  /** Bytes up to the first NUL, decoded as UTF-8. Python: `.value`. */
+  get value(): string;
+  set value(v: string | Uint8Array);
+  /** All bytes. Python: `.raw`. */
+  get raw(): Buffer;
+  set raw(v: string | Uint8Array);
+}
+
+/**
+ * Text accessor of `c_wchar` buffers (arrays, {@link create_unicode_buffer}).
+ * @category Memory
+ */
+export interface WideBufferValue {
+  /** Characters up to the first NUL. Python: `.value`. */
+  get value(): string;
+  set value(v: string);
+}
+
 type ArgsFromCTypes<TArgs extends readonly any[]> = {
   [K in keyof TArgs]: JsArgFromCType<TArgs[K]>;
 };
+
+/** JS argument accepted for a function parameter of type `T`. */
+type JsArgFromFFIType<T> = T extends StructureClass ? Buffer | { _buffer: Buffer } | Record<string, any> : JsArgFromCType<T>;
+
+/** Function arguments for `argtypes` `TArgs` (`any[]` when not a literal tuple). */
+type FFIArgs<TArgs extends readonly any[]> = FFIType[] extends TArgs ? any[] : { [K in keyof TArgs]: JsArgFromFFIType<TArgs[K]> };
+
+/**
+ * JS value returned by a function with `restype` `T`. As in Python, a
+ * `POINTER(T)` restype returns a {@link PointerInstance} and a {@link CFUNCTYPE}
+ * restype a callable function (`null` for NULL).
+ */
+type FFIReturn<T> = FFIType extends T ? any : T extends null ? undefined : T extends StructureClass ? Record<string, any> : JsFromCType<T>;
 
 /**
  * A union type definition created by the {@link union} function.
@@ -604,7 +824,7 @@ type ArgsFromCTypes<TArgs extends readonly any[]> = {
  *
  * @category Structures
  */
-export interface UnionDef extends StructDef {
+export interface UnionDef<F extends Record<string, FieldSpec> = Record<string, any>> extends StructDef<F> {
   readonly isUnion: true;
 }
 
@@ -637,18 +857,25 @@ export interface BitFieldDef {
 /**
  * An array type definition created by the {@link array} function.
  *
+ * Python equivalent: `c_int * 5`. Call it (with or without `new`) with the
+ * initial elements, as Python's `(c_int * 5)(1, 2, 3)`.
+ *
  * @example
  * ```javascript
  * const IntArray5 = array(c_int32, 5);
- * const arr = IntArray5.create([1, 2, 3, 4, 5]);
+ * const arr = IntArray5(1, 2, 3, 4, 5);  // or IntArray5.create([1, 2, 3, 4, 5])
  * console.log(arr[0]);  // 1
  * ```
  *
  * @category Structures
  */
-export interface ArrayTypeDef {
+export interface ArrayTypeDef<E = any> {
+  /** Create an array initialized with the given elements (Python: `(c_int * 3)(1, 2, 3)`). */
+  (...values: ArrayElementArg<E>[]): ArrayInstance<E>;
+  /** Create an array initialized with the given elements. */
+  new (...values: ArrayElementArg<E>[]): ArrayInstance<E>;
   /** Element type. */
-  readonly elementType: AnyType;
+  readonly elementType: AnyType | StructureClass | ArrayTypeDef | PointerTypeDef | FuncPtrFactory;
   /** Number of elements. */
   readonly length: number;
   /** @internal */
@@ -660,19 +887,22 @@ export interface ArrayTypeDef {
   getLength(): number;
   /** Element alignment. */
   getAlignment(): number;
-  /** Create a new array, optionally initialized with values. Returns a Proxy with index access. */
-  create(values?: any[]): Buffer & ArrayProxy;
+  /**
+   * Create a new array, optionally initialized with values (a string writes
+   * its char codes). Returns a Proxy with index access.
+   */
+  create(values?: ReadonlyArray<ArrayElementArg<E>> | string): ArrayInstance<E>;
   /** Wrap an existing buffer as an array with index access. */
-  wrap(buffer: Buffer): Buffer & ArrayProxy;
+  wrap(buffer: Buffer): ArrayInstance<E>;
 }
 
 /**
  * Proxy interface for array index access and iteration.
  * @category Structures
  */
-export interface ArrayProxy {
-  [index: number]: any;
-  [Symbol.iterator](): Iterator<any>;
+export interface ArrayProxy<T = any> {
+  [index: number]: T;
+  [Symbol.iterator](): Iterator<T>;
 }
 
 /**
@@ -707,7 +937,7 @@ export interface AnonymousField {
  * ```javascript
  * const IntPtr = POINTER(c_int32);
  * const p = IntPtr.fromBuffer(buf);
- * console.log(p.contents);  // dereferenced value (like *p in C)
+ * console.log(p.contents.value);  // dereferenced value (like *p in C)
  * console.log(p[0]);        // same as p.contents
  * console.log(p[5]);        // pointer arithmetic (like p[5] in C)
  * ```
@@ -723,9 +953,9 @@ export interface AnonymousField {
  *
  * @category Pointers
  */
-export interface PointerInstance {
+export interface PointerInstance<T = any> {
   /** The pointer type definition this instance was created from. */
-  readonly _pointerType: PointerTypeDef;
+  readonly _pointerType: PointerTypeDef<T>;
   /** The base type this pointer points to. */
   readonly _baseType: AnyType | StructDef;
   /** Size of the pointed-to type in bytes. */
@@ -735,24 +965,27 @@ export interface PointerInstance {
   readonly address: bigint;
 
   /**
-   * Dereference the pointer — read/write the value at the pointed location.
-   *
-   * Python equivalent: `p.contents`
+   * The pointed object, as Python's `p.contents`: a live instance on the
+   * pointed memory (`p.contents.value` for simple types, `p.contents.x` for
+   * structures). Assigning an instance re-points the pointer to it; assigning
+   * a plain value writes it.
    *
    * @example
    * ```javascript
    * const p = POINTER(c_int32).fromBuffer(buf);
-   * console.log(p.contents);  // read value
-   * p.contents = 42;          // write value
+   * console.log(p.contents.value);  // read value
+   * p.contents = 42;                // write value
+   * p.contents = new c_int32(7);    // re-point
    * ```
    */
-  contents: any;
+  get contents(): PointerContents<T>;
+  set contents(value: PointerContents<T> | JsArgFromCType<T>);
 
   /** The underlying buffer (if created from a buffer), or null. */
   readonly _buffer: Buffer | null;
 
-  /** Alias for contents getter. */
-  deref(): any;
+  /** Alias for the contents getter. */
+  deref(): PointerContents<T>;
 
   /**
    * Set pointer to a new target (buffer or address).
@@ -782,19 +1015,19 @@ export interface PointerInstance {
    * arr[2] = 99; // write to third element
    * ```
    */
-  [index: number]: any;
+  [index: number]: PointerValue<T>;
 
   /**
    * Return a new pointer offset by `n` elements (not bytes), matching C's
    * `ptr + n`. The pointer keeps the same element type.
    */
-  add(n: number): PointerInstance;
+  add(n: number): PointerInstance<T>;
 
   /**
    * Read `end - start` consecutive elements into a JS array, analogous to
    * Python's `p[start:end]` on a POINTER(T).
    */
-  slice(start: number, end: number): any[];
+  slice(start: number, end: number): PointerValue<T>[];
 }
 
 /**
@@ -806,7 +1039,7 @@ export interface PointerInstance {
  *
  * // From existing buffer
  * const p = IntPtr.fromBuffer(buf);
- * console.log(p.contents);  // 42
+ * console.log(p.contents.value);  // 42
  * console.log(p[0]);        // 42
  *
  * // From raw address (e.g., from a struct's c_void_p field)
@@ -816,9 +1049,9 @@ export interface PointerInstance {
  *
  * @category Pointers
  */
-export interface PointerTypeDef {
+export interface PointerTypeDef<T = any> {
   /** The type this pointer points to. */
-  readonly _pointerTo: AnyType | StructDef;
+  readonly _pointerTo: AnyType | StructDef | StructureClass | PointerTypeDef;
   /** Size of the pointed-to type. */
   readonly _baseSize: number;
   /** Pointer size (always 8 on 64-bit). */
@@ -833,7 +1066,7 @@ export interface PointerTypeDef {
    * console.log(p.isNull);  // true
    * ```
    */
-  create(value?: Buffer | bigint | number): PointerInstance;
+  create(value?: Buffer | bigint | number): PointerInstance<T>;
 
   /**
    * Create a pointer from an existing buffer (points to that buffer's memory).
@@ -845,10 +1078,10 @@ export interface PointerTypeDef {
    * const buf = Buffer.alloc(4);
    * buf.writeInt32LE(42, 0);
    * const p = POINTER(c_int32).fromBuffer(buf);
-   * console.log(p.contents);  // 42
+   * console.log(p.contents.value);  // 42
    * ```
    */
-  fromBuffer(targetBuf: Buffer): PointerInstance;
+  fromBuffer(targetBuf: Buffer): PointerInstance<T>;
 
   /**
    * Create a pointer from a raw memory address.
@@ -867,7 +1100,7 @@ export interface PointerTypeDef {
    * }
    * ```
    */
-  fromAddress(address: bigint | number): PointerInstance;
+  fromAddress(address: bigint | number): PointerInstance<T>;
 
   /**
    * @deprecated Use pointer instance `.contents` instead.
@@ -959,17 +1192,20 @@ export class Structure<F extends Record<string, FieldSpec> = Record<string, any>
    * ];
    * ```
    */
-  static _fields_?: Array<[string, FieldSpec]> | Record<string, FieldSpec>;
+  static _fields_?: ReadonlyArray<FieldEntry> | Record<string, FieldSpec>;
 
-  /** If `true`, disables padding between fields. */
-  static _pack_?: boolean;
+  /**
+   * Maximum field alignment in bytes, as Python's `_pack_` (`1` = no padding).
+   * `true` is accepted as `1`.
+   */
+  static _pack_?: number | boolean;
 
   /**
    * List of field names whose members are promoted to the parent struct.
    *
    * Python equivalent: `_anonymous_`
    */
-  static _anonymous_?: string[];
+  static _anonymous_?: ReadonlyArray<string>;
 
   /** Create instance with optional initial values. */
   static create<ThisT extends Structure<F>>(this: new (...args: any[]) => ThisT, values?: Partial<FieldsToInstance<F>> | Buffer): ThisT;
@@ -1153,7 +1389,7 @@ export function load(path: string | null): Library;
  *
  * @category Callbacks
  */
-export function callback(fn: Function, returnType: AnyType, argTypes?: AnyType[]): CallbackWrapper;
+export function callback(fn: Function, returnType: AnyType | null, argTypes?: AnyType[]): CallbackWrapper;
 
 /**
  * Create a thread-safe callback that can be invoked from any thread.
@@ -1166,7 +1402,7 @@ export function callback(fn: Function, returnType: AnyType, argTypes?: AnyType[]
  *
  * @category Callbacks
  */
-export function threadSafeCallback(fn: Function, returnType: AnyType, argTypes?: AnyType[]): CallbackWrapper;
+export function threadSafeCallback(fn: Function, returnType: AnyType | null, argTypes?: AnyType[]): CallbackWrapper;
 
 /**
  * Create a function pointer type with cdecl calling convention.
@@ -1218,12 +1454,21 @@ export interface ParamFlag {
  */
 export interface FuncPtrFactory {
   /** Call with a raw address to produce a caller. */
-  (address: bigint): (...args: any[]) => any;
-  /** Call with a JS function to produce a C-callable callback closure. */
-  (fn: (...args: any[]) => any): { pointer: bigint; release(): void };
+  (address: bigint | number): (...args: any[]) => any;
+  /**
+   * Call with a JS function to produce a C-callable callback closure, usable
+   * as argument or struct field of this type. Keep it referenced while C may
+   * call it; `release()` frees it.
+   */
+  (fn: (...args: any[]) => any): { readonly pointer: bigint; readonly _as_parameter_: bigint; release(): void };
+  /**
+   * Bind an exported function of a library, optionally with paramflags.
+   * Python: `prototype((name, dll))` / `prototype((name, dll), paramflags)`.
+   */
+  (spec: readonly [name: string, library: CDLL], paramflags?: ReadonlyArray<ParamFlag | readonly [flag: number, name?: string, defaultValue?: any]>): (...args: any[]) => any;
 
-  restype: AnyType;
-  argtypes: AnyType[];
+  restype: FFIType | null;
+  argtypes: FFIType[];
   readonly _isFuncPtr: true;
 
   /**
@@ -1244,10 +1489,10 @@ export interface FuncPtrFactory {
    * const [ok2, pid2, tid2] = fn({ hWnd: hwnd }); // named
    * ```
    */
-  bind(library: CDLL, symbolName: string, paramflags: ParamFlag[]): (...args: any[]) => any;
+  bind(library: CDLL, symbolName: string, paramflags: ReadonlyArray<ParamFlag | readonly [flag: number, name?: string, defaultValue?: any]>): (...args: any[]) => any;
 }
 
-export function CFUNCTYPE(restype: AnyType, ...argtypes: AnyType[]): FuncPtrFactory;
+export function CFUNCTYPE(restype: FFIType | null, ...argtypes: FFIType[]): FuncPtrFactory;
 
 /**
  * Create a function pointer type with stdcall calling convention (Windows).
@@ -1262,7 +1507,7 @@ export function CFUNCTYPE(restype: AnyType, ...argtypes: AnyType[]): FuncPtrFact
  *
  * @category Callbacks
  */
-export function WINFUNCTYPE(restype: AnyType, ...argtypes: AnyType[]): FuncPtrFactory;
+export function WINFUNCTYPE(restype: FFIType | null, ...argtypes: FFIType[]): FuncPtrFactory;
 
 /**
  * Create a C string buffer (null-terminated).
@@ -1282,7 +1527,13 @@ export function WINFUNCTYPE(restype: AnyType, ...argtypes: AnyType[]): FuncPtrFa
  *
  * @category Memory
  */
-export function create_string_buffer(init: number | string | Buffer): Buffer;
+export function create_string_buffer(init: number | string | Uint8Array, size?: number): Buffer & CharBufferValue;
+
+/**
+ * Alias of {@link create_string_buffer}. Python equivalent: `ctypes.c_buffer`.
+ * @category Memory
+ */
+export function c_buffer(init: number | string | Uint8Array, size?: number): Buffer & CharBufferValue;
 
 /**
  * Create a wide string buffer (wchar_t, null-terminated).
@@ -1295,7 +1546,7 @@ export function create_string_buffer(init: number | string | Buffer): Buffer;
  *
  * @category Memory
  */
-export function create_unicode_buffer(init: number | string): Buffer;
+export function create_unicode_buffer(init: number | string, size?: number): Buffer & WideBufferValue;
 
 /**
  * Read a C string from an address or buffer.
@@ -1337,7 +1588,10 @@ export function addressof(ptr: Buffer | bigint | number): bigint;
  *
  * @category Memory
  */
-export function memmove(dst: Buffer, src: Buffer | bigint, count: number): void;
+/** Memory argument of {@link memmove} / {@link memset}: a buffer, a ctypes instance, a pointer or an address. */
+export type MemoryTarget = Uint8Array | { readonly _buffer: Buffer } | PointerInstance | bigint | number;
+
+export function memmove(dst: MemoryTarget, src: MemoryTarget, count: number): void;
 
 /**
  * Fill memory with a byte value.
@@ -1346,7 +1600,7 @@ export function memmove(dst: Buffer, src: Buffer | bigint, count: number): void;
  *
  * @category Memory
  */
-export function memset(dst: Buffer, value: number, count: number): void;
+export function memset(dst: MemoryTarget, value: number, count: number): void;
 
 /**
  * Read a typed value from a buffer at a given offset.
@@ -1364,8 +1618,8 @@ export function memset(dst: Buffer, value: number, count: number): void;
  *
  * @category Memory
  */
-export function readValue<T extends AnyType>(ptr: Buffer | bigint | number, type: T, offset?: number): JsFromCType<T>;
-export function readValue(ptr: Buffer | bigint | number, type: AnyType, offset?: number): any;
+export function readValue<T extends AnyType>(ptr: Buffer | bigint | number | PointerInstance, type: T, offset?: number): JsFromCType<T>;
+export function readValue(ptr: Buffer | bigint | number | PointerInstance, type: AnyType | StructureClass, offset?: number): any;
 
 /**
  * Write a typed value to a buffer at a given offset.
@@ -1377,8 +1631,8 @@ export function readValue(ptr: Buffer | bigint | number, type: AnyType, offset?:
  *
  * @category Memory
  */
-export function writeValue<T extends AnyType>(ptr: Buffer | bigint | number, type: T, value: JsArgFromCType<T>, offset?: number): number | void;
-export function writeValue(ptr: Buffer | bigint | number, type: AnyType, value: any, offset?: number): number | void;
+export function writeValue<T extends AnyType>(ptr: Buffer | bigint | number | PointerInstance, type: T, value: JsArgFromCType<T>, offset?: number): number | void;
+export function writeValue(ptr: Buffer | bigint | number | PointerInstance, type: AnyType | StructureClass, value: any, offset?: number): number | void;
 
 /**
  * Get the size of a type in bytes.
@@ -1394,7 +1648,7 @@ export function writeValue(ptr: Buffer | bigint | number, type: AnyType, value: 
  *
  * @category Memory
  */
-export function sizeof(type: AnyType | StructDef | ArrayTypeDef): number;
+export function sizeof(type: AnyType | StructDef | ArrayTypeDef | StructureClass | PointerTypeDef | FuncPtrFactory | SimpleCDataInstance | Structure<any> | Uint8Array): number;
 
 /**
  * Get the alignment requirement of a type in bytes.
@@ -1410,7 +1664,7 @@ export function sizeof(type: AnyType | StructDef | ArrayTypeDef): number;
  *
  * @category Memory
  */
-export function alignment(type: AnyType | StructDef | ArrayTypeDef | typeof Structure | typeof Union): number;
+export function alignment(type: AnyType | StructDef | ArrayTypeDef | StructureClass | PointerTypeDef | FuncPtrFactory | SimpleCDataInstance | Structure<any>): number;
 
 /**
  * Create a Buffer view of native memory at a given address.
@@ -1441,7 +1695,7 @@ export function ptrToBuffer(address: bigint | number, size: number): Buffer;
  *
  * @category Structures
  */
-export function struct(fields: Record<string, FieldSpec>, options?: StructOptions): StructDef;
+export function struct<F extends Record<string, FieldSpec>>(fields: F, options?: StructOptions): StructDef<F>;
 
 /**
  * Define a union using the functional API.
@@ -1452,7 +1706,7 @@ export function struct(fields: Record<string, FieldSpec>, options?: StructOption
  *
  * @category Structures
  */
-export function union(fields: Record<string, FieldSpec>): UnionDef;
+export function union<F extends Record<string, FieldSpec>>(fields: F): UnionDef<F>;
 
 /**
  * Factory that returns a Structure subclass with typed fields.
@@ -1490,7 +1744,13 @@ export function defineUnion<F extends Record<string, FieldSpec>>(fields: F): new
  *
  * @category Structures
  */
-export function array(elementType: AnyType | typeof Structure | typeof Union, count: number): ArrayTypeDef;
+export function array<E extends AnyType | StructureClass | ArrayTypeDef | PointerTypeDef | FuncPtrFactory>(elementType: E, count: number): ArrayTypeDef<E>;
+
+/**
+ * Alias of {@link array}. Python equivalent: `ctypes.ARRAY(type, length)`.
+ * @category Structures
+ */
+export function ARRAY<E extends AnyType | StructureClass | ArrayTypeDef | PointerTypeDef | FuncPtrFactory>(elementType: E, count: number): ArrayTypeDef<E>;
 
 /**
  * Define a bit field for use in struct `_fields_`.
@@ -1551,8 +1811,8 @@ export function byref(obj: Buffer | SimpleCDataInstance | { _buffer: Buffer }): 
  *
  * @category Pointers
  */
-export function cast(ptr: Buffer | bigint | number | SimpleCDataInstance, targetType: PointerTypeDef): PointerInstance;
-export function cast(ptr: Buffer | bigint | number | SimpleCDataInstance, targetType: AnyType | StructDef): any;
+export function cast<T>(ptr: Buffer | bigint | number | SimpleCDataInstance, targetType: PointerTypeDef<T>): PointerInstance<T>;
+export function cast(ptr: Buffer | bigint | number | SimpleCDataInstance, targetType: AnyType | StructDef | StructureClass): any;
 
 /**
  * Create a pointer type for a given base type.
@@ -1569,7 +1829,7 @@ export function cast(ptr: Buffer | bigint | number | SimpleCDataInstance, target
  * buf.writeInt32LE(42, 0);
  *
  * const p = IntPtr.fromBuffer(buf);
- * console.log(p.contents);  // 42
+ * console.log(p.contents.value);  // 42
  * console.log(p[0]);        // 42
  * ```
  *
@@ -1588,7 +1848,9 @@ export function cast(ptr: Buffer | bigint | number | SimpleCDataInstance, target
  *
  * @category Pointers
  */
-export function POINTER(baseType: AnyType | StructDef): PointerTypeDef;
+export function POINTER<T extends AnyType | StructureClass | PointerTypeDef>(baseType: T): PointerTypeDef<T>;
+/** Lazy base type, for self-referential structs: `POINTER(() => Node)`. */
+export function POINTER<T extends AnyType | StructureClass>(baseType: () => T): PointerTypeDef<T>;
 
 /**
  * Create a pointer to an existing ctypes object.
@@ -1602,14 +1864,16 @@ export function POINTER(baseType: AnyType | StructDef): PointerTypeDef;
  * ```javascript
  * const x = new c_int32(42);
  * const p = pointer(x);
- * console.log(p.contents);  // 42
+ * console.log(p.contents.value);  // 42
  * p.contents = 100;
  * console.log(x.value);     // 100
  * ```
  *
  * @category Pointers
  */
-export function pointer(obj: SimpleCDataInstance | { _buffer: Buffer }): PointerInstance;
+export function pointer<T extends Structure<any>>(obj: T): PointerInstance<new (...args: any[]) => T>;
+export function pointer<V>(obj: SimpleCDataInstance<V>): PointerInstance;
+export function pointer(obj: Buffer | { _buffer: Buffer }): PointerInstance;
 
 /**
  * Get the C library errno value.
@@ -1643,7 +1907,35 @@ export function GetLastError(): number;
  *
  * @category Error Handling
  */
-export function SetLastError(code: number): void;
+export function SetLastError(code: number): number;
+
+/**
+ * Python name of {@link GetLastError}: the error code captured by the last
+ * call. Python equivalent: `ctypes.get_last_error()`
+ *
+ * @category Error Handling
+ */
+export function get_last_error(): number;
+
+/**
+ * Python name of {@link SetLastError}; returns the previous value.
+ * Python equivalent: `ctypes.set_last_error(value)`
+ *
+ * @category Error Handling
+ */
+export function set_last_error(code: number): number;
+
+/**
+ * Raised when a function argument cannot be converted to its `argtypes` type,
+ * with the message `"argument N: TypeError: ..."`. Subclass of `TypeError`.
+ *
+ * Python equivalent: `ctypes.ArgumentError`
+ *
+ * @category Error Handling
+ */
+export class ArgumentError extends TypeError {
+  constructor(message?: string);
+}
 
 /**
  * Format a Windows error code into a human-readable message (Windows only).
@@ -1712,19 +2004,21 @@ export interface SimpleCDataConstructor<Tag extends string = string> {
  */
 export type JsFromTag<Tag extends string> = Tag extends "void"
   ? void
-  : Tag extends "int8" | "uint8" | "int16" | "uint16" | "int32" | "uint32" | "float" | "double" | "char" | "wchar"
-    ? number
-    : Tag extends "int64" | "uint64" | "size_t" | "ssize_t" | "long" | "ulong"
-      ? bigint
-      : Tag extends "bool"
-        ? boolean
-        : Tag extends "string"
-          ? string | null
-          : Tag extends "wstring"
+  : Tag extends "char" | "wchar"
+    ? string
+    : Tag extends "int8" | "uint8" | "int16" | "uint16" | "int32" | "uint32" | "float" | "double"
+      ? number
+      : Tag extends "int64" | "uint64" | "size_t" | "ssize_t" | "long" | "ulong"
+        ? bigint
+        : Tag extends "bool"
+          ? boolean
+          : Tag extends "string"
             ? string | null
-            : Tag extends "pointer"
-              ? bigint | Buffer | null
-              : any;
+            : Tag extends "wstring"
+              ? string | null
+              : Tag extends "pointer"
+                ? bigint | Buffer | null
+                : any;
 
 /**
  * Maps a SimpleCData tag to accepted JavaScript **input** types (what writes/args accept).
@@ -1734,19 +2028,23 @@ export type JsFromTag<Tag extends string> = Tag extends "void"
  */
 export type JsArgFromTag<Tag extends string> = Tag extends "void"
   ? never
-  : Tag extends "int8" | "uint8" | "int16" | "uint16" | "int32" | "uint32" | "float" | "double" | "char" | "wchar"
-    ? number
-    : Tag extends "int64" | "uint64" | "size_t" | "ssize_t" | "long" | "ulong"
-      ? bigint | number
-      : Tag extends "bool"
-        ? boolean | number
-        : Tag extends "string"
-          ? string | Buffer | null
-          : Tag extends "wstring"
-            ? string | Buffer | null
-            : Tag extends "pointer"
-              ? bigint | Buffer | number | null
-              : any;
+  : Tag extends "char"
+    ? string | number | Uint8Array
+    : Tag extends "wchar"
+      ? string | number
+      : Tag extends "int8" | "uint8" | "int16" | "uint16" | "int32" | "uint32" | "float" | "double"
+        ? number
+        : Tag extends "int64" | "uint64" | "size_t" | "ssize_t" | "long" | "ulong"
+          ? bigint | number
+          : Tag extends "bool"
+            ? boolean | number
+            : Tag extends "string"
+              ? string | Buffer | null
+              : Tag extends "wstring"
+                ? string | Buffer | null
+                : Tag extends "pointer"
+                  ? bigint | Buffer | number | null | { readonly _as_parameter_: unknown }
+                  : any;
 
 /**
  * Instance of a simple C data type.
@@ -1807,11 +2105,20 @@ export const c_uint64: SimpleCDataConstructor<"uint64">;
 export const c_float: SimpleCDataConstructor<"float">;
 /** 64-bit double. Python: `ctypes.c_double` @category Types */
 export const c_double: SimpleCDataConstructor<"double">;
-/** 8-bit character. Python: `ctypes.c_char` @category Types */
+/**
+ * 1-byte character. Python: `ctypes.c_char`. Values are 1-character strings
+ * (Python `bytes` of length 1); writes also accept a byte number (0..255) or a
+ * 1-byte Buffer.
+ * @category Types
+ */
 export const c_char: SimpleCDataConstructor<"char">;
 /** Pointer to null-terminated string. Python: `ctypes.c_char_p` @category Types */
 export const c_char_p: SimpleCDataConstructor<"string">;
-/** Wide character. Python: `ctypes.c_wchar` @category Types */
+/**
+ * Wide character (`wchar_t`). Python: `ctypes.c_wchar`. Values are 1-character
+ * strings; writes also accept a code point number.
+ * @category Types
+ */
 export const c_wchar: SimpleCDataConstructor<"wchar">;
 /** Pointer to null-terminated wide string. Python: `ctypes.c_wchar_p` @category Types */
 export const c_wchar_p: SimpleCDataConstructor<"wstring">;
@@ -1840,6 +2147,213 @@ export const c_ushort: SimpleCDataConstructor<"uint16">;
 export const c_longlong: SimpleCDataConstructor<"int64">;
 /** Alias for `c_uint64`. Python: `ctypes.c_ulonglong` @category Types */
 export const c_ulonglong: SimpleCDataConstructor<"uint64">;
+/** Alias of {@link c_void_p}. Python: `ctypes.c_voidp` @category Types */
+export const c_voidp: SimpleCDataConstructor<"pointer">;
+/** `time_t` (64-bit). Python: `ctypes.c_time_t` @category Types */
+export const c_time_t: SimpleCDataConstructor<"int64">;
+
+/**
+ * A Structure class with known fields (used by {@link wintypes}).
+ * @category Types
+ */
+export type StructureOf<T> = (new (...args: any[]) => Structure<any> & T) & Omit<typeof Structure, "prototype">;
+
+type W_BYTE = SimpleCDataConstructor<"uint8">;
+type W_WORD = SimpleCDataConstructor<"uint16">;
+type W_DWORD = SimpleCDataConstructor<"ulong">;
+type W_LONG = SimpleCDataConstructor<"long">;
+type W_SHORT = SimpleCDataConstructor<"int16">;
+type W_HANDLE = SimpleCDataConstructor<"pointer">;
+type W_RECT = StructureOf<{ left: bigint; top: bigint; right: bigint; bottom: bigint }>;
+type W_POINT = StructureOf<{ x: bigint; y: bigint }>;
+type W_SIZE = StructureOf<{ cx: bigint; cy: bigint }>;
+type W_SMALL_RECT = StructureOf<{ Left: number; Top: number; Right: number; Bottom: number }>;
+type W_FILETIME = StructureOf<{ dwLowDateTime: bigint; dwHighDateTime: bigint }>;
+type W_MSG = StructureOf<{ hWnd: bigint | null; message: number; wParam: bigint; lParam: bigint; time: bigint; pt: InstanceType<W_POINT> }>;
+type W_FIND_DATA = StructureOf<{
+  dwFileAttributes: bigint;
+  ftCreationTime: InstanceType<W_FILETIME>;
+  ftLastAccessTime: InstanceType<W_FILETIME>;
+  ftLastWriteTime: InstanceType<W_FILETIME>;
+  nFileSizeHigh: bigint;
+  nFileSizeLow: bigint;
+  dwReserved0: bigint;
+  dwReserved1: bigint;
+  cFileName: string;
+  cAlternateFileName: string;
+}>;
+
+/**
+ * Windows API types, as Python's `ctypes.wintypes`: the same names, aliases,
+ * structures (`RECT`, `POINT`, `SIZE`, `MSG`, `FILETIME`, ...) and pointer
+ * types (`LPDWORD = POINTER(DWORD)`, ...), plus common extras (`QWORD`,
+ * `LRESULT`, `UINT_PTR`, `LSTATUS`, ...). Available on every platform.
+ *
+ * @example
+ * ```javascript
+ * import { wintypes } from "node-ctypes";
+ * const { HWND, UINT, RECT, LPRECT } = wintypes;
+ * ```
+ *
+ * @category Types
+ */
+export const wintypes: {
+  readonly BYTE: W_BYTE;
+  readonly WORD: W_WORD;
+  readonly DWORD: W_DWORD;
+  readonly CHAR: SimpleCDataConstructor<"char">;
+  readonly WCHAR: SimpleCDataConstructor<"wchar">;
+  readonly UINT: SimpleCDataConstructor<"uint32">;
+  readonly INT: SimpleCDataConstructor<"int32">;
+  readonly DOUBLE: SimpleCDataConstructor<"double">;
+  readonly FLOAT: SimpleCDataConstructor<"float">;
+  readonly BOOLEAN: W_BYTE;
+  readonly BOOL: W_LONG;
+  readonly VARIANT_BOOL: SimpleCDataConstructor<"bool">;
+  readonly ULONG: W_DWORD;
+  readonly LONG: W_LONG;
+  readonly USHORT: W_WORD;
+  readonly SHORT: W_SHORT;
+  readonly _LARGE_INTEGER: SimpleCDataConstructor<"int64">;
+  readonly LARGE_INTEGER: SimpleCDataConstructor<"int64">;
+  readonly _ULARGE_INTEGER: SimpleCDataConstructor<"uint64">;
+  readonly ULARGE_INTEGER: SimpleCDataConstructor<"uint64">;
+  readonly LPCOLESTR: SimpleCDataConstructor<"wstring">;
+  readonly LPOLESTR: SimpleCDataConstructor<"wstring">;
+  readonly OLESTR: SimpleCDataConstructor<"wstring">;
+  readonly LPCWSTR: SimpleCDataConstructor<"wstring">;
+  readonly LPWSTR: SimpleCDataConstructor<"wstring">;
+  readonly LPCSTR: SimpleCDataConstructor<"string">;
+  readonly LPSTR: SimpleCDataConstructor<"string">;
+  readonly LPCVOID: W_HANDLE;
+  readonly LPVOID: W_HANDLE;
+  readonly WPARAM: SimpleCDataConstructor<"size_t">;
+  readonly LPARAM: SimpleCDataConstructor<"ssize_t">;
+  readonly ATOM: W_WORD;
+  readonly LANGID: W_WORD;
+  readonly COLORREF: W_DWORD;
+  readonly LGRPID: W_DWORD;
+  readonly LCTYPE: W_DWORD;
+  readonly LCID: W_DWORD;
+  readonly HANDLE: W_HANDLE;
+  readonly HACCEL: W_HANDLE;
+  readonly HBITMAP: W_HANDLE;
+  readonly HBRUSH: W_HANDLE;
+  readonly HCOLORSPACE: W_HANDLE;
+  readonly HDC: W_HANDLE;
+  readonly HDESK: W_HANDLE;
+  readonly HDWP: W_HANDLE;
+  readonly HENHMETAFILE: W_HANDLE;
+  readonly HFONT: W_HANDLE;
+  readonly HGDIOBJ: W_HANDLE;
+  readonly HGLOBAL: W_HANDLE;
+  readonly HHOOK: W_HANDLE;
+  readonly HICON: W_HANDLE;
+  readonly HINSTANCE: W_HANDLE;
+  readonly HKEY: W_HANDLE;
+  readonly HKL: W_HANDLE;
+  readonly HLOCAL: W_HANDLE;
+  readonly HMENU: W_HANDLE;
+  readonly HMETAFILE: W_HANDLE;
+  readonly HMODULE: W_HANDLE;
+  readonly HMONITOR: W_HANDLE;
+  readonly HPALETTE: W_HANDLE;
+  readonly HPEN: W_HANDLE;
+  readonly HRGN: W_HANDLE;
+  readonly HRSRC: W_HANDLE;
+  readonly HSTR: W_HANDLE;
+  readonly HTASK: W_HANDLE;
+  readonly HWINSTA: W_HANDLE;
+  readonly HWND: W_HANDLE;
+  readonly SC_HANDLE: W_HANDLE;
+  readonly SERVICE_STATUS_HANDLE: W_HANDLE;
+  readonly RECT: W_RECT;
+  readonly tagRECT: W_RECT;
+  readonly _RECTL: W_RECT;
+  readonly RECTL: W_RECT;
+  readonly _SMALL_RECT: W_SMALL_RECT;
+  readonly SMALL_RECT: W_SMALL_RECT;
+  readonly _COORD: StructureOf<{ X: number; Y: number }>;
+  readonly POINT: W_POINT;
+  readonly tagPOINT: W_POINT;
+  readonly _POINTL: W_POINT;
+  readonly POINTL: W_POINT;
+  readonly SIZE: W_SIZE;
+  readonly tagSIZE: W_SIZE;
+  readonly SIZEL: W_SIZE;
+  /** `red + (green << 8) + (blue << 16)` */
+  RGB(red: number, green: number, blue: number): number;
+  readonly FILETIME: W_FILETIME;
+  readonly _FILETIME: W_FILETIME;
+  readonly MSG: W_MSG;
+  readonly tagMSG: W_MSG;
+  readonly MAX_PATH: 260;
+  readonly WIN32_FIND_DATAA: W_FIND_DATA;
+  readonly WIN32_FIND_DATAW: W_FIND_DATA;
+  readonly LPBOOL: PointerTypeDef<W_LONG>;
+  readonly PBOOL: PointerTypeDef<W_LONG>;
+  readonly PBOOLEAN: PointerTypeDef<W_BYTE>;
+  readonly LPBYTE: PointerTypeDef<W_BYTE>;
+  readonly PBYTE: PointerTypeDef<W_BYTE>;
+  readonly PCHAR: PointerTypeDef<SimpleCDataConstructor<"char">>;
+  readonly LPCOLORREF: PointerTypeDef<W_DWORD>;
+  readonly LPDWORD: PointerTypeDef<W_DWORD>;
+  readonly PDWORD: PointerTypeDef<W_DWORD>;
+  readonly LPFILETIME: PointerTypeDef<W_FILETIME>;
+  readonly PFILETIME: PointerTypeDef<W_FILETIME>;
+  readonly PFLOAT: PointerTypeDef<SimpleCDataConstructor<"float">>;
+  readonly LPHANDLE: PointerTypeDef<W_HANDLE>;
+  readonly PHANDLE: PointerTypeDef<W_HANDLE>;
+  readonly PHKEY: PointerTypeDef<W_HANDLE>;
+  readonly LPHKL: PointerTypeDef<W_HANDLE>;
+  readonly LPINT: PointerTypeDef<SimpleCDataConstructor<"int32">>;
+  readonly PINT: PointerTypeDef<SimpleCDataConstructor<"int32">>;
+  readonly PLARGE_INTEGER: PointerTypeDef<SimpleCDataConstructor<"int64">>;
+  readonly PLCID: PointerTypeDef<W_DWORD>;
+  readonly LPLONG: PointerTypeDef<W_LONG>;
+  readonly PLONG: PointerTypeDef<W_LONG>;
+  readonly LPMSG: PointerTypeDef<W_MSG>;
+  readonly PMSG: PointerTypeDef<W_MSG>;
+  readonly LPPOINT: PointerTypeDef<W_POINT>;
+  readonly PPOINT: PointerTypeDef<W_POINT>;
+  readonly PPOINTL: PointerTypeDef<W_POINT>;
+  readonly LPRECT: PointerTypeDef<W_RECT>;
+  readonly PRECT: PointerTypeDef<W_RECT>;
+  readonly LPRECTL: PointerTypeDef<W_RECT>;
+  readonly PRECTL: PointerTypeDef<W_RECT>;
+  readonly LPSC_HANDLE: PointerTypeDef<W_HANDLE>;
+  readonly PSHORT: PointerTypeDef<W_SHORT>;
+  readonly LPSIZE: PointerTypeDef<W_SIZE>;
+  readonly PSIZE: PointerTypeDef<W_SIZE>;
+  readonly LPSIZEL: PointerTypeDef<W_SIZE>;
+  readonly PSIZEL: PointerTypeDef<W_SIZE>;
+  readonly PSMALL_RECT: PointerTypeDef<W_SMALL_RECT>;
+  readonly LPUINT: PointerTypeDef<SimpleCDataConstructor<"uint32">>;
+  readonly PUINT: PointerTypeDef<SimpleCDataConstructor<"uint32">>;
+  readonly PULARGE_INTEGER: PointerTypeDef<SimpleCDataConstructor<"uint64">>;
+  readonly PULONG: PointerTypeDef<W_DWORD>;
+  readonly PUSHORT: PointerTypeDef<W_WORD>;
+  readonly PWCHAR: PointerTypeDef<SimpleCDataConstructor<"wchar">>;
+  readonly LPWIN32_FIND_DATAA: PointerTypeDef<W_FIND_DATA>;
+  readonly PWIN32_FIND_DATAA: PointerTypeDef<W_FIND_DATA>;
+  readonly LPWIN32_FIND_DATAW: PointerTypeDef<W_FIND_DATA>;
+  readonly PWIN32_FIND_DATAW: PointerTypeDef<W_FIND_DATA>;
+  readonly LPWORD: PointerTypeDef<W_WORD>;
+  readonly PWORD: PointerTypeDef<W_WORD>;
+  // Extras (not in Python's wintypes)
+  readonly QWORD: SimpleCDataConstructor<"uint64">;
+  readonly DWORDLONG: SimpleCDataConstructor<"uint64">;
+  readonly LONGLONG: SimpleCDataConstructor<"int64">;
+  readonly ULONGLONG: SimpleCDataConstructor<"uint64">;
+  readonly PVOID: W_HANDLE;
+  readonly HCURSOR: W_HANDLE;
+  readonly LRESULT: SimpleCDataConstructor<"ssize_t">;
+  readonly UINT_PTR: SimpleCDataConstructor<"size_t">;
+  readonly LONG_PTR: SimpleCDataConstructor<"ssize_t">;
+  readonly ULONG_PTR: SimpleCDataConstructor<"size_t">;
+  readonly LSTATUS: W_LONG;
+  readonly REGSAM: W_DWORD;
+};
 
 /**
  * Base class for creating custom simple C data types.
@@ -1868,6 +2382,32 @@ export const WCHAR_SIZE: number;
  * @category Constants
  */
 export const NULL: null;
+
+/**
+ * Size of `time_t` in bytes. Python: `ctypes.SIZEOF_TIME_T`
+ * @category Constants
+ */
+export const SIZEOF_TIME_T: number;
+
+/**
+ * `dlopen` flag: symbols are available to subsequently loaded libraries
+ * (0 on Windows). Python: `ctypes.RTLD_GLOBAL`
+ * @category Constants
+ */
+export const RTLD_GLOBAL: number;
+
+/**
+ * `dlopen` flag: symbols stay local to the library (0 on Windows).
+ * Python: `ctypes.RTLD_LOCAL`
+ * @category Constants
+ */
+export const RTLD_LOCAL: number;
+
+/**
+ * Default `mode` of {@link CDLL} (`RTLD_LOCAL`). Python: `ctypes.DEFAULT_MODE`
+ * @category Constants
+ */
+export const DEFAULT_MODE: number;
 
 /**
  * Resolve a library name to a platform-specific filename or path.

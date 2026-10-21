@@ -4,7 +4,7 @@
  * This module provides a JavaScript interface to the PC/SC smart card API
  */
 
-import { CDLL, POINTER, Structure, WinDLL, array, byref, c_char_p, c_long, c_ubyte, c_uint, c_void_p, create_string_buffer, ptrToBuffer, sizeof } from "node-ctypes";
+import { CDLL, POINTER, Structure, WinDLL, array, byref, c_char_p, c_long, c_ubyte, c_uint, c_void_p, create_string_buffer, sizeof } from "node-ctypes";
 import { platform } from "node:os";
 
 // Platform detection
@@ -263,51 +263,18 @@ SCardControl.errcheck = function (rv, func, args) {
   return rv;
 };
 
-// PCI structures for protocols
+// PCI structures for protocols: the library's exported globals
+// (Python: SCARD_IO_REQUEST.in_dll(winscard, "g_rgSCardT0Pci")), with local
+// fallbacks when the symbols are unavailable.
 const pci = {};
-// Attempt to read SCARD_PCI objects from the native library.
-// Fallback to local SCARD_IO_REQUEST instances when symbols are unavailable.
-try {
-  // Try to obtain the in-DLL symbols (addresses)
-  const addrT0 = winscard.symbol("g_rgSCardT0Pci");
-  const addrT1 = winscard.symbol("g_rgSCardT1Pci");
-
-  if (addrT0 && addrT0 !== 0n) {
-    const buf = ptrToBuffer(addrT0, sizeof(SCARD_IO_REQUEST));
-    pci[PROTOCOL_T0] = new SCARD_IO_REQUEST(buf);
-  }
-  if (addrT1 && addrT1 !== 0n) {
-    const buf = ptrToBuffer(addrT1, sizeof(SCARD_IO_REQUEST));
-    pci[PROTOCOL_T1] = new SCARD_IO_REQUEST(buf);
-  }
-
-  // If symbols not found, create local fallbacks
-  if (!pci[PROTOCOL_T0]) {
-    const scardPciT0 = new SCARD_IO_REQUEST();
-    scardPciT0.dwProtocol = PROTOCOL_T0;
-    scardPciT0.cbPciLength = sizeof(SCARD_IO_REQUEST);
-    pci[PROTOCOL_T0] = scardPciT0;
-  }
-  if (!pci[PROTOCOL_T1]) {
-    const scardPciT1 = new SCARD_IO_REQUEST();
-    scardPciT1.dwProtocol = PROTOCOL_T1;
-    scardPciT1.cbPciLength = sizeof(SCARD_IO_REQUEST);
-    pci[PROTOCOL_T1] = scardPciT1;
-  }
-} catch (e) {
-  // On any failure, create simple local fallbacks
+for (const [protocol, symbol] of [
+  [PROTOCOL_T0, "g_rgSCardT0Pci"],
+  [PROTOCOL_T1, "g_rgSCardT1Pci"],
+]) {
   try {
-    const scardPciT0 = new SCARD_IO_REQUEST();
-    scardPciT0.dwProtocol = PROTOCOL_T0;
-    scardPciT0.cbPciLength = sizeof(SCARD_IO_REQUEST);
-    pci[PROTOCOL_T0] = scardPciT0;
-
-    const scardPciT1 = new SCARD_IO_REQUEST();
-    scardPciT1.dwProtocol = PROTOCOL_T1;
-    scardPciT1.cbPciLength = sizeof(SCARD_IO_REQUEST);
-    pci[PROTOCOL_T1] = scardPciT1;
-  } catch (ee) {
-    // leave pci empty
+    pci[protocol] = SCARD_IO_REQUEST.in_dll(winscard, symbol);
+  } catch {
+    pci[protocol] = new SCARD_IO_REQUEST(protocol, sizeof(SCARD_IO_REQUEST));
   }
 }
 
@@ -337,39 +304,25 @@ export class Context {
 
   release() {
     if (this.hcontext) {
-      SCardReleaseContext(this.hcontext.value || 0);
+      SCardReleaseContext(this.hcontext);
       this.hcontext = null;
     }
   }
 
   list_readers() {
     const readers_count = new c_uint(0);
-    SCardListReaders(this.hcontext.value || 0, null, null, byref(readers_count));
+    SCardListReaders(this.hcontext, null, null, byref(readers_count));
 
-    const readers = create_string_buffer(Number(readers_count.value) || 0);
-    SCardListReaders(this.hcontext.value || 0, null, readers, byref(readers_count));
+    const readers = create_string_buffer(readers_count.value);
+    SCardListReaders(this.hcontext, null, readers, byref(readers_count));
 
-    if (readers.length === 0 || readers[0] === 0) {
-      return [];
-    }
-    // Split null-terminated strings into individual Buffers (each NUL-terminated)
-    const readerList = [];
-    let start = 0;
-    const bufLen = readers.length;
-    while (start < bufLen && readers[start] !== 0) {
-      // find next NUL
-      let end = start;
-      while (end < bufLen && readers[end] !== 0) end++;
-      // include terminating NUL in slice
-      const slice = readers.subarray(start, Math.min(end + 1, bufLen));
-      readerList.push(slice);
-      // advance to after the NUL
-      start = end + 1;
-      // skip any additional NULs
-      while (start < bufLen && readers[start] === 0) start++;
-    }
-
-    return readerList;
+    // Multi-string: names separated by NUL, list ended by an empty name
+    // (Python: [name + b"\0" for name in readers.raw.split(b"\0") if name]).
+    return readers.raw
+      .toString("latin1")
+      .split("\0")
+      .filter((name) => name)
+      .map((name) => Buffer.from(name + "\0", "latin1"));
   }
 
   get_status_change(in_reader_states = null, timeout = INFINITE) {
@@ -418,8 +371,6 @@ export class Context {
         readerBuf = Buffer.from(String(reader_name) + "\0", "ascii");
       }
       out_state.szReader = readerBuf;
-      // keep a reference to the C-string buffer so it isn't GC'd while native code uses it
-      out_state._readerBuf = readerBuf;
       out_state.pvUserData = null;
       out_state.dwCurrentState = current_state;
       // remember requested desired state for later checks
@@ -434,14 +385,13 @@ export class Context {
     // and then perform the blocking wait using the provided timeout so
     // we actually wait for an insertion/removal event.
     let timed_out = true;
-    const ctxVal = (this.hcontext && this.hcontext.value) || 0;
     for (let k = 0; k < reader_count; k++) {
       const out_state = out_reader_states[k];
 
       // Initial non-blocking query to populate current event state
       // Pass the Structure instance directly so the native function
       // receives a pointer to the struct buffer.
-      SCardGetStatusChange(ctxVal, 0, byref(out_state), 1);
+      SCardGetStatusChange(this.hcontext, 0, byref(out_state), 1);
 
       // removed debug logging
 
@@ -467,7 +417,7 @@ export class Context {
       out_state.dwCurrentState = observed || out_state.dwCurrentState;
 
       // Blocking wait for change
-      const r = Number(SCardGetStatusChange(ctxVal, timeout, byref(out_state), 1)) >>> 0;
+      const r = Number(SCardGetStatusChange(this.hcontext, timeout, byref(out_state), 1)) >>> 0;
       if (r === E_SUCCESS) {
         timed_out = false;
       }
@@ -525,15 +475,15 @@ export class Card {
     // Use ASCII encoding and ensure null-terminated
     const reader_name = typeof reader === "string" ? Buffer.from(reader + "\0", "ascii") : reader;
 
-    SCardConnect(context.hcontext.value || 0, reader_name, sharemode, preferred_protocols, byref(this.hcard), byref(this.active_protocol));
+    SCardConnect(context.hcontext, reader_name, sharemode, preferred_protocols, byref(this.hcard), byref(this.active_protocol));
 
     // Protocol is now set in this.active_protocol.value
   }
 
   disconnect(disposition = LEAVE_CARD) {
-    if (this.hcard && this.hcard.value) {
+    if (this.hcard.value) {
       try {
-        SCardDisconnect(this.hcard.value || 0, disposition);
+        SCardDisconnect(this.hcard, disposition);
       } catch (e) {
         console.log("Warning: SCardDisconnect failed:", e.message);
       }
@@ -545,7 +495,7 @@ export class Card {
   reconnect(sharemode = SHARE_SHARED, preferred_protocols = PROTOCOL_Tx, initialization = LEAVE_CARD) {
     const active_protocol = new c_uint(0);
 
-    SCardReconnect(this.hcard.value || 0, sharemode, preferred_protocols, initialization, byref(active_protocol));
+    SCardReconnect(this.hcard, sharemode, preferred_protocols, initialization, byref(active_protocol));
 
     this.active_protocol.value = active_protocol.value;
   }
@@ -558,7 +508,7 @@ export class Card {
     const ub_sendbuffer = Buffer.from(sendbuffer);
     const recvbuffer = Buffer.alloc(258);
 
-    SCardTransmit(this.hcard.value || 0, sendPci, ub_sendbuffer, sendbuffer.length, null, recvbuffer, byref(recv_len));
+    SCardTransmit(this.hcard, sendPci, ub_sendbuffer, sendbuffer.length, null, recvbuffer, byref(recv_len));
 
     const actual_len = recv_len.value || 0;
     return recvbuffer.subarray(0, actual_len);
@@ -566,11 +516,11 @@ export class Card {
 
   getAttribute(attr_id) {
     const attr_len = new c_uint(0);
-    SCardGetAttrib(this.hcard.value || 0, attr_id, null, byref(attr_len));
+    SCardGetAttrib(this.hcard, attr_id, null, byref(attr_len));
 
     const attr_len_val = attr_len.value || 0;
     const attr = Buffer.alloc(attr_len_val);
-    SCardGetAttrib(this.hcard.value || 0, attr_id, attr, byref(attr_len));
+    SCardGetAttrib(this.hcard, attr_id, attr, byref(attr_len));
 
     return attr.subarray(0, attr_len.value || 0);
   }
@@ -579,21 +529,21 @@ export class Card {
     const ub_recvbuffer = outbufsize > 0 ? Buffer.alloc(outbufsize) : null;
     const returned = new c_uint(0);
 
-    SCardControl(this.hcard.value || 0, code, Buffer.from(data), data.length, ub_recvbuffer, outbufsize, byref(returned));
+    SCardControl(this.hcard, code, Buffer.from(data), data.length, ub_recvbuffer, outbufsize, byref(returned));
 
     const returned_val = returned.value || 0;
     return ub_recvbuffer ? ub_recvbuffer.subarray(0, returned_val) : Buffer.alloc(0);
   }
 
   begin_transaction() {
-    if (this.hcard && this.hcard.value !== 0n) {
-      SCardBeginTransaction(this.hcard.value || 0);
+    if (this.hcard.value) {
+      SCardBeginTransaction(this.hcard);
     }
   }
 
   end_transaction(disposition = LEAVE_CARD) {
-    if (this.hcard && this.hcard.value !== 0n) {
-      SCardEndTransaction(this.hcard.value || 0, disposition);
+    if (this.hcard.value) {
+      SCardEndTransaction(this.hcard, disposition);
     }
   }
 
@@ -604,14 +554,14 @@ export class Card {
     const atr_length = new c_uint(0);
 
     // First call to get lengths
-    SCardStatus(this.hcard.value || 0, null, byref(reader_name_length), byref(state), byref(protocol), null, byref(atr_length));
+    SCardStatus(this.hcard, null, byref(reader_name_length), byref(state), byref(protocol), null, byref(atr_length));
 
     // Allocate buffers
     const reader_name = Buffer.alloc(reader_name_length.value);
     const atr = Buffer.alloc(atr_length.value);
 
     // Second call to get data (pass numeric handle and buffers)
-    SCardStatus(this.hcard.value || 0, reader_name, byref(reader_name_length), byref(state), byref(protocol), atr, byref(atr_length));
+    SCardStatus(this.hcard, reader_name, byref(reader_name_length), byref(state), byref(protocol), atr, byref(atr_length));
 
     // return (state, protocol)
     return [state.value, protocol.value];

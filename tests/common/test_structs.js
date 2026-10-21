@@ -394,8 +394,7 @@ describe("Structs and Unions", function () {
         static _fields_ = [["pData", IntPtr]];
       }
       const s = new S();
-      assert.strictEqual(s.pData.isNull, true);
-      assert.strictEqual(s.pData.address, 0n);
+      assert.strictEqual(s.pData, null);
     });
 
     it("should have correct struct size with POINTER field", function () {
@@ -430,7 +429,7 @@ describe("Structs and Unions", function () {
       const val = new ctypes.c_int32(42);
       const s = new S();
       s.pData = ctypes.pointer(val);
-      assert.strictEqual(s.pData.contents, 42);
+      assert.strictEqual(s.pData.contents.value, 42);
     });
 
     it("should modify through pointer field changes original", function () {
@@ -487,7 +486,7 @@ describe("Structs and Unions", function () {
         static _fields_ = [["asInt", ctypes.c_uint32], ["asPtr", IntPtr]];
       }
       const u = new U();
-      assert.strictEqual(u.asPtr.isNull, true);
+      assert.strictEqual(u.asPtr, null);
       const expected = ctypes.POINTER_SIZE === 8 ? 8 : 4;
       assert.strictEqual(ctypes.sizeof(U), expected);
     });

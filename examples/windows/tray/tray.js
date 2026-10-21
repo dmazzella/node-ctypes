@@ -2,9 +2,9 @@
 // Inspired by pit-ray/fluent-tray (https://github.com/pit-ray/fluent-tray)
 // API mirrors the C++ reference: create_tray, add_menu, add_separator, update_with_loop, stop
 
-import { WinDLL, WINFUNCTYPE, Structure, array, sizeof, byref, c_void, c_wchar } from "node-ctypes";
+import { WinDLL, WINFUNCTYPE, Structure, array, sizeof, byref, c_int, c_void, c_wchar } from "node-ctypes";
 import { wintypes } from "node-ctypes";
-const { ATOM, BOOL, BYTE, COLORREF, DWORD, HBITMAP, HBRUSH, HCURSOR, HDC, HFONT, HGDIOBJ, HICON, HINSTANCE, HMODULE, HWND, INT, LONG, LPCWSTR, LPVOID, LPARAM, LRESULT, UINT, WORD, WPARAM } = wintypes;
+const { ATOM, BOOL, BYTE, COLORREF, DWORD, HBITMAP, HBRUSH, HCURSOR, HDC, HFONT, HGDIOBJ, HICON, HINSTANCE, HMODULE, HWND, INT, LONG, LPCWSTR, LPVOID, LPARAM, LRESULT, UINT, WORD, WPARAM, POINT, RECT, MSG, LPPOINT, LPRECT, LPMSG } = wintypes;
 import { Registry, HKEY } from "../registry/registry.js";
 
 // ─── Win32 Constants ────────────────────────────────────────────────
@@ -122,9 +122,9 @@ user32.SetForegroundWindow.argtypes = [HWND];
 user32.SetForegroundWindow.restype = BOOL;
 user32.GetForegroundWindow.argtypes = [];
 user32.GetForegroundWindow.restype = HWND;
-user32.InvalidateRect.argtypes = [HWND, LPVOID, BOOL];
+user32.InvalidateRect.argtypes = [HWND, LPRECT, BOOL];
 user32.InvalidateRect.restype = BOOL;
-user32.GetClientRect.argtypes = [HWND, LPVOID];
+user32.GetClientRect.argtypes = [HWND, LPRECT];
 user32.GetClientRect.restype = BOOL;
 user32.PostQuitMessage.argtypes = [INT];
 user32.PostQuitMessage.restype = c_void;
@@ -132,9 +132,9 @@ user32.PostMessageW.argtypes = [HWND, UINT, WPARAM, LPARAM];
 user32.PostMessageW.restype = BOOL;
 
 // user32 — message loop
-user32.PeekMessageW.argtypes = [LPVOID, HWND, UINT, UINT, UINT];
+user32.PeekMessageW.argtypes = [LPMSG, HWND, UINT, UINT, UINT];
 user32.PeekMessageW.restype = BOOL;
-user32.DispatchMessageW.argtypes = [LPVOID];
+user32.DispatchMessageW.argtypes = [LPMSG];
 user32.DispatchMessageW.restype = LRESULT;
 
 // user32 — resources
@@ -150,15 +150,15 @@ user32.BeginPaint.argtypes = [HWND, LPVOID];
 user32.BeginPaint.restype = HDC;
 user32.EndPaint.argtypes = [HWND, LPVOID];
 user32.EndPaint.restype = BOOL;
-user32.FillRect.argtypes = [HDC, LPVOID, HBRUSH];
+user32.FillRect.argtypes = [HDC, LPRECT, HBRUSH];
 user32.FillRect.restype = INT;
 user32.DrawIconEx.argtypes = [HDC, INT, INT, HICON, INT, INT, UINT, HBRUSH, UINT];
 user32.DrawIconEx.restype = BOOL;
-user32.DrawTextW.argtypes = [HDC, LPCWSTR, INT, LPVOID, UINT];
+user32.DrawTextW.argtypes = [HDC, LPCWSTR, INT, LPRECT, UINT];
 user32.DrawTextW.restype = INT;
 user32.SetLayeredWindowAttributes.argtypes = [HWND, COLORREF, BYTE, DWORD];
 user32.SetLayeredWindowAttributes.restype = BOOL;
-user32.GetCursorPos.argtypes = [LPVOID];
+user32.GetCursorPos.argtypes = [LPPOINT];
 user32.GetCursorPos.restype = BOOL;
 user32.TrackMouseEvent.argtypes = [LPVOID];
 user32.TrackMouseEvent.restype = BOOL;
@@ -210,26 +210,13 @@ if (dwmapi) {
 
 // ─── Structures ─────────────────────────────────────────────────────
 
-class POINT extends Structure {
-  static _fields_ = [
-    ["x", LONG],
-    ["y", LONG],
-  ];
-}
-class RECT extends Structure {
-  static _fields_ = [
-    ["left", LONG],
-    ["top", LONG],
-    ["right", LONG],
-    ["bottom", LONG],
-  ];
-}
+// POINT, RECT and MSG come from wintypes (Python: ctypes.wintypes).
 
 class WNDCLASSEX extends Structure {
   static _fields_ = [
     ["cbSize", UINT],
     ["style", UINT],
-    ["lpfnWndProc", LPVOID],
+    ["lpfnWndProc", WNDPROC],
     ["cbClsExtra", INT],
     ["cbWndExtra", INT],
     ["hInstance", HINSTANCE],
@@ -239,17 +226,6 @@ class WNDCLASSEX extends Structure {
     ["lpszMenuName", LPCWSTR],
     ["lpszClassName", LPCWSTR],
     ["hIconSm", HICON],
-  ];
-}
-
-class MSG extends Structure {
-  static _fields_ = [
-    ["hwnd", HWND],
-    ["message", UINT],
-    ["wParam", WPARAM],
-    ["lParam", LPARAM],
-    ["time", DWORD],
-    ["pt", POINT],
   ];
 }
 
@@ -474,7 +450,7 @@ export class FluentTray {
     // Dismiss when popup loses foreground (like C++ reference)
     if (this.#visible) {
       const fg = user32.GetForegroundWindow();
-      if (BigInt(fg || 0) !== BigInt(this.#hwnd || 0)) {
+      if (fg !== this.#hwnd) {
         this.#hideMenu();
       }
     }
@@ -538,7 +514,7 @@ export class FluentTray {
     const wc = new WNDCLASSEX();
     wc.cbSize = sizeof(WNDCLASSEX);
     wc.style = CS_HREDRAW | CS_VREDRAW;
-    wc.lpfnWndProc = this.#wndProcCb.pointer;
+    wc.lpfnWndProc = this.#wndProcCb;
     wc.hInstance = this.#hInstance;
     wc.hIcon = user32.LoadIconW(null, IDI_APPLICATION);
     wc.hCursor = user32.LoadCursorW(null, IDC_ARROW);
@@ -553,9 +529,8 @@ export class FluentTray {
 
     if (round_corner && dwmapi) {
       try {
-        const buf = Buffer.alloc(4);
-        buf.writeUInt32LE(2, 0);
-        dwmapi.DwmSetWindowAttribute(this.#hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, buf, 4);
+        const DWMWCP_ROUND = new c_int(2);
+        dwmapi.DwmSetWindowAttribute(this.#hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, byref(DWMWCP_ROUND), sizeof(DWMWCP_ROUND));
       } catch {}
     }
 
@@ -572,7 +547,7 @@ export class FluentTray {
     this.#nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     this.#nid.uCallbackMessage = this.#messageId;
     this.#nid.hIcon = this.#hTrayIcon;
-    this.#nid.szTip = Buffer.from(this.#appName.substring(0, 127) + "\0", "utf16le");
+    this.#nid.szTip = this.#appName.substring(0, 127);
     shell32.Shell_NotifyIconW(NIM_ADD, byref(this.#nid));
   }
 

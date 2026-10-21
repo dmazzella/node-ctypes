@@ -203,7 +203,10 @@ describe("Callbacks", function () {
       {
         const cb = makeCb();
         const orig = cb.release.bind(cb);
-        cb.release = () => { released = true; orig(); };
+        cb.release = () => {
+          released = true;
+          orig();
+        };
         cb[Symbol.dispose] = () => cb.release();
         using _guard = cb;
         assert.strictEqual(released, false);
@@ -225,12 +228,37 @@ describe("Callbacks", function () {
       assert.throws(() => {
         const cb = makeCb();
         const orig = cb.release.bind(cb);
-        cb.release = () => { released = true; orig(); };
+        cb.release = () => {
+          released = true;
+          orig();
+        };
         cb[Symbol.dispose] = () => cb.release();
         using _guard = cb;
         throw new Error("boom");
       }, /boom/);
       assert.strictEqual(released, true, "release runs even when the block throws");
+    });
+  });
+
+  describe("Exceptions thrown by callbacks", function () {
+    it("emit a process warning when no error handler is set", async function () {
+      const arr = ctypes.array(ctypes.c_int32, 2).create([2, 1]);
+      const compare = libc.callback(
+        () => {
+          throw new Error("compare exploded");
+        },
+        ctypes.c_int32,
+        [ctypes.c_void_p, ctypes.c_void_p],
+      );
+      const qsort = libc.func("qsort", ctypes.c_void, [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_void_p]);
+
+      const warning = new Promise((resolve) => process.once("warning", resolve));
+      qsort(ctypes.byref(arr), 2, ctypes.sizeof(ctypes.c_int32), compare.pointer);
+      const w = await warning;
+      compare.release();
+
+      assert.strictEqual(w.name, "CallbackError");
+      assert.match(w.message, /compare exploded/);
     });
   });
 });

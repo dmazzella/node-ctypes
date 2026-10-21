@@ -23,12 +23,14 @@ size_t StructInfo::GetTypeAlignment(CType type, std::shared_ptr<StructInfo> nest
   switch (type) {
     case CType::CTYPES_INT8:
     case CType::CTYPES_UINT8:
+    case CType::CTYPES_CHAR:
     case CType::CTYPES_BOOL:
       return 1;
     case CType::CTYPES_INT16:
     case CType::CTYPES_UINT16:
-    case CType::CTYPES_WCHAR:
       return 2;
+    case CType::CTYPES_WCHAR:
+      return alignof(wchar_t);  // 2 su Windows, 4 su Unix
     case CType::CTYPES_INT32:
     case CType::CTYPES_UINT32:
     case CType::CTYPES_FLOAT:

@@ -100,6 +100,7 @@ CTypesAddon::CTypesAddon(Napi::Env env, Napi::Object exports) {
                          InstanceMethod("sizeof", &CTypesAddon::SizeOf),
                          InstanceMethod("cstring", &CTypesAddon::CreateCString),
                          InstanceMethod("readCString", &CTypesAddon::ReadCString),
+                         InstanceMethod("readWString", &CTypesAddon::ReadWString),
                          InstanceMethod("ptrToBuffer", &CTypesAddon::PtrToBuffer),
                          InstanceMethod("addressOf", &CTypesAddon::AddressOf),
                          // Slot module-level last-error / errno (parity Python ctypes)
@@ -107,6 +108,7 @@ CTypesAddon::CTypesAddon(Napi::Env env, Napi::Object exports) {
                          InstanceMethod("setCapturedLastError", &CTypesAddon::SetCapturedLastError),
                          InstanceMethod("getCapturedErrno", &CTypesAddon::GetCapturedErrno),
                          InstanceMethod("setCapturedErrno", &CTypesAddon::SetCapturedErrno),
+                         InstanceMethod("setArgumentError", &CTypesAddon::SetArgumentError),
 
                          // CType enum - single source of truth per i tipi
                          InstanceValue("CType", CreateCType(env), napi_enumerable),
@@ -115,6 +117,13 @@ CTypesAddon::CTypesAddon(Napi::Env env, Napi::Object exports) {
                          InstanceValue("POINTER_SIZE", Napi::Number::New(env, sizeof(void*)), napi_enumerable),
                          InstanceValue("WCHAR_SIZE", Napi::Number::New(env, sizeof(wchar_t)), napi_enumerable),
                          InstanceValue("NULL", env.Null(), napi_enumerable),
+#ifdef _WIN32
+                         InstanceValue("RTLD_GLOBAL", Napi::Number::New(env, 0), napi_enumerable),
+                         InstanceValue("RTLD_LOCAL", Napi::Number::New(env, 0), napi_enumerable),
+#else
+                         InstanceValue("RTLD_GLOBAL", Napi::Number::New(env, RTLD_GLOBAL), napi_enumerable),
+                         InstanceValue("RTLD_LOCAL", Napi::Number::New(env, RTLD_LOCAL), napi_enumerable),
+#endif
                        });
 }
 
@@ -340,6 +349,48 @@ Napi::Value CTypesAddon::CreateCString(const Napi::CallbackInfo& info) {
   return buffer;
 }
 
+namespace {
+
+// Memoria di partenza di string_at / wstring_at: Buffer (con il suo limite in
+// byte), BigInt o Number. nullptr per NULL o tipi non supportati.
+const uint8_t* StringSource(const Napi::Value& value, size_t& limit_bytes) {
+  limit_bytes = SIZE_MAX;
+  if (value.IsBuffer()) {
+    Napi::Buffer<uint8_t> buf = value.As<Napi::Buffer<uint8_t>>();
+    limit_bytes = buf.Length();
+    return buf.Data();
+  }
+  if (value.IsBigInt()) {
+    bool lossless;
+    return reinterpret_cast<const uint8_t*>(value.As<Napi::BigInt>().Uint64Value(&lossless));
+  }
+  if (value.IsNumber()) {
+    return reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(value.As<Napi::Number>().Int64Value()));
+  }
+  return nullptr;
+}
+
+// Python string_at / wstring_at: con `size` si leggono esattamente `size`
+// unità (NUL interni compresi), altrimenti fino al NUL. Ritorna false se ha
+// lanciato un'eccezione JS.
+bool StringLength(const Napi::CallbackInfo& info, size_t unit, size_t limit_bytes, std::optional<size_t>& size) {
+  if (info.Length() > 1 && info[1].IsNumber()) {
+    const int64_t raw = info[1].As<Napi::Number>().Int64Value();
+    if (raw < 0 || static_cast<uint64_t>(raw) > (SIZE_MAX / 2) / unit) {
+      Napi::RangeError::New(info.Env(), "Invalid size: must be a non-negative integer").ThrowAsJavaScriptException();
+      return false;
+    }
+    size = static_cast<size_t>(raw);
+    if (limit_bytes != SIZE_MAX && *size * unit > limit_bytes) {
+      Napi::RangeError::New(info.Env(), "size exceeds the buffer length").ThrowAsJavaScriptException();
+      return false;
+    }
+  }
+  return true;
+}
+
+}  // namespace
+
 Napi::Value CTypesAddon::ReadCString(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
 
@@ -348,39 +399,88 @@ Napi::Value CTypesAddon::ReadCString(const Napi::CallbackInfo& info) {
     return env.Undefined();
   }
 
-  const char* ptr = nullptr;
-
-  if (info[0].IsBuffer()) {
-    ptr = reinterpret_cast<const char*>(info[0].As<Napi::Buffer<uint8_t>>().Data());
-  } else if (info[0].IsBigInt()) {
-    bool lossless;
-    uint64_t addr = info[0].As<Napi::BigInt>().Uint64Value(&lossless);
-    ptr = reinterpret_cast<const char*>(addr);
-  } else if (info[0].IsNumber()) {
-    ptr = reinterpret_cast<const char*>(static_cast<uintptr_t>(info[0].ToNumber().Int64Value()));
-  }
-
+  size_t limit_bytes;
+  const char* ptr = reinterpret_cast<const char*>(StringSource(info[0], limit_bytes));
   if (!ptr) {
     return env.Null();
   }
 
-  // Set reasonable default limit to prevent DoS
-  size_t max_len = 1024 * 1024;  // 1MB default limit
-  if (info.Length() > 1 && info[1].IsNumber()) {
-    int64_t len_raw = info[1].ToNumber().Int64Value();
-    if (len_raw < 0 || len_raw > static_cast<int64_t>(SIZE_MAX / 2)) {
-      Napi::RangeError::New(env, "Invalid max_len: must be positive and reasonable").ThrowAsJavaScriptException();
-      return env.Undefined();
-    }
-    max_len = static_cast<size_t>(len_raw);
+  std::optional<size_t> size;
+  if (!StringLength(info, 1, limit_bytes, size)) {
+    return env.Undefined();
   }
 
   size_t len = 0;
-  while (len < max_len && ptr[len] != '\0') {
-    len++;
+  if (size) {
+    len = *size;
+  } else {
+    // Fino al NUL, entro il Buffer o un limite di sicurezza (anti-DoS).
+    const size_t max_len = std::min<size_t>(limit_bytes, 1024 * 1024);
+    while (len < max_len && ptr[len] != '\0') {
+      len++;
+    }
   }
 
   return Napi::String::New(env, ptr, len);
+}
+
+Napi::Value CTypesAddon::ReadWString(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+
+  if (info.Length() < 1) {
+    Napi::TypeError::New(env, "Pointer required").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+
+  size_t limit_bytes;
+  const uint8_t* ptr = StringSource(info[0], limit_bytes);
+  if (!ptr) {
+    return env.Null();
+  }
+
+  std::optional<size_t> size;
+  if (!StringLength(info, sizeof(wchar_t), limit_bytes, size)) {
+    return env.Undefined();
+  }
+
+  // Lettura per memcpy: l'indirizzo può non essere allineato a wchar_t.
+  auto at = [ptr](size_t i) {
+    wchar_t wc;
+    memcpy(&wc, ptr + i * sizeof(wchar_t), sizeof(wchar_t));
+    return wc;
+  };
+
+  size_t len = 0;
+  if (size) {
+    len = *size;
+  } else {
+    const size_t max_len = std::min<size_t>(limit_bytes / sizeof(wchar_t), 1024 * 1024);
+    while (len < max_len && at(len) != L'\0') {
+      len++;
+    }
+  }
+
+  std::u16string out;
+  out.reserve(len);
+  for (size_t i = 0; i < len; i++) {
+#ifdef _WIN32
+    out.push_back(static_cast<char16_t>(at(i)));
+#else
+    // wchar_t è UTF-32: code point non validi diventano U+FFFD.
+    uint32_t cp = static_cast<uint32_t>(at(i));
+    if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
+      cp = 0xFFFD;
+    }
+    if (cp >= 0x10000) {
+      cp -= 0x10000;
+      out.push_back(static_cast<char16_t>(0xD800 + (cp >> 10)));
+      out.push_back(static_cast<char16_t>(0xDC00 + (cp & 0x3FF)));
+    } else {
+      out.push_back(static_cast<char16_t>(cp));
+    }
+#endif
+  }
+  return Napi::String::New(env, out);
 }
 
 Napi::Value CTypesAddon::AddressOf(const Napi::CallbackInfo& info) {
@@ -456,6 +556,13 @@ Napi::Value CTypesAddon::SetCapturedLastError(const Napi::CallbackInfo& info) {
 
 Napi::Value CTypesAddon::GetCapturedErrno(const Napi::CallbackInfo& info) {
   return Napi::Number::New(info.Env(), captured_errno);
+}
+
+Napi::Value CTypesAddon::SetArgumentError(const Napi::CallbackInfo& info) {
+  if (info.Length() >= 1 && info[0].IsFunction()) {
+    argument_error_ctor = Napi::Persistent(info[0].As<Napi::Function>());
+  }
+  return info.Env().Undefined();
 }
 
 Napi::Value CTypesAddon::SetCapturedErrno(const Napi::CallbackInfo& info) {

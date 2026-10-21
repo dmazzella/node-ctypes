@@ -2,6 +2,8 @@
 
 #include "addon.h"
 #include "array.h"
+#include "direct_call.h"
+#include "napi_fast.h"
 #include "shared.h"
 #include "struct.h"
 #include "types.h"
@@ -125,6 +127,12 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
  private:
   bool PrepareFFI(Napi::Env env);
 
+  // Entry point of the per-instance `call` function: the FFIFunction* is the
+  // function's N-API data, so the hot path skips the napi_unwrap of InstanceMethod.
+  static Napi::Value FastCall(const Napi::CallbackInfo& info);
+  void InstallFastCall(Napi::Env env);
+  void SetupDirectCall();
+
   // Per-section helpers for Call(). `always_inline` marcato sulla definition
   // (vedi function.cc) — vengono chiamati esattamente una volta dal
   // caller, l'overhead di call erode il hot path FFI.
@@ -141,12 +149,6 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
                               const Napi::CallbackInfo& info,
                               size_t& out_argc,
                               bool& out_is_variadic) const;
-  // Risolve il CType di un argomento all'indice `i` nel contesto corrente.
-  // Estrae la logica duplicata tra il loop di pre-reserve string buffer e
-  // il loop di marshalling.
-  inline CType ResolveArgType(const CallContext& ctx, size_t i,
-                              const CType* extra_types_stack,
-                              const std::vector<CType>& extra_types_heap) const;
 
   // Thin wrapper that calls ConvertReturn with member state
   inline Napi::Value ConvertReturnValue(Napi::Env env) {
@@ -223,6 +225,14 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
   // il fast path di libffi; altrove ffi_call_plan_invoke ricade su ffi_call.
   ffi_call_plan* call_plan_ = nullptr;
 
+  // Direct-call fast path (see direct_call.h); nullptr when the signature is
+  // not eligible and the call goes through libffi.
+  direct::Invoker direct_invoker_ = nullptr;
+  std::array<direct::Widen, direct::kMaxDirectArgs> direct_arg_widen_{};
+  uint8_t direct_arg_widen_count_ = 0;
+  uint8_t direct_ret_widen_size_ = 0;  // 0 = return needs no widening
+  bool direct_ret_signed_ = false;
+
   // Tipi
   CType return_type_;
   std::vector<CType> arg_types_;
@@ -255,6 +265,9 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
 
   // Buffer per stringhe lunghe (fallback quando inline esaurisce)
   std::vector<char> string_buffer_;
+  // (slot index, offset in string_buffer_) delle stringhe finite nel buffer heap
+  // durante la call corrente; i puntatori sono scritti a fine marshalling.
+  std::vector<std::pair<size_t, size_t>> string_fixups_;
 
   // Heap fallback per molti argomenti
   std::vector<uint8_t> heap_arg_storage_;
