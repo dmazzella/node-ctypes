@@ -503,6 +503,8 @@ Napi::Function ThreadSafeCallback::GetClass(Napi::Env env) {
                        InstanceMethod("release", &ThreadSafeCallback::Release),
                        InstanceMethod("setErrorHandler", &ThreadSafeCallback::SetErrorHandler),
                        InstanceMethod("getLastError", &ThreadSafeCallback::GetLastError),
+                       InstanceMethod("ref", &ThreadSafeCallback::Ref),
+                       InstanceMethod("unref", &ThreadSafeCallback::Unref),
                      });
 }
 
@@ -660,6 +662,30 @@ Napi::Value ThreadSafeCallback::GetPointer(const Napi::CallbackInfo& info) {
   }
 
   return Napi::BigInt::New(env, reinterpret_cast<uint64_t>(data_->code_ptr));
+}
+
+// ref() / unref(): come i timer di Node, una callback referenziata (default)
+// tiene vivo l'event loop; unref() lascia terminare il processo quando non
+// resta altro da fare, mentre le chiamate dai thread continuano ad arrivare
+// finché il loop è vivo. Solo dal main thread.
+Napi::Value ThreadSafeCallback::Ref(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  if (!data_ || data_->released.load()) {
+    Napi::Error::New(env, "ThreadSafeCallback has been released").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+  data_->tsfn.Ref(env);
+  return info.This();
+}
+
+Napi::Value ThreadSafeCallback::Unref(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  if (!data_ || data_->released.load()) {
+    Napi::Error::New(env, "ThreadSafeCallback has been released").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+  data_->tsfn.Unref(env);
+  return info.This();
 }
 
 Napi::Value ThreadSafeCallback::Release(const Napi::CallbackInfo& info) {

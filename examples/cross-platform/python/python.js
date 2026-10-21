@@ -73,10 +73,16 @@
 // node.read_text(path)`), a concurrent.futures.Future elsewhere (`.result()`);
 // the promise of an async function is awaited, and a `cancellable(fn)` gets
 // an AbortSignal aborted when Python cancels the call. Node.js runs these
-// calls while JavaScript awaits Python code (the threadSafeCallback keeps the
-// Node.js event loop alive only then); calls made meanwhile wait for the next
-// await. Do not wait for such a future while the main thread is blocked in
-// Python (e.g. Thread.join() in synchronous code): Node.js could not run it.
+// calls as soon as its event loop is free, through an unref()'d
+// threadSafeCallback: like an unref()'d timer, Python activity alone does
+// not keep Node.js alive, JavaScript awaiting Python code does. Do not wait
+// for such a future while the main thread is blocked in Python (e.g.
+// Thread.join() in synchronous code): Node.js could not run it, and after 5 s
+// Python warns about the likely deadlock.
+//
+// Diagnostics: `python.stats()` counts the objects shared by the two
+// languages (to find leaks). `Python.initialize({ stdin: false })` leaves the
+// process stdin to Node.js (Python would read it through its own buffer).
 //
 // Interpreter: `Python.initialize({ executable })`, the PYTHON environment
 // variable, or python3 / python / py on PATH. Its sys.path is used, so virtual
@@ -84,7 +90,8 @@
 // one of the same version pass `{ library }` or set PYTHON_LIBRARY. Python
 // must be built with a shared library: the default on Windows, macOS and most
 // Linux distributions (Debian/Ubuntu: install libpython3.x; pyenv:
-// PYTHON_CONFIGURE_OPTS=--enable-shared).
+// PYTHON_CONFIGURE_OPTS=--enable-shared). Requires node-ctypes 2.1+
+// (threadSafeCallback().unref()).
 
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -178,7 +185,7 @@ const TYPES = ["PyBool_Type", "PyLong_Type", "PyFloat_Type", "PyUnicode_Type", "
 
 // Private helper module run inside the embedded interpreter.
 const BRIDGE = `
-import asyncio, collections, collections.abc, concurrent.futures, ctypes, datetime, inspect, itertools, numbers, queue, sys, threading, traceback, weakref
+import asyncio, collections, collections.abc, concurrent.futures, ctypes, datetime, inspect, itertools, numbers, queue, sys, threading, traceback, warnings, weakref
 
 _main = threading.get_ident()
 _released = collections.deque()  # JavaScript functions no longer referenced
@@ -466,13 +473,13 @@ class Watchdog:
 # notified through a channel, a node-ctypes threadSafeCallback notify(kind,
 # token) that runs on the Node.js main thread. It is called by a notifier
 # thread, never by the event loop, which keeps running meanwhile.
-DONE, CALL, CLOSE, CANCEL = 0, 1, 2, 3
+DONE, CALL, CANCEL = 0, 1, 2
 _NOTIFY = ctypes.CFUNCTYPE(None, ctypes.c_int, ctypes.c_int)
 _loop = None
 _lock = threading.Lock()
-_notify = None  # open channel: open while JavaScript awaits Python code
+_notify = None  # the channel, opened by Node.js after initialization
 _events = queue.SimpleQueue()
-_queued = []  # (kind, token) sent while the channel is closed: sent when it opens
+_queued = []  # (kind, token) sent before the channel is open
 _requests = {}  # token → JavaScript call waiting for Node.js
 _calls = {}  # token → JavaScript call running in Node.js
 _tokens = itertools.count(1)
@@ -488,8 +495,7 @@ def _send(kind, token):
         if _closing:
             raise RuntimeError("Python is finalizing: JavaScript cannot be called")
         if _notify is None:
-            if kind != DONE:  # DONE events are sent while the channel is open
-                _queued.append((kind, token))
+            _queued.append((kind, token))
         else:
             _events.put((_notify, kind, token))
 
@@ -498,18 +504,19 @@ def _run_loop(ready):
     ready.set()
     _loop.run_forever()
 
-def _start():
+def _start_loop():
     global _loop
-    if _loop is None:
+    with _lock:
+        if _loop is not None:
+            return
         _loop = asyncio.new_event_loop()
-        ready = threading.Event()
-        threading.Thread(target=_run_loop, args=(ready,), name="asyncio", daemon=True).start()
-        threading.Thread(target=_notifier, name="node-ctypes-notifier", daemon=True).start()
-        ready.wait()
+    ready = threading.Event()
+    threading.Thread(target=_run_loop, args=(ready,), name="asyncio", daemon=True).start()
+    ready.wait()
 
 def open_channel(address):
     global _notify
-    _start()
+    threading.Thread(target=_notifier, name="node-ctypes-notifier", daemon=True).start()
     with _lock:
         _notify = _NOTIFY(address)
         for kind, token in _queued:
@@ -517,12 +524,9 @@ def open_channel(address):
         _queued.clear()
 
 def close_channel():
-    """No more events after CLOSE: then Node.js releases the callback."""
     global _notify
     with _lock:
-        if _notify is not None:
-            _events.put((_notify, CLOSE, 0))
-            _notify = None
+        _notify = None
 
 def is_awaitable(obj):
     return inspect.isawaitable(obj) or isinstance(obj, concurrent.futures.Future)
@@ -535,9 +539,37 @@ def submit(awaitable, token):
     if isinstance(awaitable, concurrent.futures.Future):
         future = awaitable
     else:
+        _start_loop()
         future = asyncio.run_coroutine_threadsafe(_await(awaitable), _loop)
-    future.add_done_callback(lambda _: _closing or _send(DONE, token))  # not queued: the channel is open
+    future.add_done_callback(lambda _: _closing or _send(DONE, token))
     return future
+
+# 1 while the Node.js main thread runs Python code for JavaScript (a c_int in
+# JavaScript memory, see Python.#busy): it cannot run JavaScript calls then.
+_main_busy = None
+
+def set_busy_flag(address):
+    global _main_busy
+    _main_busy = ctypes.c_int.from_address(address)
+
+class JsFuture(concurrent.futures.Future):
+    """Result of a JavaScript call from a Python thread."""
+
+    name = "a JavaScript function"
+
+    def result(self, timeout=None):
+        if timeout is not None or self.done():
+            return super().result(timeout)
+        try:
+            return super().result(5)
+        except concurrent.futures.TimeoutError:
+            if _main_busy is not None and _main_busy.value:
+                warnings.warn(
+                    f"{self.name} has been waiting for 5 s: the Node.js main thread is running Python code "
+                    "(a synchronous call from JavaScript) and cannot run it. If that code waits for this thread "
+                    "(Thread.join(), future.result()), this is a deadlock: await the work from JavaScript instead.",
+                    RuntimeWarning, stacklevel=2)
+        return super().result()
 
 def _call_later(fid, args, kwargs, function, awaitable=True):
     """Call a JavaScript function from a thread that is not the Node.js main
@@ -545,7 +577,8 @@ def _call_later(fid, args, kwargs, function, awaitable=True):
     (thread with a running event loop) it is awaitable, otherwise a
     concurrent.futures.Future. Node.js is woken through the channel: calls
     made while it is closed run when JavaScript awaits Python code again."""
-    future = concurrent.futures.Future()
+    future = JsFuture()
+    future.name = f"JavaScript function {function.__name__}()"
     token = next(_tokens)
     _requests[token] = (fid, args, kwargs, future, function)
     try:
@@ -790,9 +823,10 @@ const DONE = Symbol("done");
 // Channel events (see BRIDGE).
 const EVENT_DONE = 0;
 const EVENT_CALL = 1;
-const EVENT_CLOSE = 2;
-const EVENT_CANCEL = 3;
+const EVENT_CANCEL = 2;
 const isIndex = (prop) => /^-?(0|[1-9]\d*)$/.test(prop);
+// Function.prototype members used by JavaScript code on callables (handler.apply(this, args), fn.bind()).
+const FUNCTION_MEMBERS = new Set(["apply", "call", "bind", "length", "name"]);
 let instance = null;
 let constructing = false;
 
@@ -829,9 +863,10 @@ export class Python {
   #functionType; // types.FunctionType: JavaScript functions are wrapped in Python functions
   #javascriptCode; // code object of those wrappers
   #keep = new WeakMap(); // ArrayBuffer of Python memory → holder that pins it
+  #busy = new Int32Array(1); // 1 while the main thread runs Python code (read by Python threads)
+  #proxies = 0; // live PyObject proxies
   #nextToken = 1;
-  #channel = null; // open threadSafeCallback while JavaScript awaits Python
-  #closeScheduled = false;
+  #channel = null; // threadSafeCallback woken by Python threads (see #openChannel)
   #main;
   #builtins;
 
@@ -841,6 +876,7 @@ export class Python {
    * @param {Object} [options]
    * @param {string} [options.executable] - Python interpreter whose library and environment are used (default: $PYTHON, python3, python, py)
    * @param {string} [options.library] - Explicit path of the Python shared library (default: $PYTHON_LIBRARY); same version as the interpreter
+   * @param {boolean} [options.stdin=true] - false: Python does not read the process stdin (sys.stdin is None), left to Node.js
    * @returns {Python}
    */
   static initialize(options = {}) {
@@ -857,7 +893,7 @@ export class Python {
     return instance;
   }
 
-  constructor({ executable, library = process.env.PYTHON_LIBRARY } = {}) {
+  constructor({ executable, library = process.env.PYTHON_LIBRARY, stdin = true } = {}) {
     if (!constructing) throw new TypeError("Use Python.initialize()");
 
     const info = probeInterpreter(executable);
@@ -908,7 +944,7 @@ export class Python {
     // The GIL is held after initialization.
     this.#depth = 1;
     try {
-      this.#setup(info);
+      this.#setup(info, stdin);
     } finally {
       this.#depth = 0;
     }
@@ -918,10 +954,11 @@ export class Python {
     process.once("exit", () => this.finalize());
   }
 
-  #setup(info) {
+  #setup(info, stdin) {
     const api = this.#api;
     this.#registry = new FinalizationRegistry((state) => {
       if (!state.ptr || this.#finalized) return;
+      this.#proxies--;
       this.#withGIL(() => api.Py_DecRef(state.ptr));
       this.#scheduleDrain(); // the object may have held JavaScript functions
     });
@@ -962,6 +999,8 @@ export class Python {
       "take_request",
       "settle",
       "shutdown",
+      "_calls",
+      "_requests",
     ]) {
       this.#bridge[name] = bridge[name];
     }
@@ -971,12 +1010,16 @@ export class Python {
     this.#javascriptCode = this.#pointer(this.#bridge.JAVASCRIPT_CODE);
     const javascript_object = (op, object, ...args) => this.#jsOp(op, object, ...args);
     bridge.set_op(javascript_object);
+    bridge.set_busy_flag(addressof(Buffer.from(this.#busy.buffer)));
+    this.#openChannel();
 
     // The environment of the probed interpreter (virtual environment included).
     const sys = this.#import("sys");
     sys.path = ["", ...info.path];
     sys.executable = info.executable;
     sys.argv = [process.argv[1] ?? ""];
+    // Python reads stdin through a buffer: what it reads is lost for Node.js.
+    if (!stdin) sys.stdin = null;
   }
 
   // ── Public API ────────────────────────────────────────────────────
@@ -1196,6 +1239,17 @@ export class Python {
   }
 
   /**
+   * Objects shared by the two languages, to find leaks: PyObject proxies
+   * alive in JavaScript, JavaScript functions and objects (JsProxy) used by
+   * Python, pending awaits and JavaScript calls from Python threads.
+   * @returns {{ proxies: number, functions: number, objects: number, awaits: number, calls: number }}
+   */
+  stats() {
+    const calls = this.#finalized ? 0 : this.#withGIL(() => this.#builtins.len(this.#bridge._calls) + this.#builtins.len(this.#bridge._requests));
+    return { proxies: this.#proxies, functions: this.#functions.size, objects: this.#objects.size, awaits: this.#awaits.size, calls };
+  }
+
+  /**
    * Finalize the interpreter (atexit handlers, flush, waits for non-daemon
    * threads). Runs automatically when the process exits; Python cannot be
    * used afterwards.
@@ -1230,11 +1284,17 @@ export class Python {
 
   #withGIL(fn) {
     if (this.#finalized) throw new Error("Python has been finalized");
-    if (this.#depth++ === 0) this.#gilState = this.#api.PyGILState_Ensure();
+    if (this.#depth++ === 0) {
+      this.#gilState = this.#api.PyGILState_Ensure();
+      this.#busy[0] = 1;
+    }
     try {
       return fn();
     } finally {
-      if (--this.#depth === 0) this.#api.PyGILState_Release(this.#gilState);
+      if (--this.#depth === 0) {
+        this.#busy[0] = 0;
+        this.#api.PyGILState_Release(this.#gilState);
+      }
     }
   }
 
@@ -1627,6 +1687,7 @@ export class Python {
     this.#states.set(target, state);
     this.#states.set(proxy, state);
     this.#registry.register(proxy, state, state);
+    this.#proxies++;
     return proxy;
   }
 
@@ -1675,7 +1736,13 @@ export class Python {
           const value = api.PyObject_GetAttrString(ptr, prop);
           if (value) return this.#take(value);
           missingAttribute();
-          return this.#bridge.get_fallback(target, prop); // mapping key, or len() for "length"
+          try {
+            return this.#bridge.get_fallback(target, prop); // mapping key, or len() for "length"
+          } catch (error) {
+            // Function.prototype members of callables (see FUNCTION_MEMBERS).
+            if (FUNCTION_MEMBERS.has(prop) && error instanceof PythonError && error.type === "AttributeError") return Reflect.get(target, prop);
+            throw error;
+          }
         });
       },
       set: (target, prop, value) => {
@@ -1783,6 +1850,7 @@ export class Python {
     const ptr = state.ptr;
     state.ptr = null;
     this.#registry.unregister(state);
+    this.#proxies--;
     this.#withGIL(() => this.#api.Py_DecRef(ptr));
   }
 
@@ -1794,13 +1862,13 @@ export class Python {
     state.promise ??= new Promise((resolve, reject) => {
       const token = this.#nextToken++;
       this.#withGIL(() => {
-        this.#openChannel();
         this.#awaits.set(token, { resolve, reject, future: null });
+        this.#channel.ref(); // Node.js waits for Python
         try {
           state.future = this.#awaits.get(token).future = this.#bridge.submit(target, token);
         } catch (error) {
           this.#awaits.delete(token);
-          this.#scheduleClose();
+          this.#unrefChannel();
           throw error;
         }
       });
@@ -1808,29 +1876,22 @@ export class Python {
     return state.promise;
   }
 
+  /**
+   * The channel from Python threads to Node.js. Unreferenced, like an
+   * unref()'d timer: Python activity alone does not keep Node.js alive, only
+   * JavaScript awaiting Python code does.
+   */
   #openChannel() {
-    if (this.#channel) return;
-    const channel = threadSafeCallback((kind, token) => this.#onEvent(channel, kind, token), null, [c_int, c_int]);
-    this.#bridge.open_channel(channel.pointer);
-    this.#channel = channel;
+    this.#channel = threadSafeCallback((kind, token) => this.#onEvent(kind, token), null, [c_int, c_int]).unref();
+    this.#bridge.open_channel(this.#channel.pointer);
   }
 
-  /** Close the channel when nothing awaits Python (it keeps Node.js alive). */
-  #scheduleClose() {
-    if (this.#closeScheduled || this.#awaits.size > 0) return;
-    this.#closeScheduled = true;
-    setImmediate(() => {
-      this.#closeScheduled = false;
-      if (this.#awaits.size > 0 || !this.#channel || this.#finalized) return;
-      this.#channel = null;
-      // The callback is released when its CLOSE event arrives: the last one.
-      this.#withGIL(() => this.#bridge.close_channel());
-    });
+  #unrefChannel() {
+    if (this.#awaits.size === 0 && this.#channel && !this.#finalized) this.#channel.unref();
   }
 
   /** Channel event, on the Node.js main thread. */
-  #onEvent(channel, kind, token) {
-    if (kind === EVENT_CLOSE) return void setImmediate(() => channel.release());
+  #onEvent(kind, token) {
     if (this.#finalized) return;
     switch (kind) {
       case EVENT_DONE: {
@@ -1844,7 +1905,7 @@ export class Python {
             entry.reject(error);
           }
         });
-        this.#scheduleClose();
+        this.#unrefChannel();
         break;
       }
       case EVENT_CALL:

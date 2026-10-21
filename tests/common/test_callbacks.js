@@ -4,6 +4,7 @@
  */
 
 import assert, { strictEqual, throws } from "node:assert";
+import { spawnSync } from "node:child_process";
 import os from "node:os";
 import { describe, it, before, after } from "node:test";
 import * as ctypes from "node-ctypes";
@@ -259,6 +260,71 @@ describe("Callbacks", function () {
 
       assert.strictEqual(w.name, "CallbackError");
       assert.match(w.message, /compare exploded/);
+    });
+  });
+
+  describe("threadSafeCallback ref() / unref()", function () {
+    // A child process: does a thread-safe callback keep the event loop alive?
+    const runChild = (code, timeout) => spawnSync(process.execPath, ["--input-type=module", "-e", `import { threadSafeCallback, c_int } from "node-ctypes";\n${code}`], { cwd: import.meta.dirname, timeout, encoding: "utf8" });
+
+    it("return the wrapper and throw after release()", function () {
+      const cb = ctypes.threadSafeCallback(() => 0, ctypes.c_int, []);
+      strictEqual(cb.unref(), cb);
+      strictEqual(cb.ref(), cb);
+      cb.release();
+      throws(() => cb.unref(), /released/);
+    });
+
+    it("a referenced callback keeps the process alive, an unreferenced one does not", function () {
+      const kept = runChild("threadSafeCallback(() => 0, c_int, []);", 1500);
+      strictEqual(kept.signal, "SIGTERM", "the process should still be running");
+      const exited = runChild("threadSafeCallback(() => 0, c_int, []).unref(); console.log('exiting');", 10000);
+      strictEqual(exited.status, 0, exited.stderr);
+      strictEqual(exited.stdout.trim(), "exiting");
+    });
+
+    it("delivers calls from a native thread while unreferenced", async function () {
+      const received = [];
+      let done;
+      const finished = new Promise((resolve) => (done = resolve));
+      const keepAlive = setTimeout(() => {}, 10000); // the test keeps the event loop alive, not the callback
+      const cb = ctypes
+        .threadSafeCallback(
+          (arg) => {
+            received.push(Number(arg));
+            done();
+            return null;
+          },
+          ctypes.c_void_p,
+          [ctypes.c_void_p],
+        )
+        .unref();
+      try {
+        if (process.platform === "win32") {
+          const kernel32 = new ctypes.WinDLL("kernel32.dll");
+          const CreateThread = kernel32.func("CreateThread", ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p]);
+          const CloseHandle = kernel32.func("CloseHandle", ctypes.c_int, [ctypes.c_void_p]);
+          const handle = CreateThread(null, 0, cb.pointer, 42n, 0, null);
+          assert.ok(handle, "CreateThread failed");
+          await finished;
+          CloseHandle(handle);
+        } else {
+          // glibc < 2.34 (manylinux_2_28) exports pthread_* from libpthread only;
+          // newer glibc and musl resolve them from libc through this name too.
+          const pthread = platform === "darwin" ? libc : new ctypes.CDLL("libpthread.so.0");
+          const pthread_create = pthread.func("pthread_create", ctypes.c_int, [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]);
+          const pthread_join = pthread.func("pthread_join", ctypes.c_int, [ctypes.c_void_p, ctypes.c_void_p]);
+          const thread = new ctypes.c_void_p();
+          strictEqual(pthread_create(ctypes.byref(thread), null, cb.pointer, 42n), 0);
+          await finished;
+          // The thread returns once the callback has run on the main thread.
+          strictEqual(pthread_join(thread.value, null), 0);
+        }
+        assert.deepStrictEqual(received, [42]);
+      } finally {
+        clearTimeout(keepAlive);
+        cb.release();
+      }
     });
   });
 });

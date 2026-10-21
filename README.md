@@ -192,6 +192,17 @@ with the `using` declaration for scope-bound cleanup (also on `throw`):
 Set `NODE_CTYPES_DEBUG_CALLBACKS=1` to log a stack trace for every
 callback garbage-collected without `.release()`.
 
+Callbacks invoked by native threads need `threadSafeCallback()`: the
+JavaScript function runs on the main thread, and the calling thread waits
+for its result. Like a timer, a thread-safe callback keeps the event loop
+alive until released; `.unref()` lets the process exit when nothing else
+is pending (calls are still delivered while it runs), `.ref()` restores it:
+
+```javascript
+const onEvent = threadSafeCallback((code) => console.log("event", code), null, [c_int]).unref();
+startWorker(onEvent); // a native library calling onEvent from its own thread
+```
+
 ### Errors: `errno` and `GetLastError`
 
 `GetLastError()` / `get_errno()` read a **private thread-local slot** —

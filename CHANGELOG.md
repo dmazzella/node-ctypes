@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`threadSafeCallback().ref()` / `.unref()`**: like a timer, a thread-safe
+  callback keeps the event loop alive until released; `.unref()` lets the
+  process exit when nothing else is pending, while calls from other threads
+  are still delivered. Both return the wrapper.
 - **Embedded Python example** (`examples/cross-platform/python`): CPython
   driven through its C API with node-ctypes, on Windows, macOS and Linux
   (glibc and musl), Python 3.8+ including free-threaded builds. It runs code

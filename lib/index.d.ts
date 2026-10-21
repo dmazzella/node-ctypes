@@ -589,6 +589,21 @@ export interface CallbackWrapper {
 }
 
 /**
+ * Wrapper returned by {@link threadSafeCallback}.
+ * @category Callbacks
+ */
+export interface ThreadSafeCallbackWrapper extends CallbackWrapper {
+  /** Keep the Node.js event loop alive until released (the default). */
+  ref(): this;
+
+  /**
+   * Do not keep the Node.js event loop alive: the process can exit while the
+   * callback exists. Calls from other threads are delivered while it runs.
+   */
+  unref(): this;
+}
+
+/**
  * Native callback class for main-thread callbacks.
  * @category Callbacks
  */
@@ -618,7 +633,12 @@ export class Callback {
  *
  * @category Callbacks
  */
-export class ThreadSafeCallback extends Callback {}
+export class ThreadSafeCallback extends Callback {
+  /** Keep the Node.js event loop alive until released (the default). */
+  ref(): this;
+  /** Do not keep the Node.js event loop alive. */
+  unref(): this;
+}
 
 // =============================================================================
 // Structures
@@ -1395,6 +1415,8 @@ export function callback(fn: Function, returnType: AnyType | null, argTypes?: An
  * Create a thread-safe callback that can be invoked from any thread.
  *
  * **Important:** Call `.release()` when the callback is no longer needed.
+ * Like a timer, it keeps the Node.js event loop alive until released, unless
+ * `.unref()` is called.
  *
  * @param fn - JavaScript function to wrap
  * @param returnType - Return type of the callback
@@ -1402,7 +1424,7 @@ export function callback(fn: Function, returnType: AnyType | null, argTypes?: An
  *
  * @category Callbacks
  */
-export function threadSafeCallback(fn: Function, returnType: AnyType | null, argTypes?: AnyType[]): CallbackWrapper;
+export function threadSafeCallback(fn: Function, returnType: AnyType | null, argTypes?: AnyType[]): ThreadSafeCallbackWrapper;
 
 /**
  * Create a function pointer type with cdecl calling convention.

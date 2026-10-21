@@ -130,10 +130,16 @@ await python.run(python.main.crawl(), { signal: AbortSignal.timeout(5000) }); //
 for await (const event of python.main.events()) console.log(event); // a Python async generator
 ```
 
-Node.js is woken through a node-ctypes `threadSafeCallback`, called by a Python thread (through Python's own `ctypes`). It exists only while JavaScript awaits Python code, because it keeps the Node.js event loop alive: calls made by Python threads at other times wait for the next `await`. Do not wait for such a call while the main thread is blocked in Python (for example `Thread.join()` in synchronous code): Node.js could not run it.
+Node.js is woken through a node-ctypes `threadSafeCallback`, called by a Python thread (through Python's own `ctypes`), so calls from Python threads run as soon as the Node.js event loop is free. The callback is `unref()`'d: like an unref'd timer, Python activity alone does not keep Node.js alive, while JavaScript awaiting Python code does. Do not wait for such a call while the main thread is blocked in Python (for example `Thread.join()` in synchronous code): Node.js could not run it; after 5 s Python prints a `RuntimeWarning` about the likely deadlock.
+
+### Diagnostics and options
+
+- `python.stats()` counts the objects shared by the two languages: PyObject proxies alive in JavaScript (about 40 are used by python.js itself), JavaScript functions and objects used by Python, pending awaits and calls. A number that keeps growing is a leak.
+- `Python.initialize({ stdin: false })` leaves the process stdin to Node.js: Python reads stdin through its own buffer, so `input()` would also consume lines meant for Node.js.
 
 ### Limits
 
+- Requires node-ctypes 2.1+ (`threadSafeCallback().unref()`).
 - Node.js `worker_threads` cannot use Python (one interpreter, driven by the main thread).
 - Reference cycles between the two languages (a JavaScript object kept by Python that holds a proxy of the same Python object) are never collected.
 - A `JsProxy` used from a Python thread other than the main one waits for Node.js like any JavaScript call (see above).

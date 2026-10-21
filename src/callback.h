@@ -77,6 +77,8 @@ class ThreadSafeCallback : public Napi::ObjectWrap<ThreadSafeCallback> {
   Napi::Value Release(const Napi::CallbackInfo& info);
   Napi::Value SetErrorHandler(const Napi::CallbackInfo& info);
   Napi::Value GetLastError(const Napi::CallbackInfo& info);
+  Napi::Value Ref(const Napi::CallbackInfo& info);
+  Napi::Value Unref(const Napi::CallbackInfo& info);
 
  private:
   std::unique_ptr<ThreadSafeCallbackData> data_;
