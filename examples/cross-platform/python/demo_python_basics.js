@@ -116,6 +116,11 @@ const later = python.import("operator").add(launch, datetime.timedelta(kwargs({ 
 console.log(`    Date → datetime: ${python.builtins.repr(launch)}`);
 console.log(`    + timedelta(days=2, hours=3) → ${later.isoformat()} → back as a Date: ${new Date(later).toISOString()}`);
 console.log("    datetimes in eval() / toJS() are Dates:", python.eval("{'epoch': __import__('datetime').datetime(1970, 1, 1, tzinfo=__import__('datetime').timezone.utc)}"));
+if (globalThis.Temporal) {
+  const meeting = Temporal.ZonedDateTime.from("2026-10-21T15:30[Europe/Rome]");
+  console.log(`    Temporal: ${meeting} → ${python.builtins.repr(meeting)}`);
+  console.log("    date and timedelta in eval() → Temporal:", python.eval("[__import__('datetime').date(2026, 10, 21), __import__('datetime').timedelta(hours=1, minutes=30)]").map(String));
+}
 const samplesF64 = new Float64Array([2.5, 3.1, 4.7]);
 const view = python.toPython(samplesF64); // a memoryview of the same memory, no copy
 python.exec("def scale(values, factor):\n    for i in range(len(values)):\n        values[i] *= factor");

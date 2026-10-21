@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Embedded Python example**: `Temporal` values (Node.js 26+) convert to
+  and from `date`, `time`, `datetime` and `timedelta`; the interpreter can
+  be hosted by a worker thread (`demo_python_worker.js`), one thread per
+  process.
+
+## [2.1.0] - 2026-10-21
+
+### Added
+
 - **`threadSafeCallback().ref()` / `.unref()`**: like a timer, a thread-safe
   callback keeps the event loop alive until released; `.unref()` lets the
   process exit when nothing else is pending, while calls from other threads
@@ -361,7 +370,8 @@ It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-
 
 Initial releases.
 
-[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/dmazzella/node-ctypes/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/dmazzella/node-ctypes/compare/v1.14.0...v2.0.0
 [1.14.0]: https://github.com/dmazzella/node-ctypes/compare/v1.13.0...v1.14.0
 [1.13.0]: https://github.com/dmazzella/node-ctypes/compare/v1.12.1...v1.13.0

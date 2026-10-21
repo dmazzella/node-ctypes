@@ -16,6 +16,7 @@ node examples/cross-platform/python/demo_python_callbacks.js  # JavaScript funct
 node examples/cross-platform/python/demo_python_threads.js    # Python threads alongside the Node.js event loop
 node examples/cross-platform/python/demo_python_async.js      # asyncio coroutines ↔ JavaScript promises, Node.js fetch() → Python asyncio server
 node examples/cross-platform/python/demo_python_module.js     # import the local inventory.py
+node examples/cross-platform/python/demo_python_worker.js     # Python hosted by a worker thread
 
 # Choose the interpreter (e.g. a virtual environment) and, if needed, its library
 PYTHON=/path/to/venv/bin/python node examples/cross-platform/python/demo_python_basics.js
@@ -96,6 +97,19 @@ const values = np.zeros(4).toTypedArray(); // Float64Array over the numpy memory
 
 A `Date` becomes an aware `datetime` (UTC); `datetime`s become `Date`s in deep conversions (`eval()`, `toJS()`; naive ones are local time) and with `new Date(dt)`.
 
+Where `Temporal` exists (Node.js 26+), the other date types convert too:
+
+| Python                                                                                             | JavaScript                                                                                         |
+| -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `date`                                                                                             | `Temporal.PlainDate`                                                                               |
+| `time` (without time zone)                                                                         | `Temporal.PlainTime`                                                                               |
+| `timedelta`                                                                                        | `Temporal.Duration` (a `Duration` with years or months has no `timedelta` equivalent: `TypeError`) |
+| naive `datetime`                                                                                   | ← `Temporal.PlainDateTime`                                                                         |
+| aware `datetime` (UTC)                                                                             | ← `Temporal.Instant`                                                                               |
+| aware `datetime` (`zoneinfo.ZoneInfo`, a fixed offset before Python 3.9 or without time zone data) | ← `Temporal.ZonedDateTime`                                                                         |
+
+Python to JavaScript conversions happen in deep conversions (`eval()`, `toJS()`), as for `Date`; without `Temporal` these values stay Python objects.
+
 ### with, async with, time limits
 
 ```javascript
@@ -132,6 +146,10 @@ for await (const event of python.main.events()) console.log(event); // a Python 
 
 Node.js is woken through a node-ctypes `threadSafeCallback`, called by a Python thread (through Python's own `ctypes`), so calls from Python threads run as soon as the Node.js event loop is free. The callback is `unref()`'d: like an unref'd timer, Python activity alone does not keep Node.js alive, while JavaScript awaiting Python code does. Do not wait for such a call while the main thread is blocked in Python (for example `Thread.join()` in synchronous code): Node.js could not run it; after 5 s Python prints a `RuntimeWarning` about the likely deadlock.
 
+### Python in a worker
+
+One thread per process hosts the interpreter: the main thread or a `worker_threads` Worker, whichever calls `Python.initialize()` first (other threads get an error). Hosting it in a worker keeps CPU-bound Python code off the Node.js main thread; the main thread sends jobs with `postMessage` (see `demo_python_worker.js`).
+
 ### Diagnostics and options
 
 - `python.stats()` counts the objects shared by the two languages: PyObject proxies alive in JavaScript (about 40 are used by python.js itself), JavaScript functions and objects used by Python, pending awaits and calls. A number that keeps growing is a leak.
@@ -140,7 +158,7 @@ Node.js is woken through a node-ctypes `threadSafeCallback`, called by a Python 
 ### Limits
 
 - Requires node-ctypes 2.1+ (`threadSafeCallback().unref()`).
-- Node.js `worker_threads` cannot use Python (one interpreter, driven by the main thread).
+- One thread per process uses Python (see [Python in a worker](#python-in-a-worker)).
 - Reference cycles between the two languages (a JavaScript object kept by Python that holds a proxy of the same Python object) are never collected.
 - A `JsProxy` used from a Python thread other than the main one waits for Node.js like any JavaScript call (see above).
 

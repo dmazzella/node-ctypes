@@ -29,7 +29,8 @@
 //   - JavaScript → Python: null/undefined → None, boolean → bool, integer
 //     number and BigInt → int, number → float, string → str, Buffer /
 //     Uint8Array → bytes, Array → list, Tuple → tuple, plain object and Map →
-//     dict, Set → set, Date → datetime (UTC), function → callable (JavaScript
+//     dict, Set → set, Date → datetime (UTC), Temporal values (Node.js 26+) →
+//     date / time / datetime / timedelta, function → callable (JavaScript
 //     classes are instantiated, `fn.new(...)` for any constructor): by value,
 //     deeply. Other typed arrays, ArrayBuffer and DataView → memoryview of
 //     their memory (no copy). Other objects (class instances, promises,
@@ -48,8 +49,9 @@
 //     arithmetic (`fraction * 2`), `new Date(datetime)`, JSON.stringify(),
 //     `obj.toTypedArray()` (the memory of a buffer: bytearray, array, numpy),
 //     `obj.toJS()` for a deep conversion (tuples become Tuple arrays,
-//     datetimes Dates), and `obj[Symbol.dispose]()` (or `using`) to release it
-//     before GC does.
+//     datetimes Dates; with Temporal, dates PlainDates, times PlainTimes and
+//     timedeltas Durations), and `obj[Symbol.dispose]()` (or `using`) to
+//     release it before GC does.
 //   - Python exceptions are thrown as PythonError (type, traceback, exception);
 //     JavaScript errors thrown in functions called by Python are raised in
 //     Python as RuntimeError (or as the original Python exception).
@@ -60,7 +62,9 @@
 //
 // Threads: the GIL is released whenever Python is not running for JavaScript,
 // so Python threads keep running while Node.js handles its event loop.
-// Free-threaded builds (python3.14t) work too.
+// Free-threaded builds (python3.14t) work too. One thread per process hosts
+// the interpreter: the main thread or a worker_threads Worker (to keep
+// CPU-bound Python code off the main thread), whichever initializes it first.
 //
 // asyncio: coroutines, tasks and concurrent.futures.Future objects are
 // awaitable from JavaScript (`await python.main.fetch_all(urls)`, or
@@ -94,7 +98,8 @@
 // (threadSafeCallback().unref()).
 
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { inspect } from "node:util";
 import { CDLL, WinDLL, RTLD_GLOBAL, Structure, CFUNCTYPE, threadSafeCallback, addressof, byref, memmove, ptrToBuffer, string_at, c_char_p, c_wchar_p, c_void_p, c_int, c_long, c_ulong, c_int64, c_double, c_ssize_t } from "node-ctypes";
@@ -396,6 +401,52 @@ def timestamp(obj):
         return (obj - _EPOCH) // datetime.timedelta(microseconds=1) / 1000
     except (OverflowError, ValueError, OSError):
         return None  # outside the range of the platform (datetime.min, ...): stays a proxy
+
+_MICROSECOND = datetime.timedelta(microseconds=1)
+
+def to_js_value(obj, temporal):
+    """Deep conversion of a date or duration: ("Date", ms), and with Temporal
+    ("PlainDate", y, m, d), ("PlainTime", h, m, s, us), ("Duration", d, h, m,
+    s, ms, us); None for other objects."""
+    if isinstance(obj, datetime.datetime):
+        ms = timestamp(obj)
+        return None if ms is None else ("Date", ms)
+    if not temporal:
+        return None
+    if isinstance(obj, datetime.date):
+        return ("PlainDate", obj.year, obj.month, obj.day)
+    if isinstance(obj, datetime.time) and obj.tzinfo is None:
+        return ("PlainTime", obj.hour, obj.minute, obj.second, obj.microsecond)
+    if isinstance(obj, datetime.timedelta):
+        total = obj // _MICROSECOND
+        sign = -1 if total < 0 else 1  # all the fields of a Temporal.Duration have the same sign
+        parts = []
+        rest = abs(total)
+        for unit in (86_400_000_000, 3_600_000_000, 60_000_000, 1_000_000, 1000):
+            value, rest = divmod(rest, unit)
+            parts.append(sign * value)
+        return ("Duration", *parts, sign * rest)
+    return None
+
+def from_temporal(kind, *fields):
+    """A Temporal value from JavaScript."""
+    if kind == "date":
+        return datetime.date(*fields)
+    if kind == "time":
+        return datetime.time(*fields)
+    if kind == "datetime":
+        return datetime.datetime(*fields)
+    if kind == "instant":
+        return _EPOCH + fields[0] * _MICROSECOND
+    if kind == "zoned":
+        micros, zone, offset = fields
+        try:
+            import zoneinfo
+            tz = zoneinfo.ZoneInfo(zone)
+        except Exception:  # Python 3.8, or no time zone data (Windows without tzdata)
+            tz = datetime.timezone(offset * _MICROSECOND)
+        return (_EPOCH + micros * _MICROSECOND).astimezone(tz)
+    return fields[0] * _MICROSECOND  # duration
 
 def format_exception(exc):
     return "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
@@ -820,11 +871,83 @@ export function kwargs(values) {
 // ─── Python ─────────────────────────────────────────────────────────
 
 const DONE = Symbol("done");
+// One interpreter per process, hosted by one thread (the main thread or a
+// worker). Workers do not share modules: the claim is a file created
+// atomically (O_EXCL), named after the process and holding its start time (a
+// file left by a dead process with the same pid is stale).
+const HOST_LOCK = path.join(tmpdir(), `node-ctypes-python-${process.pid}.lock`);
+const PROCESS_START = String(Math.round(Date.now() / 1000 - process.uptime()));
+
+function claimHost() {
+  // Files left by processes that died without finalizing Python.
+  for (const name of readdirSync(tmpdir())) {
+    const pid = Number(/^node-ctypes-python-(\d+)\.lock$/.exec(name)?.[1]);
+    if (!pid || pid === process.pid) continue;
+    try {
+      process.kill(pid, 0); // only checks that the process exists
+    } catch (error) {
+      if (error.code === "ESRCH") rmSync(path.join(tmpdir(), name), { force: true });
+    }
+  }
+  for (let attempt = 0; ; attempt++) {
+    try {
+      writeFileSync(HOST_LOCK, PROCESS_START, { flag: "wx" });
+      return;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      let owner = "";
+      try {
+        owner = readFileSync(HOST_LOCK, "utf8");
+      } catch {
+        // being written or removed: retry
+      }
+      if (attempt === 0 && owner && Math.abs(Number(owner) - Number(PROCESS_START)) > 2) {
+        unlinkSync(HOST_LOCK); // stale
+        continue;
+      }
+      throw new Error("Python is already initialized in this process by another thread (the main thread or a worker): one thread hosts the interpreter, use it from there.");
+    }
+  }
+}
+
+function releaseHost() {
+  try {
+    unlinkSync(HOST_LOCK);
+  } catch {
+    // already removed
+  }
+}
 // Channel events (see BRIDGE).
 const EVENT_DONE = 0;
 const EVENT_CALL = 1;
 const EVENT_CANCEL = 2;
 const isIndex = (prop) => /^-?(0|[1-9]\d*)$/.test(prop);
+
+// Temporal (Node.js 26+): date, time and timedelta ↔ PlainDate, PlainTime and Duration.
+const { Temporal } = globalThis;
+const NS_PER_US = 1000n;
+
+/** Arguments of the bridge's from_temporal() for a Temporal value, or null. */
+function temporalFields(value) {
+  if (value instanceof Temporal.PlainDate) return ["date", value.year, value.month, value.day];
+  if (value instanceof Temporal.PlainTime) return ["time", value.hour, value.minute, value.second, value.millisecond * 1000 + value.microsecond];
+  if (value instanceof Temporal.PlainDateTime) return ["datetime", value.year, value.month, value.day, value.hour, value.minute, value.second, value.millisecond * 1000 + value.microsecond];
+  if (value instanceof Temporal.Instant) return ["instant", value.epochNanoseconds / NS_PER_US];
+  if (value instanceof Temporal.ZonedDateTime) return ["zoned", value.epochNanoseconds / NS_PER_US, value.timeZoneId, value.offsetNanoseconds / 1000];
+  if (value instanceof Temporal.Duration) {
+    if (value.years || value.months) throw new TypeError("A Temporal.Duration with years or months has no timedelta equivalent");
+    const micros =
+      BigInt(value.weeks * 7 + value.days) * 86_400_000_000n +
+      BigInt(value.hours) * 3_600_000_000n +
+      BigInt(value.minutes) * 60_000_000n +
+      BigInt(value.seconds) * 1_000_000n +
+      BigInt(value.milliseconds) * 1000n +
+      BigInt(value.microseconds) +
+      BigInt(value.nanoseconds) / NS_PER_US;
+    return ["duration", micros];
+  }
+  return null;
+}
 // Function.prototype members used by JavaScript code on callables (handler.apply(this, args), fn.bind()).
 const FUNCTION_MEMBERS = new Set(["apply", "call", "bind", "length", "name"]);
 let instance = null;
@@ -896,6 +1019,16 @@ export class Python {
   constructor({ executable, library = process.env.PYTHON_LIBRARY, stdin = true } = {}) {
     if (!constructing) throw new TypeError("Use Python.initialize()");
 
+    claimHost(); // one interpreter per process (see HOST_LOCK)
+    try {
+      this.#start(executable, library, stdin);
+    } catch (error) {
+      releaseHost();
+      throw error;
+    }
+  }
+
+  #start(executable, library, stdin) {
     const info = probeInterpreter(executable);
     const loaded = loadLibrary(info, library);
 
@@ -910,6 +1043,12 @@ export class Python {
         `${loaded.library} is Python ${libraryVersion}, but ${info.executable} is Python ${info.version}: ` + "pass the matching interpreter too (Python.initialize({ executable, library }), or the PYTHON and PYTHON_LIBRARY environment variables).",
       );
     }
+
+    // Initialized by other code in the process (another native module).
+    const isInitialized = loaded.lib.Py_IsInitialized;
+    isInitialized.argtypes = [];
+    isInitialized.restype = c_int;
+    if (isInitialized()) throw new Error("Python is already initialized in this process by other code");
 
     /** Python version (e.g. "3.12.8"). */
     this.version = info.version;
@@ -992,6 +1131,8 @@ export class Python {
       "export_buffer",
       "from_timestamp",
       "timestamp",
+      "to_js_value",
+      "from_temporal",
       "is_awaitable",
       "submit",
       "open_channel",
@@ -1261,6 +1402,7 @@ export class Python {
       // JavaScript function called by Python): the GIL is held by the Python
       // frames below, which cannot be finalized. The process is exiting.
       this.#finalized = true;
+      releaseHost();
       return;
     }
     this.#api.PyEval_RestoreThread(this.#threadState);
@@ -1271,6 +1413,7 @@ export class Python {
       // finalize anyway
     }
     this.#api.Py_FinalizeEx();
+    releaseHost();
     this.#finalized = true;
     this.#functions.clear();
     // Pending awaits never complete, and the channel must not keep Node.js alive.
@@ -1419,8 +1562,20 @@ export class Python {
           return new Set(this.#items(ptr));
       }
       api.Py_IncRef(ptr);
-      const ms = this.#take(this.#callRaw(this.#bridge.timestamp, [ptr]));
-      if (ms !== null) return new Date(ms);
+      const special = this.#takeDeep(this.#callRaw(this.#bridge.to_js_value, [ptr, this.#toPy(Boolean(Temporal))]));
+      if (special !== null) {
+        const [kind, ...f] = special;
+        switch (kind) {
+          case "Date":
+            return new Date(f[0]);
+          case "PlainDate":
+            return new Temporal.PlainDate(f[0], f[1], f[2]);
+          case "PlainTime":
+            return new Temporal.PlainTime(f[0], f[1], f[2], Math.floor(f[3] / 1000), f[3] % 1000);
+          case "Duration":
+            return new Temporal.Duration(0, 0, 0, ...f);
+        }
+      }
     }
     api.Py_IncRef(ptr);
     return this.#wrap(ptr);
@@ -1471,6 +1626,14 @@ export class Python {
     if (value instanceof Date) {
       if (Number.isNaN(value.getTime())) throw new TypeError("Cannot convert an Invalid Date to a Python object");
       return this.#callRaw(this.#bridge.from_timestamp, [this.#toPy(value.getTime())]);
+    }
+    if (Temporal) {
+      const fields = temporalFields(value);
+      if (fields)
+        return this.#callRaw(
+          this.#bridge.from_temporal,
+          fields.map((field) => this.#toPy(field)),
+        );
     }
     if (value instanceof Uint8Array && !(value instanceof Uint8ClampedArray)) return this.#check(api.PyBytes_FromStringAndSize(value, value.byteLength));
     if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer || value instanceof SharedArrayBuffer) return this.#memoryview(value);
