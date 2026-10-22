@@ -5,20 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Added
-
-- **Embedded Python example**: `Temporal` values (Node.js 26+) convert to
-  and from `date`, `time`, `datetime` and `timedelta`; the interpreter can
-  be hosted by a worker thread (`demo_python_worker.js`), one thread per
-  process.
-- **Embedded Python example**: synchronous Python code waiting for a thread
-  that calls JavaScript (`Thread.join()`, `Event.wait()`, ...) is no longer a
-  deadlock: the main thread runs the call, woken by `SIGURG` on POSIX
-  systems and by the interrupt event on Windows with Python 3.14+.
-
-## [2.1.0] - 2026-10-21
+## [2.1.0] - 2026-10-22
 
 ### Added
 
@@ -28,15 +15,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are still delivered. Both return the wrapper.
 - **Embedded Python example** (`examples/cross-platform/python`): CPython
   driven through its C API with node-ctypes, on Windows, macOS and Linux
-  (glibc and musl), Python 3.8+ including free-threaded builds. It runs code
-  and imports modules (local `.py` files and numpy too), converts values
-  both ways (dict keys as properties, `Tuple`, `Date` ↔ `datetime`), uses
-  JavaScript objects from Python by reference (`JsProxy`, `byReference()`),
-  shares memory between typed arrays and Python buffers without copies,
-  implements `with` / `async with` and time limits, and connects asyncio to
-  the Node.js event loop with a `threadSafeCallback`: coroutines are
-  awaitable from JavaScript, coroutines and Python threads call JavaScript
-  functions, async iterators and cancellation work in both directions.
+  (glibc and musl), Python 3.8+ including free-threaded builds, hosted by
+  the main thread or by a worker thread. It runs code and imports modules
+  and packages (local `.py` files and numpy too), converts values both ways
+  (dict keys as properties, `Tuple`, `Date` ↔ `datetime`, `Temporal` types
+  on Node.js 26+), uses JavaScript objects from Python by reference
+  (`JsProxy`, `byReference()`), shares memory between typed arrays and
+  Python buffers without copies, and implements `with` / `async with` and
+  time limits. asyncio is connected to the Node.js event loop with an
+  unreferenced `threadSafeCallback`: coroutines are awaitable from
+  JavaScript, coroutines and Python threads call JavaScript functions (also
+  while synchronous Python code waits for them, without deadlocks), and
+  async iterators and cancellation work in both directions. `stats()`
+  counts the objects shared by the two languages.
 - **A README for every example**, published as child pages of the Examples
   document in the API documentation.
 
@@ -374,7 +365,6 @@ It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-
 
 Initial releases.
 
-[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.1.0...HEAD
 [2.1.0]: https://github.com/dmazzella/node-ctypes/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/dmazzella/node-ctypes/compare/v1.14.0...v2.0.0
 [1.14.0]: https://github.com/dmazzella/node-ctypes/compare/v1.13.0...v1.14.0
