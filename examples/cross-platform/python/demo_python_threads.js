@@ -106,6 +106,18 @@ def size(url):
   }
   console.log(`    this file read by Node.js for a Python thread: ${await pool.submit(python.main.size, import.meta.url)} bytes`);
   pool.shutdown();
+
+  // Synchronous Python code waiting for a thread that calls JavaScript: the
+  // main thread runs the call while it waits (woken by SIGURG on POSIX).
+  if (process.platform !== "win32") {
+    python.exec(`
+joined = []
+t = threading.Thread(target=lambda: joined.append(checksum("delta")))
+t.start()
+t.join()  # not a deadlock: node.hash() runs on the main thread meanwhile
+`);
+    console.log(`    from a thread joined by synchronous code: ${python.eval("joined[0]")}`);
+  }
   console.log("\n    Done!");
 }
 

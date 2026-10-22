@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and from `date`, `time`, `datetime` and `timedelta`; the interpreter can
   be hosted by a worker thread (`demo_python_worker.js`), one thread per
   process.
+- **Embedded Python example**: synchronous Python code waiting for a thread
+  that calls JavaScript (`Thread.join()`, `Event.wait()`, ...) is no longer a
+  deadlock on POSIX systems: the main thread runs the call, woken by
+  `SIGURG`.
 
 ## [2.1.0] - 2026-10-21
 

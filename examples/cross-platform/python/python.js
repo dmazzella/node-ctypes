@@ -79,10 +79,12 @@
 // an AbortSignal aborted when Python cancels the call. Node.js runs these
 // calls as soon as its event loop is free, through an unref()'d
 // threadSafeCallback: like an unref()'d timer, Python activity alone does
-// not keep Node.js alive, JavaScript awaiting Python code does. Do not wait
-// for such a future while the main thread is blocked in Python (e.g.
-// Thread.join() in synchronous code): Node.js could not run it, and after 5 s
-// Python warns about the likely deadlock.
+// not keep Node.js alive, JavaScript awaiting Python code does. While the
+// main thread runs Python code (e.g. Thread.join() in synchronous code), it
+// runs these calls itself: SIGURG interrupts its wait (POSIX). Async
+// JavaScript functions need the Node.js event loop, so waiting for them
+// there is a deadlock (after 5 s Python warns about it), as on Windows,
+// where a blocked main thread cannot be woken.
 //
 // Diagnostics: `python.stats()` counts the objects shared by the two
 // languages (to find leaks). `Python.initialize({ stdin: false })` leaves the
@@ -190,7 +192,7 @@ const TYPES = ["PyBool_Type", "PyLong_Type", "PyFloat_Type", "PyUnicode_Type", "
 
 // Private helper module run inside the embedded interpreter.
 const BRIDGE = `
-import asyncio, collections, collections.abc, concurrent.futures, ctypes, datetime, inspect, itertools, numbers, queue, sys, threading, traceback, warnings, weakref
+import asyncio, collections, collections.abc, concurrent.futures, ctypes, datetime, inspect, itertools, numbers, queue, signal, sys, threading, traceback, warnings, weakref
 
 _main = threading.get_ident()
 _released = collections.deque()  # JavaScript functions no longer referenced
@@ -616,11 +618,53 @@ class JsFuture(concurrent.futures.Future):
         except concurrent.futures.TimeoutError:
             if _main_busy is not None and _main_busy.value:
                 warnings.warn(
-                    f"{self.name} has been waiting for 5 s: the Node.js main thread is running Python code "
-                    "(a synchronous call from JavaScript) and cannot run it. If that code waits for this thread "
-                    "(Thread.join(), future.result()), this is a deadlock: await the work from JavaScript instead.",
+                    f"{self.name} has been waiting for 5 s while the Node.js main thread runs Python code "
+                    "(a synchronous call from JavaScript). If that code waits for this thread (Thread.join(), "
+                    "future.result()), this is a deadlock: an async JavaScript function needs the Node.js event "
+                    "loop, and on Windows a blocked main thread cannot run JavaScript calls. Await the work from "
+                    "JavaScript instead.",
                     RuntimeWarning, stacklevel=2)
         return super().result()
+
+# A thread calling JavaScript while the main thread runs Python code (e.g.
+# Thread.join() on that thread): the main thread runs the call itself, from
+# inside Python. POSIX: SIGURG (unused by Node.js, ignored by default) is sent
+# to the main thread; a blocking wait (join(), lock.acquire(), Event.wait(),
+# sleep, I/O) is interrupted, runs the signal handler, then resumes (PEP 475).
+# Windows: a pending call, run while the main thread executes bytecode.
+_wakeup = None  # the signal, when its handler is installed
+
+def _serve(token):
+    try:
+        if token in _requests:  # not served through the channel yet
+            _op("serve", token)
+    except BaseException:
+        traceback.print_exc()  # never raised in the code the main thread runs
+
+def _serve_waiting(*_):
+    for token in list(_requests):
+        _serve(token)
+
+def install_wakeup():
+    """On the main thread: the SIGURG handler, unless SIGURG is already used."""
+    global _wakeup
+    if not hasattr(signal, "pthread_kill") or not hasattr(signal, "SIGURG"):
+        return
+    if signal.getsignal(signal.SIGURG) not in (signal.SIG_DFL, signal.SIG_IGN, None):
+        return  # another runtime (e.g. Go) uses it
+    signal.signal(signal.SIGURG, _serve_waiting)
+    _wakeup = signal.SIGURG
+
+_PENDING = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
+_add_pending_call = ctypes.pythonapi.Py_AddPendingCall
+_add_pending_call.argtypes = (_PENDING, ctypes.c_void_p)
+_serve_pending_c = _PENDING(lambda token: (_serve(token), 0)[1])
+
+def _wake_main(token):
+    if _wakeup is not None:
+        signal.pthread_kill(_main, _wakeup)
+    else:
+        _add_pending_call(_serve_pending_c, token)
 
 def _call_later(fid, args, kwargs, function, awaitable=True):
     """Call a JavaScript function from a thread that is not the Node.js main
@@ -637,6 +681,8 @@ def _call_later(fid, args, kwargs, function, awaitable=True):
     except BaseException:
         del _requests[token]
         raise
+    if _main_busy is not None and _main_busy.value:
+        _wake_main(token)  # whichever comes first serves the call: the main thread or Node.js
     # Cancelling the future aborts the AbortSignal of cancellable() functions.
     future.add_done_callback(lambda f: f.cancelled() and _cancel(token))
     if not awaitable:
@@ -656,8 +702,11 @@ def _cancel(token):
         _send(CANCEL, token)
 
 def take_request(token):
-    """The call, or None if it was cancelled before Node.js could run it."""
-    fid, args, kwargs, future, function = _requests.pop(token)
+    """The call, or None if it was cancelled or already served."""
+    request = _requests.pop(token, None)
+    if request is None:
+        return None
+    fid, args, kwargs, future, function = request
     if future.cancelled():
         return None
     _calls[token] = future, function
@@ -1152,6 +1201,7 @@ export class Python {
     const javascript_object = (op, object, ...args) => this.#jsOp(op, object, ...args);
     bridge.set_op(javascript_object);
     bridge.set_busy_flag(addressof(Buffer.from(this.#busy.buffer)));
+    bridge.install_wakeup();
     this.#openChannel();
 
     // The environment of the probed interpreter (virtual environment included).
@@ -1801,6 +1851,9 @@ export class Python {
       }
       case "anext":
         return Promise.resolve(object.next()).then((step) => Tuple.of(Boolean(step.done), ref(step.value)));
+      case "serve": // a pending call: the main thread serves a call from a Python thread
+        this.#serve(object);
+        return null;
       case "await":
         return object; // a promise: the call settles when it does
       case "new":
@@ -2118,6 +2171,9 @@ export class Python {
     } catch (error) {
       return settle(false, error);
     }
+    // Synchronous results settle now: the call may be served from inside
+    // Python (a pending call), where promise reactions cannot run.
+    if (typeof result?.then !== "function" || this.#states.has(result)) return settle(true, result);
     Promise.resolve(result).then(
       (value) => settle(true, value),
       (error) => settle(false, error),
