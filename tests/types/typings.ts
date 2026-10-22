@@ -201,6 +201,10 @@ check(expectType<string>()(array(c_wchar, 4)().value));
 void array(array(c_int, 2), 3)()[0];
 void array(POINTER(POINT), 2)(pointer(new POINT()), null);
 void array(CFUNCTYPE(c_int), 2);
+// Arrays on existing memory (Python: from_address / from_buffer / from_buffer_copy).
+check(expectType<Buffer>()(array(c_int, 4).from_address(0x1000n)._buffer));
+check(expectType<number>()(Int3.from_buffer(Buffer.alloc(12))[0]));
+check(expectType<number>()(Int3.from_buffer_copy(i3, 0)[2]));
 
 // char array fields read as strings.
 class Named extends Structure {

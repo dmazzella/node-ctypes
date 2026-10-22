@@ -914,6 +914,21 @@ export interface ArrayTypeDef<E = any> {
   create(values?: ReadonlyArray<ArrayElementArg<E>> | string): ArrayInstance<E>;
   /** Wrap an existing buffer as an array with index access. */
   wrap(buffer: Buffer): ArrayInstance<E>;
+  /**
+   * Array sharing the memory of `source` from `offset` (Python:
+   * `(c_int * 3).from_buffer(source, offset)`).
+   */
+  from_buffer(source: Buffer | Uint8Array | { _buffer: Buffer }, offset?: number): ArrayInstance<E>;
+  /** Array with a copy of the bytes of `source` from `offset` (Python: `from_buffer_copy`). */
+  from_buffer_copy(source: Buffer | Uint8Array | { _buffer: Buffer }, offset?: number): ArrayInstance<E>;
+  /**
+   * Array on the memory at `address` (Python: `(c_int * 3).from_address(address)`).
+   * Its `_buffer` is a Buffer over that memory, as Python's
+   * `memoryview((c_char * n).from_address(address))`; where
+   * {@link EXTERNAL_BUFFERS} is `false` it is a copy kept in sync by the
+   * array's element accesses.
+   */
+  from_address(address: bigint | number): ArrayInstance<E>;
 }
 
 /**
@@ -923,6 +938,12 @@ export interface ArrayTypeDef<E = any> {
 export interface ArrayProxy<T = any> {
   [index: number]: T;
   [Symbol.iterator](): Iterator<T>;
+  /**
+   * The Buffer of the array: for an array on native memory
+   * ({@link ArrayTypeDef.from_address}) a Buffer over that memory, as
+   * Python's `memoryview()` (a copy where {@link EXTERNAL_BUFFERS} is `false`).
+   */
+  readonly _buffer: Buffer;
 }
 
 /**
@@ -1689,18 +1710,6 @@ export function sizeof(type: AnyType | StructDef | ArrayTypeDef | StructureClass
 export function alignment(type: AnyType | StructDef | ArrayTypeDef | StructureClass | PointerTypeDef | FuncPtrFactory | SimpleCDataInstance | Structure<any>): number;
 
 /**
- * Create a Buffer view of native memory at a given address.
- *
- * **Warning:** Use with caution — the buffer is not bounds-checked.
- *
- * @param address - Native memory address
- * @param size - Number of bytes
- *
- * @category Memory
- */
-export function ptrToBuffer(address: bigint | number, size: number): Buffer;
-
-/**
  * Define a struct using the functional API.
  *
  * For Python-like class syntax, use {@link Structure} instead.
@@ -2392,6 +2401,15 @@ export const SimpleCData: SimpleCDataConstructor;
  * @category Constants
  */
 export const POINTER_SIZE: number;
+
+/**
+ * `false` where the runtime does not allow Buffers over native memory
+ * (Electron, or `NODE_CTYPES_NO_EXTERNAL_BUFFERS=1`). ctypes instances on
+ * native memory (`from_address`, `in_dll`, pointers) then work on a
+ * synchronized copy, and their `_buffer` is that copy.
+ * @category Constants
+ */
+export const EXTERNAL_BUFFERS: boolean;
 
 /**
  * Size of `wchar_t` in bytes (2 on Windows, 4 on Unix).

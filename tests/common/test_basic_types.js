@@ -802,27 +802,6 @@ describe("Basic Types", function () {
       assert.ok(str.includes("0x0"));
     });
   });
-
-  // ─── ptrToBuffer() — node-ctypes specific ───
-
-  describe("ptrToBuffer() function", function () {
-    it("should create buffer view at address", function () {
-      const x = new ctypes.c_int32(42);
-      const addr = ctypes.addressof(x);
-      const view = ctypes.ptrToBuffer(addr, 4);
-      assert.ok(Buffer.isBuffer(view));
-      assert.strictEqual(view.length, 4);
-      assert.strictEqual(view.readInt32LE(0), 42);
-    });
-
-    it("should allow modifications to view change original", function () {
-      const x = new ctypes.c_int32(42);
-      const addr = ctypes.addressof(x);
-      const view = ctypes.ptrToBuffer(addr, 4);
-      view.writeInt32LE(999, 0);
-      assert.strictEqual(x.value, 999);
-    });
-  });
 });
 
 // ────────────────────────────────────────────────────────────────────

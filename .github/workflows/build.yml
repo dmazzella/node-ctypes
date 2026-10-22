@@ -94,6 +94,14 @@ jobs:
           npm install
           npm test
 
+      - name: Run tests without external buffers (as in Electron)
+        if: ${{ !matrix.container }}
+        env:
+          NODE_CTYPES_NO_EXTERNAL_BUFFERS: "1"
+        run: |
+          cd tests
+          npm test
+
       - name: Build and test in ${{ matrix.container }}
         if: ${{ matrix.container }}
         run: docker run --rm -v "$PWD:/work" -w /work ${{ matrix.container }} sh .github/scripts/build-linux.sh

@@ -39,6 +39,9 @@ class CTypesAddon : public Napi::Addon<CTypesAddon> {
   Napi::Value ReadWString(const Napi::CallbackInfo& info);
   Napi::Value PtrToBuffer(const Napi::CallbackInfo& info);
   Napi::Value AddressOf(const Napi::CallbackInfo& info);
+  Napi::Value Memmove(const Napi::CallbackInfo& info);
+  Napi::Value ReadMemory(const Napi::CallbackInfo& info);
+  Napi::Value WriteMemory(const Napi::CallbackInfo& info);
 
   // Module-level captured last-error / errno accessors (parity Python ctypes)
   Napi::Value GetCapturedLastError(const Napi::CallbackInfo& info);

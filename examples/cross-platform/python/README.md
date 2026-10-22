@@ -172,4 +172,4 @@ const python = Python.initialize({ stdout: "node", stderr: (text) => log.push(te
 
 ## node-ctypes features used
 
-`CDLL(path, RTLD_GLOBAL)` · a `Structure` with a `CFUNCTYPE` field (`PyMethodDef`) · `CFUNCTYPE` callbacks · `threadSafeCallback` called from a Python thread · `addressof()` and `ptrToBuffer()` for shared memory · `c_void_p.in_dll()` and `symbol()` for exported data · `byref()` output parameters · `string_at(address, size)` · `memmove` from an address · `WinDLL` (`AddDllDirectory`)
+`CDLL(path, RTLD_GLOBAL)` · a `Structure` with a `CFUNCTYPE` field (`PyMethodDef`) · `CFUNCTYPE` callbacks · `threadSafeCallback` called from a Python thread · `addressof()` and `array(c_uint8, n).from_address()` for shared memory · `c_void_p.in_dll()` and `symbol()` for exported data · `byref()` output parameters · `string_at(address, size)` · `memmove` from an address · `WinDLL` (`AddDllDirectory`)

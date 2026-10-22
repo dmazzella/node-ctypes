@@ -4,7 +4,7 @@ Tests array creation, indexing, iteration, in structs, in functions
 """
 
 import unittest
-from ctypes import c_int32, c_uint8, c_double, c_float, c_char, sizeof, Structure
+from ctypes import addressof, c_int32, c_uint8, c_double, c_float, c_char, sizeof, Structure
 
 class TestArrays(unittest.TestCase):
     def test_array_creation(self):
@@ -135,6 +135,41 @@ class TestArrays(unittest.TestCase):
         self.assertEqual(arr[0], 0)
         self.assertEqual(arr[4], 0)
     
+    def test_from_buffer_shares_memory(self):
+        """(c_int32 * 3).from_buffer shares the memory"""
+        IntArray3 = c_int32 * 3
+        buf = bytearray(16)
+        arr = IntArray3.from_buffer(buf, 4)
+        arr[1] = 7
+        self.assertEqual(int.from_bytes(buf[8:12], "little", signed=True), 7)
+        buf[4:8] = (-3).to_bytes(4, "little", signed=True)
+        self.assertEqual(arr[0], -3)
+        self.assertEqual(addressof(arr), addressof(c_uint8.from_buffer(buf)) + 4)
+        with self.assertRaises(ValueError):
+            IntArray3.from_buffer(buf, 8)
+
+    def test_from_buffer_copy(self):
+        """(c_int32 * 3).from_buffer_copy copies the bytes"""
+        IntArray3 = c_int32 * 3
+        source = IntArray3(1, 2, 3)
+        arr = IntArray3.from_buffer_copy(source)
+        arr[0] = 100
+        self.assertEqual(list(arr), [100, 2, 3])
+        self.assertEqual(source[0], 1)
+        with self.assertRaises(ValueError):
+            IntArray3.from_buffer_copy(bytes(8))
+
+    def test_from_address(self):
+        """(c_int32 * 3).from_address is the memory at the address"""
+        IntArray3 = c_int32 * 3
+        source = IntArray3(1, 2, 3)
+        arr = IntArray3.from_address(addressof(source))
+        self.assertEqual(list(arr), [1, 2, 3])
+        arr[2] = 30
+        self.assertEqual(source[2], 30)
+        source[0] = 10
+        self.assertEqual(arr[0], 10)
+
     def test_string_as_byte_array(self):
         """Test create arrays from strings"""
         CharArray = c_char * 100

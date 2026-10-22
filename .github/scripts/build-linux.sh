@@ -34,3 +34,5 @@ npm run build
 cd tests
 npm install
 npm test
+# Again as in Electron, where external buffers are not allowed.
+NODE_CTYPES_NO_EXTERNAL_BUFFERS=1 npm test

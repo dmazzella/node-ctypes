@@ -201,6 +201,42 @@ describe("Arrays", function () {
     });
   });
 
+  // Python: (c_int32 * 3).from_buffer / from_buffer_copy / from_address.
+  describe("Arrays on existing memory", function () {
+    const IntArray3 = ctypes.array(ctypes.c_int32, 3);
+
+    it("from_buffer shares the memory", function () {
+      const buf = Buffer.alloc(16);
+      const arr = IntArray3.from_buffer(buf, 4);
+      arr[1] = 7;
+      assert.strictEqual(buf.readInt32LE(8), 7);
+      buf.writeInt32LE(-3, 4);
+      assert.strictEqual(arr[0], -3);
+      assert.strictEqual(ctypes.addressof(arr), ctypes.addressof(buf) + 4n);
+      throws(() => IntArray3.from_buffer(buf, 8), RangeError);
+    });
+
+    it("from_buffer_copy copies the bytes", function () {
+      const source = IntArray3(1, 2, 3);
+      const arr = IntArray3.from_buffer_copy(source);
+      arr[0] = 100;
+      assert.deepStrictEqual([...arr], [100, 2, 3]);
+      assert.strictEqual(source[0], 1);
+      throws(() => IntArray3.from_buffer_copy(Buffer.alloc(8)), RangeError);
+    });
+
+    it("from_address is the memory at the address", function () {
+      const source = IntArray3(1, 2, 3);
+      const arr = IntArray3.from_address(ctypes.addressof(source));
+      assert.deepStrictEqual([...arr], [1, 2, 3]);
+      arr[2] = 30;
+      assert.strictEqual(source[2], 30);
+      source[0] = 10;
+      assert.strictEqual(arr[0], 10);
+      throws(() => IntArray3.from_address(0), TypeError);
+    });
+  });
+
   describe("String as Byte Arrays", function () {
     it("should create arrays from strings", function () {
       const CharArray = ctypes.array(ctypes.c_int8, 100);

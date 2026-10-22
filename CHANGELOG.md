@@ -17,6 +17,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Python's output through `process.stdout` / `process.stderr` (`"node"`, in
   order with `console.log`) or captures it with a function; in Electron,
   `toTypedArray()` falls back to a copy.
+- **`EXTERNAL_BUFFERS`**: `false` where the runtime does not allow Buffers
+  over native memory (Electron). Detected when the native module loads
+  (`napi_no_external_buffers_allowed`), not from the runtime name;
+  `NODE_CTYPES_NO_EXTERNAL_BUFFERS=1` forces the mode on Node.js.
+- **`from_buffer()`, `from_buffer_copy()` and `from_address()` on array
+  types**, as in Python: `array(c_uint8, n).from_address(addr)` is an
+  array on the memory at `addr`, and its `_buffer` a Buffer over it (the
+  equivalent of `memoryview((c_ubyte * n).from_address(addr))`).
+
+### Removed
+
+- **`ptrToBuffer()`** is no longer exported. Python ctypes has no
+  such function, and the same view is
+  `array(c_uint8, size).from_address(address)._buffer`. To read or write a
+  value at an address use `T.from_address(address)` or a `POINTER(T)`; to
+  copy bytes, `memmove(Buffer.alloc(n), address, n)`.
+
+### Fixed
+
+- **Electron**: `from_address`, `in_dll`, `pointer.contents`, `p[i]`,
+  `cast` and `memmove` / `memset` with addresses failed with "External
+  buffers are not allowed". Without external buffers, instances on native
+  memory now work on a copy: each read refreshes the bytes of the field and
+  each write copies them back, with one native call (about 50 ns);
+  instances on ordinary Buffers have no extra cost. Passed to C functions,
+  `addressof()`, `pointer()` and `memmove()` / `memset()` they use the
+  original address. On Node.js nothing changes.
+- **`memmove()` / `memset()` with addresses** copy through the native module
+  instead of creating a Buffer over the memory.
+
+### Performance
+
+- **Writes through a pointer to an address** (`p[i] = v`,
+  `p.contents = v` for simple types) copy the value with the native module
+  instead of creating an external Buffer at each write: `p[i]` read + write
+  goes from ~715 ns to ~350 ns.
+- **Nested structures and arrays** reuse their Proxy handler instead of
+  creating one at each field access.
 
 ## [2.1.1] - 2026-10-22
 

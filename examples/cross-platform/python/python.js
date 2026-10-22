@@ -110,7 +110,30 @@ import { existsSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { inspect } from "node:util";
-import { CDLL, WinDLL, RTLD_GLOBAL, Structure, CFUNCTYPE, threadSafeCallback, addressof, byref, memmove, ptrToBuffer, string_at, c_char_p, c_wchar_p, c_void_p, c_int, c_long, c_ulong, c_int64, c_double, c_ssize_t } from "node-ctypes";
+import {
+  CDLL,
+  WinDLL,
+  RTLD_GLOBAL,
+  Structure,
+  CFUNCTYPE,
+  threadSafeCallback,
+  addressof,
+  byref,
+  memmove,
+  array,
+  EXTERNAL_BUFFERS,
+  string_at,
+  c_char_p,
+  c_wchar_p,
+  c_void_p,
+  c_int,
+  c_long,
+  c_ulong,
+  c_int64,
+  c_double,
+  c_ssize_t,
+  c_uint8,
+} from "node-ctypes";
 
 // ─── Python C API ───────────────────────────────────────────────────
 
@@ -1829,15 +1852,13 @@ export class Python {
       const Type = globalThis[name] ?? Uint8Array;
       if (copy) return new Type(copy.buffer, copy.byteOffset, copy.length / Type.BYTES_PER_ELEMENT);
       if (!size) return new Type(0);
-      let memory;
-      try {
-        memory = ptrToBuffer(address, size);
-      } catch {
+      if (!EXTERNAL_BUFFERS) {
         // Electron forbids buffers over external memory: a copy.
         const copied = new Type(size / Type.BYTES_PER_ELEMENT);
         memmove(Buffer.from(copied.buffer), address, size);
         return copied;
       }
+      const memory = array(c_uint8, size).from_address(address)._buffer; // Python: memoryview((c_ubyte * size).from_address(address))
       this.#keep.set(memory.buffer, holder); // pins the Python buffer while the memory is used
       return new Type(memory.buffer, memory.byteOffset, size / Type.BYTES_PER_ELEMENT);
     });

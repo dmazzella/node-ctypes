@@ -292,7 +292,33 @@ const r2 = RECT.from_address(malloc_result);
 
 // Bind a C-exported global (Python: c_int.in_dll)
 const tz = c_int32.in_dll(libc, "_timezone");
+
+// Raw bytes at an address (Python: (c_ubyte * n).from_address(addr));
+// `bytes._buffer` is a Buffer over that memory, as Python's memoryview()
+const bytes = array(c_uint8, 64).from_address(malloc_result);
+const view = new Float32Array(bytes._buffer.buffer, bytes._buffer.byteOffset, 16);
 ```
+
+### Electron
+
+Electron does not allow Buffers over memory that V8 did not allocate, so a
+Buffer *view* of native memory cannot exist there. node-ctypes detects this
+when it loads (`EXTERNAL_BUFFERS` is `false`) and keeps the same API:
+
+- instances on native memory (`from_address`, `in_dll`, `pointer.contents`,
+  `p[i]`, pointer fields) work on a copy that is re-read before every access
+  and written back after every assignment, so they still see what C writes
+  and C sees what JavaScript writes;
+- passed to a C function, `addressof()`, `pointer()`, `memmove()` and
+  `memset()`, such an instance uses the original address;
+- the `_buffer` of such an instance is the copy: a typed array or Buffer
+  method over it does not read or write native memory. Use the instance
+  (`arr[i]`, `s.field`) or `memmove()`.
+
+Only the bytes of the accessed field are copied, one native call per read
+or write (about 50 ns); instances on ordinary Buffers (`new Point()`,
+`c_int(5)`) have no extra cost. Set `NODE_CTYPES_NO_EXTERNAL_BUFFERS=1`
+to run in this mode on Node.js.
 
 ### Adapter protocols: `_as_parameter_` and `from_param`
 
@@ -527,6 +553,7 @@ Each example in `examples/` has its own README; see the [index](examples/README.
 
 ```bash
 cd tests && npm install && npm run test    # unit tests (JS + Python parity)
+NODE_CTYPES_NO_EXTERNAL_BUFFERS=1 npm test  # again as in Electron (from tests/)
 npm run test:types                          # type-check lib/index.d.ts (tests/types)
 npm run docs                                # TypeDoc API site in docs/
 npm run docs:serve                          # preview

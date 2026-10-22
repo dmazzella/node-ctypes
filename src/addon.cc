@@ -22,6 +22,24 @@ Napi::Object CreateVersionObject(Napi::Env env) {
   return version;
 }
 
+// Electron (V8 memory cage) rifiuta i Buffer su memoria non allocata da V8:
+// napi_create_external_buffer restituisce napi_no_external_buffers_allowed.
+// Si prova una volta all'avvio, invece di riconoscere il runtime dal nome.
+static bool ExternalBuffersAllowed(napi_env env) {
+  static uint8_t probe = 0;
+  napi_value result;
+  napi_status status = napi_create_external_buffer(env, sizeof(probe), &probe, nullptr, nullptr, &result);
+  if (status == napi_ok) {
+    return true;
+  }
+  bool pending = false;
+  if (napi_is_exception_pending(env, &pending) == napi_ok && pending) {
+    napi_value ignored;
+    napi_get_and_clear_last_exception(env, &ignored);
+  }
+  return false;
+}
+
 template <typename Func>
 auto SafeInvoke(Napi::Env env, Func&& func) -> decltype(func()) {
   try {
@@ -103,6 +121,9 @@ CTypesAddon::CTypesAddon(Napi::Env env, Napi::Object exports) {
                          InstanceMethod("readWString", &CTypesAddon::ReadWString),
                          InstanceMethod("ptrToBuffer", &CTypesAddon::PtrToBuffer),
                          InstanceMethod("addressOf", &CTypesAddon::AddressOf),
+                         InstanceMethod("memmove", &CTypesAddon::Memmove),
+                         InstanceMethod("readMemory", &CTypesAddon::ReadMemory),
+                         InstanceMethod("writeMemory", &CTypesAddon::WriteMemory),
                          // Slot module-level last-error / errno (parity Python ctypes)
                          InstanceMethod("getCapturedLastError", &CTypesAddon::GetCapturedLastError),
                          InstanceMethod("setCapturedLastError", &CTypesAddon::SetCapturedLastError),
@@ -117,6 +138,8 @@ CTypesAddon::CTypesAddon(Napi::Env env, Napi::Object exports) {
                          InstanceValue("POINTER_SIZE", Napi::Number::New(env, sizeof(void*)), napi_enumerable),
                          InstanceValue("WCHAR_SIZE", Napi::Number::New(env, sizeof(wchar_t)), napi_enumerable),
                          InstanceValue("NULL", env.Null(), napi_enumerable),
+                         InstanceValue("externalBuffersAllowed", Napi::Boolean::New(env, ExternalBuffersAllowed(env)),
+                                       napi_enumerable),
 #ifdef _WIN32
                          InstanceValue("RTLD_GLOBAL", Napi::Number::New(env, 0), napi_enumerable),
                          InstanceValue("RTLD_LOCAL", Napi::Number::New(env, 0), napi_enumerable),
@@ -491,6 +514,123 @@ Napi::Value CTypesAddon::AddressOf(const Napi::CallbackInfo& info) {
   }
   void* ptr = info[0].As<Napi::Buffer<uint8_t>>().Data();
   return Napi::BigInt::New(env, reinterpret_cast<uint64_t>(ptr));
+}
+
+// Memoria di un argomento di memmove: Buffer/TypedArray/ArrayBuffer (con
+// controllo dei limiti) oppure un indirizzo BigInt/number non nullo.
+static uint8_t* MemoryArgument(Napi::Env env, const Napi::Value& value, size_t size, const char* name) {
+  if (value.IsTypedArray()) {
+    Napi::TypedArray array = value.As<Napi::TypedArray>();
+    if (array.ByteLength() < size) {
+      Napi::RangeError::New(env, std::format("memmove: {} is smaller than {} bytes", name, size))
+        .ThrowAsJavaScriptException();
+      return nullptr;
+    }
+    return static_cast<uint8_t*>(array.ArrayBuffer().Data()) + array.ByteOffset();
+  }
+  if (value.IsArrayBuffer()) {
+    Napi::ArrayBuffer buffer = value.As<Napi::ArrayBuffer>();
+    if (buffer.ByteLength() < size) {
+      Napi::RangeError::New(env, std::format("memmove: {} is smaller than {} bytes", name, size))
+        .ThrowAsJavaScriptException();
+      return nullptr;
+    }
+    return static_cast<uint8_t*>(buffer.Data());
+  }
+  uintptr_t address = 0;
+  if (value.IsBigInt()) {
+    bool lossless;
+    address = static_cast<uintptr_t>(value.As<Napi::BigInt>().Uint64Value(&lossless));
+  } else if (value.IsNumber()) {
+    address = static_cast<uintptr_t>(value.As<Napi::Number>().Int64Value());
+  } else {
+    Napi::TypeError::New(env, std::format("memmove: {} must be a Buffer or an address", name))
+      .ThrowAsJavaScriptException();
+    return nullptr;
+  }
+  if (address == 0) {
+    Napi::TypeError::New(env, std::format("memmove: {} is a NULL pointer", name)).ThrowAsJavaScriptException();
+    return nullptr;
+  }
+  return reinterpret_cast<uint8_t*>(address);
+}
+
+// memmove(dst, src, size): copia tra Buffer e indirizzi senza creare Buffer
+// esterni, l'unico modo di leggere/scrivere memoria nativa dove sono vietati.
+Napi::Value CTypesAddon::Memmove(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  if (info.Length() < 3 || !info[2].IsNumber()) {
+    Napi::TypeError::New(env, "memmove(dst, src, size) requires a numeric size").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+  int64_t size_raw = info[2].As<Napi::Number>().Int64Value();
+  if (size_raw < 0) {
+    Napi::RangeError::New(env, "memmove: size must be non-negative").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+  size_t size = static_cast<size_t>(size_raw);
+  if (size == 0) {
+    return env.Undefined();
+  }
+  uint8_t* dst = MemoryArgument(env, info[0], size, "dst");
+  if (dst == nullptr) {
+    return env.Undefined();
+  }
+  uint8_t* src = MemoryArgument(env, info[1], size, "src");
+  if (src == nullptr) {
+    return env.Undefined();
+  }
+  memmove(dst, src, size);
+  return env.Undefined();
+}
+
+// readMemory / writeMemory(buf, offset, length, address): copia `length` byte
+// da `address` a buf[offset] o viceversa, in una sola chiamata e senza
+// subarray. È il percorso caldo delle copie di memoria nativa usate dove i
+// Buffer esterni sono vietati (lib/memory/mirror.js): la lettura o la
+// scrittura di un campo. Con NAPI_CPP_EXCEPTIONS un argomento del tipo
+// sbagliato lancia già nella conversione, quindi niente Is*() in più.
+struct MemoryRange {
+  uint8_t* data = nullptr;
+  uint8_t* address = nullptr;
+  size_t length = 0;
+};
+
+static MemoryRange MemoryRangeArguments(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  if (info.Length() < 4) {
+    throw Napi::TypeError::New(env, "readMemory/writeMemory(buf, offset, length, address)");
+  }
+  Napi::Uint8Array buf = info[0].As<Napi::Uint8Array>();
+  uint32_t offset = info[1].As<Napi::Number>().Uint32Value();
+  uint32_t length = info[2].As<Napi::Number>().Uint32Value();
+  if (static_cast<uint64_t>(offset) + length > buf.ByteLength()) {
+    throw Napi::RangeError::New(env, "readMemory/writeMemory: range outside the buffer");
+  }
+  uintptr_t address = 0;
+  Napi::Value value = info[3];
+  if (value.Type() == napi_number) {
+    address = static_cast<uintptr_t>(value.As<Napi::Number>().Int64Value());
+  } else {
+    bool lossless;
+    address = static_cast<uintptr_t>(value.As<Napi::BigInt>().Uint64Value(&lossless));
+  }
+  if (address == 0) {
+    throw Napi::TypeError::New(env, "readMemory/writeMemory: NULL address");
+  }
+  return {buf.Data() + offset, reinterpret_cast<uint8_t*>(address), length};
+}
+
+Napi::Value CTypesAddon::ReadMemory(const Napi::CallbackInfo& info) {
+  MemoryRange range = MemoryRangeArguments(info);
+  memmove(range.data, range.address, range.length);
+  return info.Env().Undefined();
+}
+
+Napi::Value CTypesAddon::WriteMemory(const Napi::CallbackInfo& info) {
+  MemoryRange range = MemoryRangeArguments(info);
+  memmove(range.address, range.data, range.length);
+  return info.Env().Undefined();
 }
 
 Napi::Value CTypesAddon::PtrToBuffer(const Napi::CallbackInfo& info) {
