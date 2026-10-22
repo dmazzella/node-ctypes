@@ -443,6 +443,78 @@ console.log("└─────────────────────�
 }
 
 // ============================================================================
+// Benchmark 10: Asynchronous calls (worker threads)
+// ============================================================================
+
+console.log("┌─────────────────────────────────────────────────────────────────┐");
+console.log("│ Benchmark 10: Async calls - callAsync() vs koffi .async()       │");
+console.log("└─────────────────────────────────────────────────────────────────┘");
+
+{
+  // node-ctypes: libuv thread pool (UV_THREADPOOL_SIZE, 4 by default);
+  // koffi: its own worker threads. Async calls do not make a call faster:
+  // they keep the event loop free while it runs.
+  const ctypes_abs = ctypes_libc.func("abs", ctypes.c_int32, [ctypes.c_int32]);
+  const koffi_abs = koffi_libc.func("int abs(int)");
+  const koffiAsync = (fn, ...args) => new Promise((resolve, reject) => fn.async(...args, (err, result) => (err ? reject(err) : resolve(result))));
+
+  // `total` calls with at most `inFlight` pending at a time (koffi limits its queue).
+  const runConcurrent = async (call, total, inFlight) => {
+    let next = 0;
+    const lane = async () => {
+      while (next < total) {
+        next++;
+        await call();
+      }
+    };
+    await Promise.all(Array.from({ length: inFlight }, lane));
+  };
+  const time = async (fn) => {
+    const start = performance.now();
+    await fn();
+    return performance.now() - start;
+  };
+
+  // Warmup (starts the worker threads)
+  await runConcurrent(() => ctypes_abs.callAsync(-42), 2000, 32);
+  await runConcurrent(() => koffiAsync(koffi_abs, -42), 2000, 32);
+
+  // 10a: cost of one async call (round trip main thread → worker → main thread)
+  {
+    const iterations = 20_000;
+    console.log("  abs(-42), awaited one at a time:");
+    const ctypes_time = await time(async () => {
+      for (let i = 0; i < iterations; i++) await ctypes_abs.callAsync(-42);
+    });
+    const koffi_time = await time(async () => {
+      for (let i = 0; i < iterations; i++) await koffiAsync(koffi_abs, -42);
+    });
+    benchmark("abs async (sequential)", ctypes_time, koffi_time, iterations);
+  }
+
+  // 10b: throughput with several calls in flight
+  {
+    const iterations = 50_000;
+    console.log("  abs(-42), 32 calls in flight:");
+    const ctypes_time = await time(() => runConcurrent(() => ctypes_abs.callAsync(-42), iterations, 32));
+    const koffi_time = await time(() => runConcurrent(() => koffiAsync(koffi_abs, -42), iterations, 32));
+    benchmark("abs async (32 in flight)", ctypes_time, koffi_time, iterations);
+  }
+
+  // 10c: blocking calls (1 ms each): parallelism of the worker threads
+  {
+    const iterations = 400;
+    const [ctypes_sleep, koffi_sleep, arg] = isWindows
+      ? [ctypes_system.func("Sleep", ctypes.c_void, [ctypes.c_uint32]), koffi_system.func("void __stdcall Sleep(uint32_t)"), 1]
+      : [ctypes_libc.func("usleep", ctypes.c_int32, [ctypes.c_uint32]), koffi_libc.func("int usleep(uint32_t)"), 1000];
+    console.log(`  ${isWindows ? "Sleep(1)" : "usleep(1000)"}, 16 calls in flight (serial: ~${iterations} ms):`);
+    const ctypes_time = await time(() => runConcurrent(() => ctypes_sleep.callAsync(arg), iterations, 16));
+    const koffi_time = await time(() => runConcurrent(() => koffiAsync(koffi_sleep, arg), iterations, 16));
+    benchmark("sleep 1ms async (16)", ctypes_time, koffi_time, iterations);
+  }
+}
+
+// ============================================================================
 // Summary
 // ============================================================================
 
