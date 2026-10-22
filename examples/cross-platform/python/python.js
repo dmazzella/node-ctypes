@@ -89,7 +89,11 @@
 //
 // Diagnostics: `python.stats()` counts the objects shared by the two
 // languages (to find leaks). `Python.initialize({ stdin: false })` leaves the
-// process stdin to Node.js (Python would read it through its own buffer).
+// process stdin to Node.js (Python would read it through its own buffer);
+// `{ stdout: "node", stderr: "node" }` writes Python's output through
+// process.stdout / process.stderr, in order with console.log (Python writes
+// to the file descriptors directly, while Node.js queues writes to pipes on
+// macOS and to terminals on Windows), and a function captures it.
 //
 // Interpreter: `Python.initialize({ executable })`, the PYTHON environment
 // variable, or python3 / python / py on PATH. Its sys.path is used, so virtual
@@ -195,7 +199,7 @@ const TYPES = ["PyBool_Type", "PyLong_Type", "PyFloat_Type", "PyUnicode_Type", "
 
 // Private helper module run inside the embedded interpreter.
 const BRIDGE = `
-import asyncio, collections, collections.abc, concurrent.futures, ctypes, datetime, inspect, itertools, numbers, queue, signal, sys, threading, traceback, warnings, weakref, zoneinfo
+import asyncio, collections, collections.abc, concurrent.futures, ctypes, datetime, inspect, io, itertools, numbers, queue, signal, sys, threading, traceback, warnings, weakref, zoneinfo
 
 _main = threading.get_ident()
 _released = collections.deque()  # JavaScript functions no longer referenced
@@ -209,6 +213,31 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8", line_buffering=True)
     except Exception:
         pass
+
+class JsStream(io.TextIOBase):
+    """sys.stdout / sys.stderr writing through a JavaScript function: from
+    the main thread synchronously (in order with process.stdout), from other
+    threads through the channel."""
+
+    encoding = "utf-8"
+    errors = "strict"
+
+    def __init__(self, name, write):
+        self.name = name
+        self._write = write
+
+    def writable(self):
+        return True
+
+    def write(self, text):
+        if not isinstance(text, str):
+            raise TypeError(f"write() argument must be str, not {type(text).__name__}")
+        if text:
+            self._write(text)
+        return len(text)
+
+def redirect(name, write):
+    setattr(sys, name, JsStream(f"<node {name}>", write))
 
 def wrap(cfunc, fid):
     """Python function calling the JavaScript function cfunc: directly on the
@@ -1069,6 +1098,8 @@ export class Python {
    * @param {string} [options.executable] - Python interpreter whose library and environment are used (default: $PYTHON, python3, python, py)
    * @param {string} [options.library] - Explicit path of the Python shared library (default: $PYTHON_LIBRARY); same version as the interpreter
    * @param {boolean} [options.stdin=true] - false: Python does not read the process stdin (sys.stdin is None), left to Node.js
+   * @param {"inherit"|"node"|Function} [options.stdout="inherit"] - sys.stdout: the process stdout ("inherit"), process.stdout of Node.js, in order with console.log ("node"), or a function receiving the text
+   * @param {"inherit"|"node"|Function} [options.stderr="inherit"] - sys.stderr, as stdout
    * @returns {Python}
    */
   static initialize(options = {}) {
@@ -1085,19 +1116,22 @@ export class Python {
     return instance;
   }
 
-  constructor({ executable, library = process.env.PYTHON_LIBRARY, stdin = true } = {}) {
+  constructor({ executable, library = process.env.PYTHON_LIBRARY, stdin = true, stdout = "inherit", stderr = "inherit" } = {}) {
     if (!constructing) throw new TypeError("Use Python.initialize()");
+    for (const [name, value] of Object.entries({ stdout, stderr })) {
+      if (value !== "inherit" && value !== "node" && typeof value !== "function") throw new TypeError(`options.${name} must be "inherit", "node" or a function`);
+    }
 
     claimHost(); // one interpreter per process (see HOST_LOCK)
     try {
-      this.#start(executable, library, stdin);
+      this.#start(executable, library, { stdin, stdout, stderr });
     } catch (error) {
       releaseHost();
       throw error;
     }
   }
 
-  #start(executable, library, stdin) {
+  #start(executable, library, streams) {
     const info = probeInterpreter(executable);
     const [pyMajor, pyMinor] = info.version.split(".").map(Number);
     if (pyMajor < MIN_PYTHON[0] || (pyMajor === MIN_PYTHON[0] && pyMinor < MIN_PYTHON[1])) {
@@ -1156,7 +1190,7 @@ export class Python {
     // The GIL is held after initialization.
     this.#depth = 1;
     try {
-      this.#setup(info, stdin);
+      this.#setup(info, streams);
     } finally {
       this.#depth = 0;
     }
@@ -1166,7 +1200,7 @@ export class Python {
     process.once("exit", () => this.finalize());
   }
 
-  #setup(info, stdin) {
+  #setup(info, streams) {
     const api = this.#api;
     this.#registry = new FinalizationRegistry((state) => {
       if (!state.ptr || this.#finalized) return;
@@ -1213,6 +1247,7 @@ export class Python {
       "take_request",
       "settle",
       "shutdown",
+      "redirect",
       "_calls",
       "_requests",
     ]) {
@@ -1234,7 +1269,15 @@ export class Python {
     sys.executable = info.executable;
     sys.argv = [process.argv[1] ?? ""];
     // Python reads stdin through a buffer: what it reads is lost for Node.js.
-    if (!stdin) sys.stdin = null;
+    if (!streams.stdin) sys.stdin = null;
+    // Python writes to the file descriptors directly, Node.js through a queue
+    // when they are pipes (macOS) or terminals (Windows): "node" keeps the order.
+    for (const name of ["stdout", "stderr"]) {
+      const target = streams[name];
+      if (target === "inherit") continue;
+      const write = target === "node" ? (text) => void process[name].write(text) : (text) => void target(text);
+      this.#bridge.redirect(name, write);
+    }
   }
 
   // ── Public API ────────────────────────────────────────────────────
@@ -1786,7 +1829,15 @@ export class Python {
       const Type = globalThis[name] ?? Uint8Array;
       if (copy) return new Type(copy.buffer, copy.byteOffset, copy.length / Type.BYTES_PER_ELEMENT);
       if (!size) return new Type(0);
-      const memory = ptrToBuffer(address, size);
+      let memory;
+      try {
+        memory = ptrToBuffer(address, size);
+      } catch {
+        // Electron forbids buffers over external memory: a copy.
+        const copied = new Type(size / Type.BYTES_PER_ELEMENT);
+        memmove(Buffer.from(copied.buffer), address, size);
+        return copied;
+      }
       this.#keep.set(memory.buffer, holder); // pins the Python buffer while the memory is used
       return new Type(memory.buffer, memory.byteOffset, size / Type.BYTES_PER_ELEMENT);
     });

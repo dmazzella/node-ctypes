@@ -155,10 +155,17 @@ One thread per process hosts the interpreter: the main thread or a `worker_threa
 
 - `python.stats()` counts the objects shared by the two languages: PyObject proxies alive in JavaScript (about 40 are used by python.js itself), JavaScript functions and objects used by Python, pending awaits and calls. A number that keeps growing is a leak.
 - `Python.initialize({ stdin: false })` leaves the process stdin to Node.js: Python reads stdin through its own buffer, so `input()` would also consume lines meant for Node.js.
+- `Python.initialize({ stdout, stderr })`: `"inherit"` (default) writes to the file descriptors directly; `"node"` writes through `process.stdout` / `process.stderr`, in order with `console.log` (Node.js queues writes to pipes on macOS and to terminals on Windows, and Python's output could land in the middle of a large pending write); a function receives the text, to capture Python's output (a logger, an HTTP response, an Electron window). `sys.__stdout__` / `sys.__stderr__` stay the file descriptors.
+
+```javascript
+const log = [];
+const python = Python.initialize({ stdout: "node", stderr: (text) => log.push(text) });
+```
 
 ### Limits
 
 - Requires node-ctypes 2.1+ (`threadSafeCallback().unref()`).
+- In Electron, which forbids buffers over external memory, `toTypedArray()` returns a copy instead of sharing the memory of the Python buffer.
 - One thread per process uses Python (see [Python in a worker](#python-in-a-worker)).
 - Reference cycles between the two languages (a JavaScript object kept by Python that holds a proxy of the same Python object) are never collected.
 - A `JsProxy` used from a Python thread other than the main one waits for Node.js like any JavaScript call (see above).

@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pyca/cryptography (hashes, HMAC, RSA, EC and DSA keys and signatures, an
   X.509 CSR and a self-signed certificate) and checks every result with
   `node:crypto`.
+- **Embedded Python example**: `Python.initialize({ stdout, stderr })` writes
+  Python's output through `process.stdout` / `process.stderr` (`"node"`, in
+  order with `console.log`) or captures it with a function; in Electron,
+  `toTypedArray()` falls back to a copy.
 
 ## [2.1.1] - 2026-10-22
 
