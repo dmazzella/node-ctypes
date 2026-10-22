@@ -4,11 +4,9 @@ A plain Python module, unaware of Node.js: classes, a dataclass, a custom
 exception, a generator, and a function taking a callback.
 """
 
-from __future__ import annotations
-
 import json
+from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass
-from typing import Callable, Iterator
 
 
 class OutOfStock(Exception):

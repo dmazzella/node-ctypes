@@ -95,10 +95,11 @@
 // variable, or python3 / python / py on PATH. Its sys.path is used, so virtual
 // environments work. Its shared library is found automatically; to use another
 // one of the same version pass `{ library }` or set PYTHON_LIBRARY. Python
-// must be built with a shared library: the default on Windows, macOS and most
-// Linux distributions (Debian/Ubuntu: install libpython3.x; pyenv:
-// PYTHON_CONFIGURE_OPTS=--enable-shared). Requires node-ctypes 2.1+
-// (threadSafeCallback().unref()).
+// 3.12+ is required, built with a shared library: the default on Windows,
+// macOS and most Linux distributions (Debian/Ubuntu: install libpython3.x;
+// pyenv: PYTHON_CONFIGURE_OPTS=--enable-shared). Only the stable C API of
+// Python is used, plus _PyOS_SigintEvent on Windows (optional). Requires
+// node-ctypes 2.1+ (threadSafeCallback().unref()).
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
@@ -109,6 +110,7 @@ import { CDLL, WinDLL, RTLD_GLOBAL, Structure, CFUNCTYPE, threadSafeCallback, ad
 
 // ─── Python C API ───────────────────────────────────────────────────
 
+const MIN_PYTHON = [3, 12];
 const Py_file_input = 257;
 const Py_eval_input = 258;
 const METH_VARARGS = 0x0001;
@@ -134,9 +136,9 @@ const API = {
   PyEval_RestoreThread: [null, [c_void_p]],
   PyGILState_Ensure: [c_int, []],
   PyGILState_Release: [null, [c_int]],
-  PyRun_String: [c_void_p, [c_char_p, c_int, c_void_p, c_void_p]],
+  Py_CompileString: [c_void_p, [c_char_p, c_char_p, c_int]],
+  PyEval_EvalCode: [c_void_p, [c_void_p, c_void_p, c_void_p]],
   PyImport_ImportModule: [c_void_p, [c_char_p]],
-  PyImport_AddModule: [c_void_p, [c_char_p]],
   PyModule_GetDict: [c_void_p, [c_void_p]],
   PyObject_GetAttrString: [c_void_p, [c_void_p, c_char_p]],
   PyObject_SetAttrString: [c_int, [c_void_p, c_char_p, c_void_p]],
@@ -150,10 +152,10 @@ const API = {
   PyObject_GetIter: [c_void_p, [c_void_p]],
   PyIter_Next: [c_void_p, [c_void_p]],
   PyErr_Occurred: [c_void_p, []],
-  PyErr_Fetch: [null, [c_void_p, c_void_p, c_void_p]],
-  PyErr_NormalizeException: [null, [c_void_p, c_void_p, c_void_p]],
+  PyErr_GetRaisedException: [c_void_p, []],
+  PyErr_SetRaisedException: [null, [c_void_p]],
   PyErr_SetString: [null, [c_void_p, c_char_p]],
-  PyErr_SetObject: [null, [c_void_p, c_void_p]],
+  PyType_GetName: [c_void_p, [c_void_p]],
   PyErr_Clear: [null, []],
   PyErr_ExceptionMatches: [c_int, [c_void_p]],
   PyThreadState_SetAsyncExc: [c_int, [c_ulong, c_void_p]],
@@ -193,7 +195,7 @@ const TYPES = ["PyBool_Type", "PyLong_Type", "PyFloat_Type", "PyUnicode_Type", "
 
 // Private helper module run inside the embedded interpreter.
 const BRIDGE = `
-import asyncio, collections, collections.abc, concurrent.futures, ctypes, datetime, inspect, itertools, numbers, queue, signal, sys, threading, traceback, warnings, weakref
+import asyncio, collections, collections.abc, concurrent.futures, ctypes, datetime, inspect, itertools, numbers, queue, signal, sys, threading, traceback, warnings, weakref, zoneinfo
 
 _main = threading.get_ident()
 _released = collections.deque()  # JavaScript functions no longer referenced
@@ -340,11 +342,11 @@ def is_async_iterable(obj):
     return hasattr(type(obj), "__aiter__")
 
 def aiter_of(obj):
-    return type(obj).__aiter__(obj)
+    return aiter(obj)
 
 async def anext_of(iterator):
     try:
-        return False, await type(iterator).__anext__(iterator)
+        return False, await anext(iterator)
     except StopAsyncIteration:
         return True, None
 
@@ -359,11 +361,7 @@ def memory(address, size, fmt, keep):
         return memoryview(bytearray()).cast(fmt)
     array = (ctypes.c_char * size).from_address(address)
     array._node_ctypes_keep = keep  # the JavaScript memory lives as long as the view
-    view = memoryview(array).cast("B")
-    try:
-        return view.cast(fmt)
-    except (TypeError, ValueError):
-        return view  # e.g. "e" (float16) before Python 3.12: bytes
+    return memoryview(array).cast("B").cast(fmt)
 
 _TYPED = {"b": "Int8Array", "B": "Uint8Array", "h": "Int16Array", "H": "Uint16Array", "i": "Int32Array", "I": "Uint32Array",
           "q": "BigInt64Array", "Q": "BigUint64Array", "e": "Float16Array", "f": "Float32Array", "d": "Float64Array"}
@@ -444,9 +442,8 @@ def from_temporal(kind, *fields):
     if kind == "zoned":
         micros, zone, offset = fields
         try:
-            import zoneinfo
             tz = zoneinfo.ZoneInfo(zone)
-        except Exception:  # Python 3.8, or no time zone data (Windows without tzdata)
+        except (zoneinfo.ZoneInfoNotFoundError, ValueError):  # no time zone data (Windows without tzdata)
             tz = datetime.timezone(offset * _MICROSECOND)
         return (_EPOCH + micros * _MICROSECOND).astimezone(tz)
     return fields[0] * _MICROSECOND  # duration
@@ -616,7 +613,7 @@ class JsFuture(concurrent.futures.Future):
             return super().result(timeout)
         try:
             return super().result(5)
-        except concurrent.futures.TimeoutError:
+        except TimeoutError:
             if _main_busy is not None and _main_busy.value:
                 warnings.warn(
                     f"{self.name} has been waiting for 5 s while the Node.js main thread runs Python code "
@@ -1102,6 +1099,10 @@ export class Python {
 
   #start(executable, library, stdin) {
     const info = probeInterpreter(executable);
+    const [pyMajor, pyMinor] = info.version.split(".").map(Number);
+    if (pyMajor < MIN_PYTHON[0] || (pyMajor === MIN_PYTHON[0] && pyMinor < MIN_PYTHON[1])) {
+      throw new Error(`${info.executable} is Python ${info.version}: python.js requires Python ${MIN_PYTHON.join(".")}+ (pass another interpreter with Python.initialize({ executable }) or the PYTHON environment variable).`);
+    }
     const loaded = loadLibrary(info, library);
 
     // The library must match the interpreter that provides sys.path and home.
@@ -1176,7 +1177,7 @@ export class Python {
     this.#handler = this.#proxyHandler();
     this.#trampoline = PyCFunctionWithKeywords((self, args, kw) => this.#callJS(self, args, kw));
 
-    this.#main = this.#fromPy(this.#check(api.PyImport_AddModule("__main__")), false);
+    this.#main = this.#import("__main__");
     this.#builtins = this.#import("builtins");
     const bridge = this.#import("types").ModuleType("_node_ctypes");
     this.#builtins.exec(this.#builtins.compile(BRIDGE, "<node-ctypes>", "exec"), bridge.__dict__);
@@ -1531,8 +1532,9 @@ export class Python {
     return ptr;
   }
 
-  #run(code, start, globals) {
-    return this.#check(this.#api.PyRun_String(code, start, globals, globals));
+  #run(source, start, globals) {
+    const api = this.#api;
+    return this.#using(this.#check(api.Py_CompileString(source, "<string>", start)), (code) => this.#check(api.PyEval_EvalCode(code, globals, globals)));
   }
 
   #import(name) {
@@ -2270,7 +2272,7 @@ export class Python {
   #raise(error) {
     const api = this.#api;
     try {
-      this.#using(this.#exception(error), (exc) => api.PyErr_SetObject(this.#typeOf(exc), exc));
+      api.PyErr_SetRaisedException(this.#exception(error)); // steals the reference
     } catch {
       api.PyErr_SetString(this.#runtimeError, String(error?.message ?? error));
     }
@@ -2320,36 +2322,27 @@ export class Python {
   /** Current Python exception → PythonError (clears the exception). */
   #fetchError() {
     const api = this.#api;
-    const type = new c_void_p();
-    const value = new c_void_p();
-    const tb = new c_void_p();
-    api.PyErr_Fetch(byref(type), byref(value), byref(tb));
-    if (!type.value) return new Error("Python call failed without setting an exception");
-    api.PyErr_NormalizeException(byref(type), byref(value), byref(tb));
-    if (tb.value && value.value) api.PyObject_SetAttrString(value.value, "__traceback__", tb.value);
+    const exc = api.PyErr_GetRaisedException(); // normalized, with its __traceback__
+    if (!exc) return new Error("Python call failed without setting an exception");
 
     let name = "Exception";
     let message = "";
     let traceback = "";
     let cause;
     try {
-      name = this.#take(api.PyObject_GetAttrString(type.value, "__name__"));
-      if (value.value) {
-        message = this.#take(api.PyObject_Str(value.value));
-        api.Py_IncRef(value.value);
-        traceback = this.#take(this.#callRaw(this.#bridge.format_exception, [value.value]));
-        if (api.PyObject_HasAttrString(value.value, "_node_ctypes_error") === 1) {
-          const id = this.#take(api.PyObject_GetAttrString(value.value, "_node_ctypes_error"));
-          cause = this.#jsErrors.get(id);
-          this.#jsErrors.delete(id);
-        }
+      name = this.#take(api.PyType_GetName(this.#typeOf(exc)));
+      message = this.#take(api.PyObject_Str(exc));
+      api.Py_IncRef(exc);
+      traceback = this.#take(this.#callRaw(this.#bridge.format_exception, [exc]));
+      if (api.PyObject_HasAttrString(exc, "_node_ctypes_error") === 1) {
+        const id = this.#take(api.PyObject_GetAttrString(exc, "_node_ctypes_error"));
+        cause = this.#jsErrors.get(id);
+        this.#jsErrors.delete(id);
       }
     } catch {
       api.PyErr_Clear(); // keep what could be read
     }
-    const exception = value.value ? this.#wrap(value.value) : null; // owns the reference
-    api.Py_DecRef(type.value);
-    if (tb.value) api.Py_DecRef(tb.value);
+    const exception = this.#wrap(exc); // owns the reference
     const error = new PythonError(name, message, traceback, exception);
     if (cause !== undefined) error.cause = cause;
     return error;

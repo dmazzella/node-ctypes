@@ -129,7 +129,7 @@ async def patient(seconds):
 async def impatient():
     try:
         return await asyncio.wait_for(node.download("dataset", 5000), 0.1)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return "gave up after 0.1 s"
 `);
 

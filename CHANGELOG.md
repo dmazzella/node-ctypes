@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Embedded Python example requires Python 3.12+** (was 3.8+): it uses only
+  the stable C API of Python (`Py_CompileString` / `PyEval_EvalCode` instead
+  of `PyRun_String`, `PyErr_GetRaisedException` / `PyErr_SetRaisedException`
+  instead of the deprecated `PyErr_Fetch` triple), and older interpreters get
+  a clear error.
+
 ## [2.1.0] - 2026-10-22
 
 ### Added
@@ -365,6 +375,7 @@ It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-
 
 Initial releases.
 
+[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.1.0...HEAD
 [2.1.0]: https://github.com/dmazzella/node-ctypes/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/dmazzella/node-ctypes/compare/v1.14.0...v2.0.0
 [1.14.0]: https://github.com/dmazzella/node-ctypes/compare/v1.13.0...v1.14.0

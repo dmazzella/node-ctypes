@@ -6,7 +6,7 @@ title: Embedded Python
 
 Loads the shared library of an installed Python (`libpython3.x.so`, `Python.framework`, `python3x.dll`) and drives it through the Python C API, as a C extension would: run code, import modules (standard library, numpy, local `.py` files), call Python objects from JavaScript and expose JavaScript functions to Python.
 
-**Platforms:** Windows, macOS, Linux (glibc and musl) · **Library:** [python.js](python.js) · **Requires:** Python 3.8+ built with a shared library (default on Windows and macOS; Debian/Ubuntu: `libpython3.x`; pyenv: `PYTHON_CONFIGURE_OPTS=--enable-shared`)
+**Platforms:** Windows, macOS, Linux (glibc and musl) · **Library:** [python.js](python.js) · **Requires:** Python 3.12+ built with a shared library (default on Windows and macOS; Debian/Ubuntu: `libpython3.x`; pyenv: `PYTHON_CONFIGURE_OPTS=--enable-shared`)
 
 ## Run
 
@@ -99,14 +99,14 @@ A `Date` becomes an aware `datetime` (UTC); `datetime`s become `Date`s in deep c
 
 Where `Temporal` exists (Node.js 26+), the other date types convert too:
 
-| Python                                                                                             | JavaScript                                                                                         |
-| -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `date`                                                                                             | `Temporal.PlainDate`                                                                               |
-| `time` (without time zone)                                                                         | `Temporal.PlainTime`                                                                               |
-| `timedelta`                                                                                        | `Temporal.Duration` (a `Duration` with years or months has no `timedelta` equivalent: `TypeError`) |
-| naive `datetime`                                                                                   | ← `Temporal.PlainDateTime`                                                                         |
-| aware `datetime` (UTC)                                                                             | ← `Temporal.Instant`                                                                               |
-| aware `datetime` (`zoneinfo.ZoneInfo`, a fixed offset before Python 3.9 or without time zone data) | ← `Temporal.ZonedDateTime`                                                                         |
+| Python                                                                        | JavaScript                                                                                         |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `date`                                                                        | `Temporal.PlainDate`                                                                               |
+| `time` (without time zone)                                                    | `Temporal.PlainTime`                                                                               |
+| `timedelta`                                                                   | `Temporal.Duration` (a `Duration` with years or months has no `timedelta` equivalent: `TypeError`) |
+| naive `datetime`                                                              | ← `Temporal.PlainDateTime`                                                                         |
+| aware `datetime` (UTC)                                                        | ← `Temporal.Instant`                                                                               |
+| aware `datetime` (`zoneinfo.ZoneInfo`, a fixed offset without time zone data) | ← `Temporal.ZonedDateTime`                                                                         |
 
 Python to JavaScript conversions happen in deep conversions (`eval()`, `toJS()`), as for `Date`; without `Temporal` these values stay Python objects.
 
