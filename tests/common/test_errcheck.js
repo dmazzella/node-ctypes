@@ -390,3 +390,53 @@ describe("use_last_error", { skip: process.platform !== "win32" }, function () {
     assert.throws(() => k32.get_last_error(), /use_last_error/);
   });
 });
+
+// ────────────────────────────────────────────────────────────────────
+// callAsync: the call runs on a worker thread, errno / GetLastError and
+// errcheck must behave as for synchronous calls.
+// ────────────────────────────────────────────────────────────────────
+
+describe("callAsync with errcheck and use_errno / use_last_error", function () {
+  const LIBC = process.platform === "win32" ? "msvcrt.dll" : platform === "darwin" ? "libc.dylib" : "libc.so.6";
+
+  it("errcheck receives the arguments of the call", async function () {
+    const libc = new ctypes.CDLL(LIBC);
+    const strlen = libc.func("strlen", ctypes.c_size_t, [ctypes.c_char_p]);
+    let seen;
+    strlen.errcheck = (result, func, args) => {
+      seen = { result, isFunc: typeof func, args: [...args] };
+      return result * 10n;
+    };
+    assert.strictEqual(await strlen.callAsync("hello"), 50n);
+    assert.deepStrictEqual(seen, { result: 5n, isFunc: "object", args: ["hello"] });
+    libc.close();
+  });
+
+  it("get_errno() sees the errno of the call, also inside errcheck", { skip: process.platform === "win32" }, async function () {
+    const libc = new ctypes.CDLL(LIBC, { use_errno: true });
+    const open = libc.func("open", ctypes.c_int32, [ctypes.c_char_p, ctypes.c_int32]);
+    const ENOENT = 2;
+    ctypes.set_errno(0);
+    let inErrcheck;
+    open.errcheck = (result) => {
+      inErrcheck = ctypes.get_errno();
+      return result;
+    };
+    assert.strictEqual(await open.callAsync("/path/that/does/not/exist/test.txt", 0), -1);
+    assert.strictEqual(inErrcheck, ENOENT);
+    assert.strictEqual(ctypes.get_errno(), ENOENT);
+    assert.strictEqual(libc.get_errno(), ENOENT);
+    libc.close();
+  });
+
+  it("get_last_error() sees the GetLastError of the call", { skip: process.platform !== "win32" }, async function () {
+    const k32 = new ctypes.WinDLL("kernel32.dll", { use_last_error: true });
+    const LoadLibraryW = k32.func("LoadLibraryW", ctypes.c_void_p, [ctypes.c_wchar_p]);
+    ctypes.set_last_error(0);
+    assert.strictEqual(await LoadLibraryW.callAsync("C:/NoSuchFile_ABCXYZ_async.dll"), null);
+    const err = k32.get_last_error();
+    // 126 = ERROR_MOD_NOT_FOUND, 3 = PATH_NOT_FOUND
+    assert.ok(err === 126 || err === 3, `unexpected error code: ${err}`);
+    assert.strictEqual(ctypes.get_last_error(), err);
+  });
+});

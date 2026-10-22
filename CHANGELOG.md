@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`callAsync()` with `use_errno` / `use_last_error`**: the call runs on a
+  worker thread and its `errno` / `GetLastError()` were not captured, so
+  `get_errno()` / `get_last_error()` returned a previous value. They are now
+  read on the worker thread right after the call and published before
+  `errcheck` runs, as for synchronous calls.
+- **`errcheck` with `callAsync()`** received an empty `args` array; it now
+  receives the arguments of the call, as for synchronous calls.
+
 ### Changed
 
 - **Embedded Python example requires Python 3.12+** (was 3.8+): it uses only

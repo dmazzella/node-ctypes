@@ -139,6 +139,7 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
   bool MarshalArguments(CallContext& ctx);
   void SelectReturnPtr(CallContext& ctx);
   void CaptureErrorState();
+  void PublishErrorState(uint32_t last_error, int last_errno);
   Napi::Value FinalizeCall(CallContext& ctx);
 
   // Helper condiviso tra Call() (sincrona) e CallAsync (asincrona):
@@ -184,6 +185,7 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
     void OnOK() override;
     void OnError(const Napi::Error& error) override;
     Napi::Promise GetPromise() { return deferred_.Promise(); }
+    void KeepArguments(const Napi::CallbackInfo& info);
 
    private:
     void FixupPointers();
@@ -209,6 +211,12 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
     void* return_ptr_;                                     // &return_value_ or return_buffer_.data()
     Napi::Promise::Deferred deferred_;
     Napi::FunctionReference* errcheck_ref_;
+    Napi::ObjectReference args_ref_;  // JS arguments, for errcheck(result, func, args)
+    // use_last_error / use_errno: snapshot on the worker thread, right after ffi_call
+    bool capture_last_error_;
+    bool capture_errno_;
+    uint32_t last_error_ = 0;
+    int last_errno_ = 0;
   };
 
   void* fn_ptr_;

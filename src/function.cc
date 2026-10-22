@@ -1191,6 +1191,23 @@ CTYPES_ALWAYS_INLINE void FFIFunction::CaptureErrorState() {
   }
 }
 
+// Pubblica uno snapshot preso su un altro thread (callAsync) negli slot
+// letti da get_last_error() / get_errno(). Solo dal main thread.
+void FFIFunction::PublishErrorState(uint32_t last_error, int last_errno) {
+  if (capture_last_error_) {
+    last_error_ = last_error;
+    if (addon_) {
+      addon_->captured_last_error = last_error;
+    }
+  }
+  if (capture_errno_) {
+    last_errno_ = last_errno;
+    if (addon_) {
+      addon_->captured_errno = last_errno;
+    }
+  }
+}
+
 // Convert return value e applica errcheck se presente.
 CTYPES_ALWAYS_INLINE Napi::Value FFIFunction::FinalizeCall(CallContext& ctx) {
   Napi::Value result = ConvertReturn(ctx.env, ctx.return_ptr, return_type_, return_struct_info_, return_array_info_);
@@ -1738,6 +1755,10 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
                                 std::move(buffer_refs), std::move(owned_cif), std::move(owned_ffi_types),
                                 std::move(large_arg_buffers), std::move(large_arg_indices), errcheck_ptr);
 
+  if (errcheck_ptr) {
+    worker->KeepArguments(info);
+  }
+
   Napi::Promise promise = worker->GetPromise();
   worker->Queue();
 
@@ -1784,7 +1805,9 @@ FFIFunction::CallWorker::CallWorker(Napi::Env env,
     large_arg_indices_(std::move(large_arg_indices)),
     return_ptr_(nullptr),
     deferred_(Napi::Promise::Deferred::New(env)),
-    errcheck_ref_(errcheck_ref) {
+    errcheck_ref_(errcheck_ref),
+    capture_last_error_(parent->capture_last_error_),
+    capture_errno_(parent->capture_errno_) {
   ffi_function_->Ref();  // Pin the FFIFunction instance
 
   memset(&return_value_, 0, sizeof(return_value_));
@@ -1843,6 +1866,14 @@ void FFIFunction::CallWorker::FixupPointers() {
   }
 }
 
+void FFIFunction::CallWorker::KeepArguments(const Napi::CallbackInfo& info) {
+  Napi::Array args = Napi::Array::New(info.Env(), info.Length());
+  for (size_t i = 0; i < info.Length(); i++) {
+    args.Set(i, info[i]);
+  }
+  args_ref_ = Napi::Persistent(args.As<Napi::Object>());
+}
+
 FFIFunction::CallWorker::~CallWorker() {
   ffi_function_->Unref();  // Unpin the FFIFunction instance
 }
@@ -1851,6 +1882,17 @@ void FFIFunction::CallWorker::Execute() {
   // *** WORKER THREAD - Nessun accesso a V8! ***
   try {
     ffi_call(active_cif_, FFI_FN(fn_ptr_), return_ptr_, arg_values_.empty() ? nullptr : arg_values_.data());
+    // Snapshot su questo thread, subito dopo la chiamata (come CaptureErrorState).
+    if (capture_last_error_) {
+#ifdef _WIN32
+      last_error_ = static_cast<uint32_t>(::GetLastError());
+#else
+      last_error_ = static_cast<uint32_t>(errno);
+#endif
+    }
+    if (capture_errno_) {
+      last_errno_ = errno;
+    }
   } catch (...) {
     SetError("Native function threw an exception");
   }
@@ -1861,6 +1903,11 @@ void FFIFunction::CallWorker::OnOK() {
   Napi::Env env = Env();
   Napi::HandleScope scope(env);
 
+  // get_last_error() / get_errno() see this call, also inside errcheck.
+  if (capture_last_error_ || capture_errno_) {
+    ffi_function_->PublishErrorState(last_error_, last_errno_);
+  }
+
   try {
     // Riusa ConvertReturn statico (shared con ConvertReturnValue sync)
     Napi::Value result =
@@ -1869,7 +1916,7 @@ void FFIFunction::CallWorker::OnOK() {
     // Errcheck (se presente)
     if (errcheck_ref_ && !errcheck_ref_->IsEmpty()) {
       try {
-        Napi::Array args_array = Napi::Array::New(env, 0);
+        Napi::Value args_array = args_ref_.IsEmpty() ? Napi::Array::New(env, 0) : args_ref_.Value();
         std::vector<napi_value> errcheck_args = {result, ffi_function_->Value(), args_array};
         result = errcheck_ref_->Call(errcheck_args);
       } catch (const Napi::Error& e) {
