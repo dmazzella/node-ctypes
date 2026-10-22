@@ -11,12 +11,13 @@ Loads the shared library of an installed Python (`libpython3.x.so`, `Python.fram
 ## Run
 
 ```bash
-node examples/cross-platform/python/demo_python_basics.js     # code, standard library, live objects, exceptions, numpy
-node examples/cross-platform/python/demo_python_callbacks.js  # JavaScript functions called by Python
-node examples/cross-platform/python/demo_python_threads.js    # Python threads alongside the Node.js event loop
-node examples/cross-platform/python/demo_python_async.js      # asyncio coroutines ↔ JavaScript promises, Node.js fetch() → Python asyncio server
-node examples/cross-platform/python/demo_python_module.js     # import the local inventory.py
-node examples/cross-platform/python/demo_python_worker.js     # Python hosted by a worker thread
+node examples/cross-platform/python/demo_python_basics.js        # code, standard library, live objects, exceptions, numpy
+node examples/cross-platform/python/demo_python_callbacks.js     # JavaScript functions called by Python
+node examples/cross-platform/python/demo_python_threads.js       # Python threads alongside the Node.js event loop
+node examples/cross-platform/python/demo_python_async.js         # asyncio coroutines ↔ JavaScript promises, Node.js fetch() → Python asyncio server
+node examples/cross-platform/python/demo_python_module.js        # import the local inventory.py
+node examples/cross-platform/python/demo_python_worker.js        # Python hosted by a worker thread
+node examples/cross-platform/python/demo_python_cryptography.js  # pyca/cryptography (pip install cryptography), checked with node:crypto
 
 # Choose the interpreter (e.g. a virtual environment) and, if needed, its library
 PYTHON=/path/to/venv/bin/python node examples/cross-platform/python/demo_python_basics.js
