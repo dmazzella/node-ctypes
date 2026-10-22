@@ -108,16 +108,16 @@ def size(url):
   pool.shutdown();
 
   // Synchronous Python code waiting for a thread that calls JavaScript: the
-  // main thread runs the call while it waits (woken by SIGURG on POSIX).
-  if (process.platform !== "win32") {
-    python.exec(`
+  // main thread runs the call while it waits (woken by SIGURG on POSIX, by
+  // the interrupt event on Windows with Python 3.14+).
+  python.exec(`
 joined = []
 t = threading.Thread(target=lambda: joined.append(checksum("delta")))
 t.start()
-t.join()  # not a deadlock: node.hash() runs on the main thread meanwhile
+t.join(3)  # not a deadlock: node.hash() runs on the main thread meanwhile
 `);
-    console.log(`    from a thread joined by synchronous code: ${python.eval("joined[0]")}`);
-  }
+  const joined = python.eval("joined");
+  console.log(`    from a thread joined by synchronous code: ${joined[0] ?? "not served while the main thread waited (Windows before Python 3.14)"}`);
   console.log("\n    Done!");
 }
 

@@ -81,10 +81,11 @@
 // threadSafeCallback: like an unref()'d timer, Python activity alone does
 // not keep Node.js alive, JavaScript awaiting Python code does. While the
 // main thread runs Python code (e.g. Thread.join() in synchronous code), it
-// runs these calls itself: SIGURG interrupts its wait (POSIX). Async
-// JavaScript functions need the Node.js event loop, so waiting for them
-// there is a deadlock (after 5 s Python warns about it), as on Windows,
-// where a blocked main thread cannot be woken.
+// runs these calls itself: SIGURG interrupts its wait (POSIX), the interrupt
+// event does on Windows with Python 3.14+. Async JavaScript functions need
+// the Node.js event loop, so waiting for them there is a deadlock (after 5 s
+// Python warns about it), as on Windows before Python 3.14, where a blocked
+// main thread cannot be woken.
 //
 // Diagnostics: `python.stats()` counts the objects shared by the two
 // languages (to find leaks). `Python.initialize({ stdin: false })` leaves the
@@ -621,7 +622,7 @@ class JsFuture(concurrent.futures.Future):
                     f"{self.name} has been waiting for 5 s while the Node.js main thread runs Python code "
                     "(a synchronous call from JavaScript). If that code waits for this thread (Thread.join(), "
                     "future.result()), this is a deadlock: an async JavaScript function needs the Node.js event "
-                    "loop, and on Windows a blocked main thread cannot run JavaScript calls. Await the work from "
+                    "loop, and on Windows before Python 3.14 a blocked main thread cannot run JavaScript calls. Await the work from "
                     "JavaScript instead.",
                     RuntimeWarning, stacklevel=2)
         return super().result()
@@ -631,8 +632,11 @@ class JsFuture(concurrent.futures.Future):
 # inside Python. POSIX: SIGURG (unused by Node.js, ignored by default) is sent
 # to the main thread; a blocking wait (join(), lock.acquire(), Event.wait(),
 # sleep, I/O) is interrupted, runs the signal handler, then resumes (PEP 475).
-# Windows: a pending call, run while the main thread executes bytecode.
+# Windows: a pending call, run while the main thread executes bytecode and,
+# from Python 3.14, also during its waits: they wait for the interrupt event
+# of Ctrl+C too, which is set to wake it.
 _wakeup = None  # the signal, when its handler is installed
+_interrupt_event = None  # Windows, Python 3.14+
 
 def _serve(token):
     try:
@@ -647,7 +651,18 @@ def _serve_waiting(*_):
 
 def install_wakeup():
     """On the main thread: the SIGURG handler, unless SIGURG is already used."""
-    global _wakeup
+    global _wakeup, _interrupt_event, _kernel32
+    if sys.platform == "win32":
+        if sys.version_info >= (3, 14):
+            try:
+                event = ctypes.pythonapi._PyOS_SigintEvent
+                event.restype = ctypes.c_void_p
+                _interrupt_event = event()
+                _kernel32 = ctypes.WinDLL("kernel32")
+                _kernel32.SetEvent.argtypes = _kernel32.ResetEvent.argtypes = (ctypes.c_void_p,)
+            except (AttributeError, OSError):
+                _interrupt_event = None
+        return
     if not hasattr(signal, "pthread_kill") or not hasattr(signal, "SIGURG"):
         return
     if signal.getsignal(signal.SIGURG) not in (signal.SIG_DFL, signal.SIG_IGN, None):
@@ -658,13 +673,21 @@ def install_wakeup():
 _PENDING = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
 _add_pending_call = ctypes.pythonapi.Py_AddPendingCall
 _add_pending_call.argtypes = (_PENDING, ctypes.c_void_p)
-_serve_pending_c = _PENDING(lambda token: (_serve(token), 0)[1])
+def _serve_pending(token):
+    if _interrupt_event:
+        _kernel32.ResetEvent(_interrupt_event)  # manual reset: it would interrupt the next waits
+    _serve(token)
+    return 0
+
+_serve_pending_c = _PENDING(_serve_pending)
 
 def _wake_main(token):
     if _wakeup is not None:
         signal.pthread_kill(_main, _wakeup)
     else:
         _add_pending_call(_serve_pending_c, token)
+        if _interrupt_event:
+            _kernel32.SetEvent(_interrupt_event)
 
 def _call_later(fid, args, kwargs, function, awaitable=True):
     """Call a JavaScript function from a thread that is not the Node.js main

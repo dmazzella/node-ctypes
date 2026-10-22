@@ -15,8 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   process.
 - **Embedded Python example**: synchronous Python code waiting for a thread
   that calls JavaScript (`Thread.join()`, `Event.wait()`, ...) is no longer a
-  deadlock on POSIX systems: the main thread runs the call, woken by
-  `SIGURG`.
+  deadlock: the main thread runs the call, woken by `SIGURG` on POSIX
+  systems and by the interrupt event on Windows with Python 3.14+.
 
 ## [2.1.0] - 2026-10-21
 
