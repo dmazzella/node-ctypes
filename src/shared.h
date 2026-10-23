@@ -64,6 +64,9 @@ using ssize_t = SSIZE_T;
 //   MSVC:      __forceinline                   (prefisso non-standard)
 // CTYPES_NOINLINE: percorsi lenti tenuti fuori dal codice inline del percorso caldo.
 #if defined(_MSC_VER)
+// Per MSVC __forceinline resta un suggerimento: per le funzioni grandi
+// (MarshalArguments) segnala C4714 e non le rende inline.
+#pragma warning(disable : 4714)
 #define CTYPES_ALWAYS_INLINE __forceinline
 #define CTYPES_NOINLINE __declspec(noinline)
 #elif defined(__GNUC__) || defined(__clang__)

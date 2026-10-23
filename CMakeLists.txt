@@ -99,12 +99,13 @@ endif()
 
 if(NODE_ADDON_API_DIR)
     string(REGEX REPLACE "[\r\n\"]" "" NODE_ADDON_API_DIR "${NODE_ADDON_API_DIR}")
-    target_include_directories(${PROJECT_NAME} PRIVATE ${NODE_ADDON_API_DIR})
+    # SYSTEM: header esterni, senza i loro warning (MSVC: /external:I + /external:W0).
+    target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE ${NODE_ADDON_API_DIR})
 endif()
 
 # Include directories
 if(CMAKE_JS_INC)
-    target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_JS_INC})
+    target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE ${CMAKE_JS_INC})
 endif()
 
 # third-party

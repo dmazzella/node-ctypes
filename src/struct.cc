@@ -83,11 +83,11 @@ Napi::Value StructType::AddField(const Napi::CallbackInfo& info) {
 }
 
 Napi::Value StructType::GetSize(const Napi::CallbackInfo& info) {
-  return Napi::Number::New(info.Env(), struct_info_->GetSize());
+  return Napi::Number::New(info.Env(), static_cast<double>(struct_info_->GetSize()));
 }
 
 Napi::Value StructType::GetAlignment(const Napi::CallbackInfo& info) {
-  return Napi::Number::New(info.Env(), struct_info_->GetAlignment());
+  return Napi::Number::New(info.Env(), static_cast<double>(struct_info_->GetAlignment()));
 }
 
 Napi::Value StructType::Create(const Napi::CallbackInfo& info) {

@@ -69,15 +69,15 @@ ArrayType::ArrayType(const Napi::CallbackInfo& info) : Napi::ObjectWrap<ArrayTyp
 }
 
 Napi::Value ArrayType::GetSize(const Napi::CallbackInfo& info) {
-  return Napi::Number::New(info.Env(), array_info_->GetSize());
+  return Napi::Number::New(info.Env(), static_cast<double>(array_info_->GetSize()));
 }
 
 Napi::Value ArrayType::GetLength(const Napi::CallbackInfo& info) {
-  return Napi::Number::New(info.Env(), array_info_->GetCount());
+  return Napi::Number::New(info.Env(), static_cast<double>(array_info_->GetCount()));
 }
 
 Napi::Value ArrayType::GetAlignment(const Napi::CallbackInfo& info) {
-  return Napi::Number::New(info.Env(), array_info_->GetAlignment());
+  return Napi::Number::New(info.Env(), static_cast<double>(array_info_->GetAlignment()));
 }
 
 Napi::Value ArrayType::Create(const Napi::CallbackInfo& info) {

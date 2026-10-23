@@ -436,7 +436,7 @@ bool ArrayInfo::JSToArray(Napi::Env env, Napi::Value val, std::span<uint8_t> buf
     const size_t copy_len = std::min<size_t>(arr.Length(), count_);
 
     for (size_t i = 0; i < copy_len; i++) {
-      Napi::Value elem = arr.Get(i);
+      Napi::Value elem = arr.Get(static_cast<uint32_t>(i));
       const std::span<uint8_t> elem_bytes = bytes.subspan(i * element_size_, element_size_);
 
       if (element_struct_) {
@@ -486,10 +486,10 @@ Napi::Array ArrayInfo::ArrayToJS(Napi::Env env, const void* buffer) {
 
     if (element_struct_) {
       // Element è struct
-      arr.Set(i, element_struct_->StructToJS(env, elem_ptr));
+      arr.Set(static_cast<uint32_t>(i), element_struct_->StructToJS(env, elem_ptr));
     } else {
       // Element è tipo primitivo
-      arr.Set(i, CToJS(env, elem_ptr, element_type_));
+      arr.Set(static_cast<uint32_t>(i), CToJS(env, elem_ptr, element_type_));
     }
   }
 

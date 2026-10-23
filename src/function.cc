@@ -946,7 +946,7 @@ bool FFIFunction::MarshalStructArg(Napi::Env env,
   uint8_t* dest = slot;
   size_t dest_size = ARG_SLOT_SIZE;
   if (struct_size > ARG_SLOT_SIZE) {
-    large_buffers.emplace_back(struct_size, 0);
+    large_buffers.emplace_back(struct_size, uint8_t{0});
     dest = large_buffers.back().data();
     dest_size = struct_size;
     *arg_value_ptr = dest;
@@ -1736,7 +1736,7 @@ Napi::Value FFIFunction::ApplyErrcheck(Napi::Env env, Napi::Value result, const 
   // Napi::Error (NAPI_CPP_EXCEPTIONS) e si propaga al caller JS.
   Napi::Array args_array = Napi::Array::New(env, info.Length());
   for (size_t i = 0; i < info.Length(); i++) {
-    args_array.Set(i, info[i]);
+    args_array.Set(static_cast<uint32_t>(i), info[i]);
   }
   return errcheck_callback_.Value().Call(env.Undefined(), {result, info.This(), args_array});
 }
@@ -2150,7 +2150,7 @@ void FFIFunction::CallWorker::FixupPointers() {
 void FFIFunction::CallWorker::KeepArguments(const Napi::CallbackInfo& info) {
   Napi::Array args = Napi::Array::New(info.Env(), info.Length());
   for (size_t i = 0; i < info.Length(); i++) {
-    args.Set(i, info[i]);
+    args.Set(static_cast<uint32_t>(i), info[i]);
   }
   args_ref_ = Napi::Persistent(args.As<Napi::Object>());
 }
