@@ -9,6 +9,14 @@
 [libffi](https://github.com/libffi/libffi) and [N-API](https://nodejs.org/api/n-api.html).
 If you know Python ctypes, you already know node-ctypes.
 
+## Support
+
+Development help is welcome: issues, pull requests and discussions are all appreciated.
+
+> [!TIP]
+> If you find **node-ctypes** useful, consider :star: this project
+> and why not ... [Buy me a coffee](https://www.buymeacoffee.com/damianomazp) :smile:
+
 ---
 
 ## Quick start
