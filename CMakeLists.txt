@@ -145,6 +145,11 @@ set_target_properties(ctypes_test_fixture PROPERTIES
     # $<1:...>: nessuna sottocartella per configurazione (generatori multi-config)
     LIBRARY_OUTPUT_DIRECTORY "$<1:${CMAKE_BINARY_DIR}/fixture>"
     RUNTIME_OUTPUT_DIRECTORY "$<1:${CMAKE_BINARY_DIR}/fixture>")
+if(MSVC)
+    # cmake-js passa /DELAYLOAD:NODE.EXE a tutte le librerie condivise: la
+    # fixture non importa nulla da node.exe (LNK4199).
+    target_link_options(ctypes_test_fixture PRIVATE /IGNORE:4199)
+endif()
 
 # ============================================================================
 # Info
