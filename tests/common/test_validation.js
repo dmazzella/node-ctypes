@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { struct, c_int32, readValue, writeValue, cast, Structure, StructType, ArrayType, CType, Library, addressof, sizeof } from "node-ctypes";
+import { struct, c_int32, readValue, writeValue, cast, Structure, StructType, ArrayType, CType, Library, addressof, sizeof, find_library } from "node-ctypes";
 
 describe("Input Validation", () => {
   it("should handle object with duplicate keys (JS limitation)", () => {
@@ -80,7 +80,8 @@ describe("Input Validation", () => {
       assert.throws(() => new StructType().addField("x", fake), { name: "TypeError", message: /StructType or ArrayType/ });
       assert.throws(() => new ArrayType(fake, 2), TypeError);
     }
-    const lib = new Library(null);
+    // The C runtime: Library(null) on Windows is node.exe, which does not export abs.
+    const lib = new Library(find_library("c"));
     try {
       assert.throws(() => lib.func("abs", fakeStruct, []), { name: "TypeError", message: /^Invalid return type: / });
       assert.throws(() => lib.func("abs", CType.INT32, [fakeArray]), { name: "TypeError", message: /^Invalid argument type at index 0: / });
