@@ -4,6 +4,7 @@ Tests function calls, variadic functions, callbacks, errcheck
 """
 
 import unittest
+import platform
 import sys
 from ctypes import (
     CDLL,
@@ -193,6 +194,10 @@ class TestFunctionsAndCallbacks(unittest.TestCase):
 
     @unittest.skipUnless(
         sys.platform == "win32", "Windows only - different sprintf behavior on Unix"
+    )
+    @unittest.skipIf(
+        sys.platform == "win32" and platform.machine().lower() in ("arm64", "aarch64"),
+        "CPython on Windows does not use ffi_prep_cif_var: variadic doubles go in the wrong registers on ARM64",
     )
     def test_variadic_functions(self):
         """Test functions with variable arguments (sprintf)"""

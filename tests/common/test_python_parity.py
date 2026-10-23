@@ -35,6 +35,12 @@ elif platform.system() == "Darwin":
 else:
     LIBC = "libc.so.6"
 
+# CPython on Windows does not use ffi_prep_cif_var: variadic doubles go in the wrong registers on ARM64 (node-ctypes does).
+SKIP_CPYTHON_WINDOWS_ARM64_VARIADIC = unittest.skipIf(
+    platform.system() == "Windows" and platform.machine().lower() in ("arm64", "aarch64"),
+    "CPython on Windows does not use ffi_prep_cif_var: variadic doubles go in the wrong registers on ARM64",
+)
+
 
 class TestPythonParity(unittest.TestCase):
     @classmethod
@@ -429,6 +435,7 @@ class TestPythonParity(unittest.TestCase):
 
     # Variadic arguments
 
+    @SKIP_CPYTHON_WINDOWS_ARM64_VARIADIC
     def test_variadic_instances_keep_type(self):
         sprintf = self.libc.sprintf
         sprintf.restype = c_int
@@ -547,7 +554,7 @@ class TestPythonParity(unittest.TestCase):
         self.assertEqual(p.contents.value, 4294967295)
 
     def test_float_for_integer_types(self):
-        libc = CDLL(ctypes.util.find_library("c"))
+        libc = CDLL(LIBC)
         abs_ = libc.abs
         abs_.argtypes = [c_int]
         for value in (3.7, float("nan"), float("inf")):
@@ -564,7 +571,7 @@ class TestPythonParity(unittest.TestCase):
             S().i = 3.5
 
     def test_errcheck_func(self):
-        libc = CDLL(ctypes.util.find_library("c"))
+        libc = CDLL(LIBC)
         abs_ = libc.abs
         abs_.argtypes = [c_int]
         seen = []
