@@ -54,27 +54,25 @@ template <int R>
 using RetOf =
   std::conditional_t<R == 0, void, std::conditional_t<R == 1, int64_t, std::conditional_t<R == 2, double, float>>>;
 
+// Tipi che viaggiano in un registro: le classi ArgClass / RetClass.
 template <typename T>
-inline T Load(const void* p) {
-  T v;
-  std::memcpy(&v, p, sizeof(T));
-  return v;
-}
+concept RegisterValue = std::same_as<T, int64_t> || std::same_as<T, double> || std::same_as<T, float>;
 
-template <typename R, typename... A, size_t... Is>
-inline void InvokeImpl(void* fn, void** args, void* ret, std::index_sequence<Is...>) {
+template <typename R>
+concept RegisterResult = std::is_void_v<R> || RegisterValue<R>;
+
+template <RegisterResult R, RegisterValue... A, size_t... Is>
+inline void InvokeImpl(void* fn, [[maybe_unused]] void** args, [[maybe_unused]] void* ret, std::index_sequence<Is...>) {
   using Fn = R (*)(A...);
   if constexpr (std::is_void_v<R>) {
-    (void)args;
-    (void)ret;
-    reinterpret_cast<Fn>(fn)(Load<A>(args[Is])...);
+    reinterpret_cast<Fn>(fn)(LoadAs<A>(args[Is])...);
   } else {
-    R r = reinterpret_cast<Fn>(fn)(Load<A>(args[Is])...);
+    R r = reinterpret_cast<Fn>(fn)(LoadAs<A>(args[Is])...);
     std::memcpy(ret, &r, sizeof(R));
   }
 }
 
-template <typename R, typename... A>
+template <RegisterResult R, RegisterValue... A>
 void Invoke(void* fn, void** args, void* ret) {
   InvokeImpl<R, A...>(fn, args, ret, std::index_sequence_for<A...>{});
 }
@@ -123,7 +121,7 @@ inline Invoker SelectForRet(size_t n, size_t code) {
   }
 }
 
-inline Invoker Select(RetClass ret, size_t n, size_t code) {
+[[nodiscard]] inline Invoker Select(RetClass ret, size_t n, size_t code) {
   switch (ret) {
     case RetClass::Void:
       return SelectForRet<0>(n, code);
@@ -138,7 +136,7 @@ inline Invoker Select(RetClass ret, size_t n, size_t code) {
 }
 
 // Integer CTypes that travel in a general purpose register.
-inline bool IsIntClass(CType t) {
+[[nodiscard]] constexpr bool IsIntClass(CType t) noexcept {
   switch (t) {
     case CType::CTYPES_INT8:
     case CType::CTYPES_UINT8:
@@ -164,7 +162,7 @@ inline bool IsIntClass(CType t) {
   }
 }
 
-inline bool IsSignedInt(CType t) {
+[[nodiscard]] constexpr bool IsSignedInt(CType t) noexcept {
   switch (t) {
     case CType::CTYPES_INT8:
     case CType::CTYPES_INT16:
@@ -191,13 +189,13 @@ inline void WidenInPlace(void* p, uint8_t size, bool is_signed) {
   int64_t v;
   switch (size) {
     case 1:
-      v = is_signed ? static_cast<int64_t>(Load<int8_t>(p)) : static_cast<int64_t>(Load<uint8_t>(p));
+      v = is_signed ? static_cast<int64_t>(LoadAs<int8_t>(p)) : static_cast<int64_t>(LoadAs<uint8_t>(p));
       break;
     case 2:
-      v = is_signed ? static_cast<int64_t>(Load<int16_t>(p)) : static_cast<int64_t>(Load<uint16_t>(p));
+      v = is_signed ? static_cast<int64_t>(LoadAs<int16_t>(p)) : static_cast<int64_t>(LoadAs<uint16_t>(p));
       break;
     case 4:
-      v = is_signed ? static_cast<int64_t>(Load<int32_t>(p)) : static_cast<int64_t>(Load<uint32_t>(p));
+      v = is_signed ? static_cast<int64_t>(LoadAs<int32_t>(p)) : static_cast<int64_t>(LoadAs<uint32_t>(p));
       break;
     default:
       return;

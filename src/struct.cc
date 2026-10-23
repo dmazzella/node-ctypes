@@ -4,242 +4,6 @@
 
 namespace ctypes {
 // ============================================================================
-// StructInfo - Core logic (come CPython StgInfo)
-// ============================================================================
-
-StructInfo::StructInfo(bool is_union) : is_union_(is_union), size_(0), alignment_(1) {}
-
-StructInfo::~StructInfo() = default;
-
-size_t StructInfo::GetTypeAlignment(CType type, std::shared_ptr<StructInfo> nested, std::shared_ptr<ArrayInfo> array) {
-  if (array) {
-    return array->GetAlignment();
-  }
-
-  if (nested) {
-    return nested->GetAlignment();
-  }
-
-  switch (type) {
-    case CType::CTYPES_INT8:
-    case CType::CTYPES_UINT8:
-    case CType::CTYPES_CHAR:
-    case CType::CTYPES_BOOL:
-      return 1;
-    case CType::CTYPES_INT16:
-    case CType::CTYPES_UINT16:
-      return 2;
-    case CType::CTYPES_WCHAR:
-      return alignof(wchar_t);  // 2 su Windows, 4 su Unix
-    case CType::CTYPES_INT32:
-    case CType::CTYPES_UINT32:
-    case CType::CTYPES_FLOAT:
-      return 4;
-    case CType::CTYPES_LONG:
-    case CType::CTYPES_ULONG:
-      return sizeof(long);  // 4 su Windows (LLP64), 8 su Unix 64-bit (LP64)
-    case CType::CTYPES_INT64:
-    case CType::CTYPES_UINT64:
-    case CType::CTYPES_DOUBLE:
-    case CType::CTYPES_POINTER:
-    case CType::CTYPES_STRING:
-    case CType::CTYPES_WSTRING:
-    case CType::CTYPES_SIZE_T:
-    case CType::CTYPES_SSIZE_T:
-      return sizeof(void*);  // 8 su x64, 4 su x86
-    default:
-      return 1;
-  }
-}
-
-bool StructInfo::AddField(const std::string& name, CType type, std::shared_ptr<StructInfo> nested, bool is_anonymous) {
-  FieldInfo field;
-  field.name = name;
-  field.type = type;
-  field.struct_type = nested;
-  field.array_type = nullptr;
-  field.is_anonymous = is_anonymous;
-
-  if (nested) {
-    field.size = nested->GetSize();
-  } else {
-    field.size = CTypeSize(type);
-  }
-
-  fields_.push_back(field);
-  return true;
-}
-
-bool StructInfo::AddArrayField(const std::string& name, std::shared_ptr<ArrayInfo> array_type) {
-  FieldInfo field;
-  field.name = name;
-  field.type = CType::CTYPES_ARRAY;
-  field.struct_type = nullptr;
-  field.array_type = array_type;
-  field.size = array_type->GetSize();
-  field.is_anonymous = false;
-
-  fields_.push_back(field);
-  return true;
-}
-
-void StructInfo::CalculateLayout() {
-  if (fields_.empty()) {
-    size_ = 0;
-    alignment_ = 1;
-    return;
-  }
-
-  size_t current_offset = 0;
-  size_t max_alignment = 1;
-
-  for (auto& field : fields_) {
-    size_t field_alignment = GetTypeAlignment(field.type, field.struct_type, field.array_type);
-    max_alignment = std::max(max_alignment, field_alignment);
-
-    if (is_union_) {
-      // Union: tutti i campi allo stesso offset 0
-      field.offset = 0;
-    } else {
-      // Struct: allinea offset al boundary del tipo
-      size_t padding = (field_alignment - (current_offset % field_alignment)) % field_alignment;
-      current_offset += padding;
-      field.offset = current_offset;
-      current_offset += field.size;
-    }
-  }
-
-  alignment_ = max_alignment;
-
-  if (is_union_) {
-    // Union: size = max(field sizes)
-    size_ = 0;
-    for (const auto& field : fields_) {
-      size_ = std::max(size_, field.size);
-    }
-  } else {
-    // Struct: size = offset finale + padding finale
-    size_ = current_offset;
-  }
-
-  // Padding finale per allineare la struct stessa
-  size_t final_padding = (alignment_ - (size_ % alignment_)) % alignment_;
-  size_ += final_padding;
-}
-
-ffi_type* StructInfo::GetFFIType() {
-  if (ffi_type_) {
-    return ffi_type_.get();
-  }
-
-  ffi_field_types_.clear();
-  for (const auto& field : fields_) {
-    if (field.array_type) {
-      ffi_field_types_.push_back(field.array_type->GetFFIType());
-    } else if (field.struct_type) {
-      ffi_field_types_.push_back(field.struct_type->GetFFIType());
-    } else {
-      ffi_field_types_.push_back(CTypeToFFI(field.type));
-    }
-  }
-
-  ffi_field_types_.push_back(nullptr);  // Terminatore
-
-  ffi_type_ = std::make_unique<ffi_type>();
-  ffi_type_->size = size_;
-  ffi_type_->alignment = static_cast<unsigned short>(alignment_);
-  ffi_type_->type = FFI_TYPE_STRUCT;
-  ffi_type_->elements = ffi_field_types_.data();
-
-  return ffi_type_.get();
-}
-
-bool StructInfo::JSToStruct(Napi::Env env, Napi::Object obj, void* buffer, size_t bufsize) {
-  if (bufsize < size_) {
-    Napi::TypeError::New(env, "Buffer too small for struct").ThrowAsJavaScriptException();
-    return false;
-  }
-
-  // Inizializza buffer a zero
-  std::memset(buffer, 0, size_);
-
-  // Copia ogni campo
-  for (const auto& field : fields_) {
-    void* field_ptr = static_cast<char*>(buffer) + field.offset;
-
-    if (field.array_type) {
-      // Array field — single Get() + undefined test evita il doppio
-      // V8-crossing di Has()+Get().
-      Napi::Value value = obj.Get(field.name);
-      if (value.IsUndefined()) {
-        continue;  // campo opzionale
-      }
-      if (!field.array_type->JSToArray(env, value, field_ptr, field.size)) {
-        return false;
-      }
-    } else if (field.struct_type) {
-      // Nested struct
-      if (field.is_anonymous) {
-        // Anonymous field: leggi i suoi campi direttamente dall'oggetto
-        if (!field.struct_type->JSToStruct(env, obj, field_ptr, field.size)) {
-          return false;
-        }
-      } else {
-        Napi::Value value = obj.Get(field.name);
-        if (value.IsUndefined()) {
-          continue;  // campo opzionale
-        }
-        if (!value.IsObject()) {
-          Napi::TypeError::New(env, std::format("Field {} must be an object", field.name)).ThrowAsJavaScriptException();
-          return false;
-        }
-        if (!field.struct_type->JSToStruct(env, value.As<Napi::Object>(), field_ptr, field.size)) {
-          return false;
-        }
-      }
-    } else {
-      // Tipo primitivo
-      Napi::Value value = obj.Get(field.name);
-      if (value.IsUndefined()) {
-        continue;  // campo opzionale
-      }
-      if (JSToC(env, value, field.type, field_ptr, field.size) < 0) {
-        return false;
-      }
-    }
-  }
-
-  return true;
-}
-
-Napi::Object StructInfo::StructToJS(Napi::Env env, const void* buffer) {
-  Napi::Object obj = Napi::Object::New(env);
-  WriteFieldsTo(env, buffer, obj);
-  return obj;
-}
-
-void StructInfo::WriteFieldsTo(Napi::Env env, const void* buffer, Napi::Object obj) {
-  for (const auto& field : fields_) {
-    const void* field_ptr = static_cast<const char*>(buffer) + field.offset;
-
-    if (field.array_type) {
-      obj.Set(field.name, field.array_type->ArrayToJS(env, field_ptr));
-    } else if (field.struct_type) {
-      if (field.is_anonymous) {
-        // Scrivi i sotto-campi direttamente nell'obj esterno: evita di
-        // creare un oggetto intermedio, enumerarne le chiavi e ricopiarle
-        // una a una (GetPropertyNames + N Get/Set coppie V8↔C++).
-        field.struct_type->WriteFieldsTo(env, field_ptr, obj);
-      } else {
-        obj.Set(field.name, field.struct_type->StructToJS(env, field_ptr));
-      }
-    } else {
-      obj.Set(field.name, CToJS(env, field_ptr, field.type));
-    }
-  }
-}
-
-// ============================================================================
 // StructType - Napi wrapper
 // ============================================================================
 
@@ -256,18 +20,33 @@ Napi::Function StructType::GetClass(Napi::Env env) {
 }
 
 StructType::StructType(const Napi::CallbackInfo& info) : Napi::ObjectWrap<StructType>(info) {
-  // Napi::Env env = info.Env();
+  info.This().As<Napi::Object>().TypeTag(&kTypeTag);
 
-  // Opzionale: { union: true }
+  // Opzionale: { union: true, alignment: N, memoryClass: true }
   is_union_ = false;
+  bool memory_class = false;
+  size_t min_alignment = 1;
   if (info.Length() > 0 && info[0].IsObject()) {
     Napi::Object options = info[0].As<Napi::Object>();
     if (options.Has("union")) {
       is_union_ = options.Get("union").ToBoolean();
     }
+    if (options.Has("memoryClass")) {
+      memory_class = options.Get("memoryClass").ToBoolean();
+    }
+    Napi::Value alignment = options.Get("alignment");
+    if (alignment.IsNumber()) {
+      const int64_t value = alignment.As<Napi::Number>().Int64Value();
+      if (value < 1 || value > 1 << 15) {
+        throw Napi::RangeError::New(info.Env(), "alignment must be between 1 and 32768");
+      }
+      min_alignment = static_cast<size_t>(value);
+    }
   }
 
   struct_info_ = std::make_shared<StructInfo>(is_union_);
+  struct_info_->SetMinimumAlignment(min_alignment);
+  struct_info_->SetMemoryClass(memory_class);
 }
 
 Napi::Value StructType::AddField(const Napi::CallbackInfo& info) {
@@ -280,9 +59,6 @@ Napi::Value StructType::AddField(const Napi::CallbackInfo& info) {
 
   std::string name = info[0].As<Napi::String>().Utf8Value();
 
-  CType type;
-  std::shared_ptr<StructInfo> nested;
-  std::shared_ptr<ArrayInfo> array;
   bool is_anonymous = false;
 
   // Terzo parametro opzionale: { anonymous: true }
@@ -293,43 +69,13 @@ Napi::Value StructType::AddField(const Napi::CallbackInfo& info) {
     }
   }
 
-  if (info[1].IsNumber()) {
-    int32_t type_int = info[1].As<Napi::Number>().Int32Value();
-    type = IntToCType(type_int);
-  } else if (info[1].IsObject()) {
-    Napi::Object type_obj = info[1].As<Napi::Object>();
-    if (IsStructType(type_obj)) {
-      StructType* st = Napi::ObjectWrap<StructType>::Unwrap(type_obj);
-      nested = st->GetStructInfo();
-      type = CType::CTYPES_STRUCT;
-    } else if (IsArrayType(type_obj)) {
-      ArrayType* at = Napi::ObjectWrap<ArrayType>::Unwrap(type_obj);
-      array = at->GetArrayInfo();
-      type = CType::CTYPES_ARRAY;
-    } else if (type_obj.Has("_native") && type_obj.Get("_native").IsObject()) {
-      // È un wrapper JavaScript di array() - estrai il _native
-      Napi::Object native_obj = type_obj.Get("_native").As<Napi::Object>();
-      if (IsArrayType(native_obj)) {
-        ArrayType* at = Napi::ObjectWrap<ArrayType>::Unwrap(native_obj);
-        array = at->GetArrayInfo();
-        type = CType::CTYPES_ARRAY;
-      } else {
-        Napi::TypeError::New(env, "Invalid type").ThrowAsJavaScriptException();
-        return env.Undefined();
-      }
-    } else {
-      Napi::TypeError::New(env, "Invalid type").ThrowAsJavaScriptException();
-      return env.Undefined();
-    }
-  } else {
-    Napi::TypeError::New(env, "Type must be string, StructType, or ArrayType").ThrowAsJavaScriptException();
-    return env.Undefined();
-  }
+  const TypeSpec spec = TypeSpecFromJS(info[1]);
+  const std::shared_ptr<ArrayInfo>& array = spec.array_info;
 
   if (array) {
     struct_info_->AddArrayField(name, array);
   } else {
-    struct_info_->AddField(name, type, nested, is_anonymous);
+    struct_info_->AddField(name, spec.type, spec.struct_info, is_anonymous);
   }
   struct_info_->CalculateLayout();
 
@@ -352,7 +98,7 @@ Napi::Value StructType::Create(const Napi::CallbackInfo& info) {
   Napi::Buffer<uint8_t> buffer = Napi::Buffer<uint8_t>::New(env, size);
 
   if (info.Length() > 0 && info[0].IsObject()) {
-    if (!struct_info_->JSToStruct(env, info[0].As<Napi::Object>(), buffer.Data(), size)) {
+    if (!struct_info_->JSToStruct(env, info[0].As<Napi::Object>(), std::span(buffer.Data(), size))) {
       return env.Undefined();
     }
   } else {
@@ -365,24 +111,33 @@ Napi::Value StructType::Create(const Napi::CallbackInfo& info) {
   // Aggiungi campo dati interno (nascosto)
   obj.Set("_buffer", buffer);
 
-  // Per ogni campo, aggiungi getter/setter
+  // Per ogni campo, aggiungi getter/setter. Il Buffer è letto da `_buffer` a
+  // ogni accesso: un Napi::Buffer catturato sarebbe un handle valido solo
+  // dentro questa chiamata.
   for (const auto& field : struct_info_->GetFields()) {
     std::string fieldName = field.name;
 
+    auto field_data = [](const Napi::CallbackInfo& info, size_t offset, size_t size) -> uint8_t* {
+      Napi::Value value = info.This().As<Napi::Object>().Get("_buffer");
+      if (!value.IsBuffer() || value.As<Napi::Buffer<uint8_t>>().Length() < offset + size) {
+        throw Napi::TypeError::New(info.Env(), "Invalid struct buffer");
+      }
+      return value.As<Napi::Buffer<uint8_t>>().Data() + offset;
+    };
+
     // Getter
-    auto getter = [buffer, offset = field.offset, type = field.type](const Napi::CallbackInfo& info) -> Napi::Value {
-      Napi::Env env = info.Env();
-      uint8_t* data = buffer.Data() + offset;
-      return CToJS(env, data, type);
+    auto getter = [field_data, offset = field.offset, size = field.size,
+                   type = field.type](const Napi::CallbackInfo& info) -> Napi::Value {
+      return CToJS(info.Env(), field_data(info, offset, size), type);
     };
 
     // Setter
-    auto setter = [buffer, offset = field.offset, type = field.type](const Napi::CallbackInfo& info) -> Napi::Value {
-      Napi::Env env = info.Env();
-      if (info.Length() > 0) {
-        JSToC(env, info[0], type, buffer.Data() + offset, 0);  // Size not used for single values
+    auto setter = [field_data, offset = field.offset, size = field.size, type = field.type,
+                   name = field.name](const Napi::CallbackInfo& info) -> Napi::Value {
+      if (info.Length() > 0 && JSToC(info[0], type, std::span(field_data(info, offset, size), size)) < 0) {
+        throw Napi::TypeError::New(info.Env(), std::format("Cannot assign field '{}'", name));
       }
-      return env.Undefined();
+      return info.Env().Undefined();
     };
 
     Napi::PropertyDescriptor desc =

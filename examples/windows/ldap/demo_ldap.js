@@ -113,7 +113,7 @@ function main() {
   console.log(`\n  Retrieved ${total} user(s) — output: ${opts.outputType === OUTPUT_TYPE.TREE ? "tree" : "flat"}`);
 
   if (opts.debug) {
-     console.dir(users, { depth: null });
+    console.dir(users, { depth: null });
   }
 
   // // ── 2. Low-level API demo (queryBegin / findObjects / queryEnd) ──

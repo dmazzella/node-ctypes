@@ -7,8 +7,7 @@ import unittest
 import sys
 
 if sys.platform != 'win32':
-    import pytest
-    pytest.skip("Windows only", allow_module_level=True)
+    raise unittest.SkipTest("Windows only")
 
 from ctypes import (
     WinDLL, Structure, c_uint16, sizeof, byref, create_unicode_buffer,
@@ -192,6 +191,17 @@ class TestWindowsAPI(unittest.TestCase):
         # This should raise WinError
         with self.assertRaises(OSError):
             GetModuleHandleW('NonExistent.dll')
+
+class TestWinError(unittest.TestCase):
+    def test_fields(self):
+        err = WinError(2)
+        self.assertEqual(err.winerror, 2)
+        self.assertEqual(err.errno, 2)  # ENOENT
+        self.assertIsInstance(err.strerror, str)
+        self.assertTrue(str(err).startswith("[WinError 2] "))
+        self.assertEqual(WinError(5).errno, 13)  # EACCES
+        self.assertEqual(WinError(87, "bad").strerror, "bad")
+
 
 if __name__ == '__main__':
     unittest.main()

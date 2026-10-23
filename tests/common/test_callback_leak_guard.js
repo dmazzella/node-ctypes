@@ -26,14 +26,10 @@ function runSubprocess(envDebug, withRelease) {
       await new Promise((r) => setTimeout(r, 50));
     }
   `;
-  const res = spawnSync(
-    process.execPath,
-    ["--expose-gc", "--input-type=module", "-e", script],
-    {
-      env: { ...process.env, NODE_CTYPES_DEBUG_CALLBACKS: envDebug },
-      encoding: "utf8",
-    },
-  );
+  const res = spawnSync(process.execPath, ["--expose-gc", "--input-type=module", "-e", script], {
+    env: { ...process.env, NODE_CTYPES_DEBUG_CALLBACKS: envDebug },
+    encoding: "utf8",
+  });
   return res.stderr + res.stdout;
 }
 

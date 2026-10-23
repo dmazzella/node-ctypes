@@ -29,11 +29,7 @@ describe("struct-by-value (Python ctypes parity, CORR-4)", function () {
   let libc;
   before(() => {
     // Su Windows (CI) `div` è esportato da msvcrt.
-    const path = process.platform === "darwin"
-      ? "/usr/lib/libSystem.dylib"
-      : process.platform === "win32"
-        ? "msvcrt.dll"
-        : null; // Linux: path=null → Library(NULL) cerca il processo corrente (libc già linkata)
+    const path = process.platform === "darwin" ? "/usr/lib/libSystem.dylib" : process.platform === "win32" ? "msvcrt.dll" : null; // Linux: path=null → Library(NULL) cerca il processo corrente (libc già linkata)
     libc = new CDLL(path);
   });
 
@@ -89,9 +85,7 @@ describe("struct-by-value — composite fields (layout / signature only)", funct
     }
     // Layout: 4 (n) + 16 (items) = 20
     assert.strictEqual(S.size, 20);
-    const libc = process.platform === "darwin"
-      ? new ctypes.CDLL("/usr/lib/libSystem.dylib")
-      : new ctypes.CDLL(null);
+    const libc = process.platform === "darwin" ? new ctypes.CDLL("/usr/lib/libSystem.dylib") : new ctypes.CDLL(null);
     try {
       libc.func("__node_ctypes_dummy_never_exists", ctypes.c_int32, [S]);
     } catch (e) {
@@ -101,7 +95,10 @@ describe("struct-by-value — composite fields (layout / signature only)", funct
 
   it("struct with array-of-Structure field", function () {
     class Point extends ctypes.Structure {
-      static _fields_ = [["x", ctypes.c_int32], ["y", ctypes.c_int32]];
+      static _fields_ = [
+        ["x", ctypes.c_int32],
+        ["y", ctypes.c_int32],
+      ];
     }
     const PointArr3 = ctypes.array(Point, 3);
     class Polyline extends ctypes.Structure {
@@ -113,9 +110,7 @@ describe("struct-by-value — composite fields (layout / signature only)", funct
     }
     // Layout: 4 + 4 + 3*8 = 32
     assert.strictEqual(Polyline.size, 32);
-    const libc = process.platform === "darwin"
-      ? new ctypes.CDLL("/usr/lib/libSystem.dylib")
-      : new ctypes.CDLL(null);
+    const libc = process.platform === "darwin" ? new ctypes.CDLL("/usr/lib/libSystem.dylib") : new ctypes.CDLL(null);
     try {
       libc.func("__node_ctypes_dummy_never_exists", ctypes.c_int32, [Polyline]);
     } catch (e) {
@@ -138,9 +133,7 @@ describe("struct-by-value — composite fields (layout / signature only)", funct
     f.high = 0xbbbb;
     assert.strictEqual(f.low, 0xaaaa);
     assert.strictEqual(f.high, 0xbbbb);
-    const libc = process.platform === "darwin"
-      ? new ctypes.CDLL("/usr/lib/libSystem.dylib")
-      : new ctypes.CDLL(null);
+    const libc = process.platform === "darwin" ? new ctypes.CDLL("/usr/lib/libSystem.dylib") : new ctypes.CDLL(null);
     try {
       libc.func("__node_ctypes_dummy_never_exists", ctypes.c_uint32, [Flags]);
     } catch (e) {

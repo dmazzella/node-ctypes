@@ -276,5 +276,26 @@ class TestFunctionsAndCallbacks(unittest.TestCase):
         self.assertEqual(wcslen(addressof(wbuf)), 5)
 
 
+
+class TestLibraryLoader(unittest.TestCase):
+    def test_probes(self):
+        import ctypes
+
+        self.assertIn("LibraryLoader", str(ctypes.cdll))
+        with self.assertRaises(AttributeError):
+            ctypes.cdll._private
+
+
+@unittest.skipUnless(sys.platform == "darwin", "macOS only")
+class TestFindLibraryDarwin(unittest.TestCase):
+    def test_dyld_shared_cache(self):
+        from ctypes import CDLL
+        from ctypes.util import find_library
+
+        self.assertEqual(find_library("c"), "/usr/lib/libc.dylib")
+        self.assertEqual(find_library("CoreFoundation"), "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+        self.assertTrue(hasattr(CDLL(find_library("CoreFoundation")), "CFStringGetLength"))
+
+
 if __name__ == "__main__":
     unittest.main()

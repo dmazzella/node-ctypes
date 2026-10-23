@@ -172,7 +172,11 @@ export class Library {
    */
   symbol(name: string): bigint;
 
-  /** Close the library and release resources. */
+  /**
+   * Close the library and release resources. Functions obtained from it
+   * throw when called afterwards. Throws while a call to one of its
+   * functions is in progress (from a callback, or a pending `callAsync()`).
+   */
   close(): void;
 
   /** Library file path. */
@@ -312,12 +316,21 @@ export interface TypedFFIFunction<TArgs extends readonly FFIType[], TRet extends
  */
 export interface LibraryOptions {
   /**
-   * `dlopen` flags combined with `RTLD_LAZY` (e.g. {@link RTLD_GLOBAL}).
+   * `dlopen` flags combined with `RTLD_NOW` (e.g. {@link RTLD_GLOBAL}).
    * Ignored on Windows. Default: {@link DEFAULT_MODE}.
    *
    * Python ctypes parity: the `mode` argument of `CDLL(name, mode)`.
    */
   mode?: number;
+
+  /**
+   * `LoadLibraryExW` flags (Windows only). Default: `LOAD_LIBRARY_SEARCH_DEFAULT_DIRS`,
+   * plus `LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR` (with the path made absolute) when the
+   * name contains a path separator.
+   *
+   * Python ctypes parity: the `winmode` argument of `CDLL(name, winmode=...)`.
+   */
+  winmode?: number;
 
   /**
    * Maximum size of the internal function cache. Default: 1000.
@@ -370,7 +383,11 @@ export class CDLL {
    */
   symbol(name: string): bigint;
 
-  /** Close the library and clear the function cache. */
+  /**
+   * Close the library and clear the function cache. Functions obtained from
+   * it throw when called afterwards. Throws while a call to one of its
+   * functions is in progress (from a callback, or a pending `callAsync()`).
+   */
   close(): void;
 
   /** Close the library at the end of a `using` block. */
@@ -790,11 +807,27 @@ type PointerContents<T> = IsAny<T> extends true ? any : T extends SimpleCDataCon
 type CharArrayValue<E, Else> = IsAny<E> extends true ? Else : [E] extends [SimpleCDataConstructor<"char">] ? string : [E] extends [SimpleCDataConstructor<"wchar">] ? string : Else;
 
 /**
- * Array instance: a Buffer with index access; `c_char` arrays also expose
- * `.value`/`.raw` and `c_wchar` arrays `.value`, as in Python.
+ * Array instance: a Buffer with index access; the Array methods (`slice`, `map`,
+ * `includes`, ...) work on the elements, as Python's sequence operations.
+ * `c_char` arrays also expose `.value`/`.raw` and `c_wchar` arrays `.value`.
  * @category Structures
  */
-export type ArrayInstance<E = any> = Buffer & ArrayProxy<ArrayElement<E>> & (IsAny<E> extends true ? {} : [E] extends [SimpleCDataConstructor<"char">] ? CharBufferValue : [E] extends [SimpleCDataConstructor<"wchar">] ? WideBufferValue : {});
+export type ArrayInstance<E = any> = Omit<Buffer, ElementMethod | "length" | "toJSON"> &
+  (IsAny<E> extends true
+    ? ArrayProxy<any>
+    : [E] extends [SimpleCDataConstructor<"char">]
+      ? Omit<ArrayProxy<ArrayElement<E>>, "slice"> & CharBufferValue & CharSlice
+      : [E] extends [SimpleCDataConstructor<"wchar">]
+        ? Omit<ArrayProxy<ArrayElement<E>>, "slice"> & WideBufferValue & CharSlice
+        : ArrayProxy<ArrayElement<E>>);
+
+/** Array methods that work on the elements of an array instance; the Buffer methods (`readInt32LE`, `subarray`, ...) work on the bytes. */
+type ElementMethod = Exclude<keyof ArrayProxy, number | typeof Symbol.iterator | "length" | "toJSON">;
+
+/** `c_char` / `c_wchar` arrays: a slice is a string (Python: bytes / str). */
+interface CharSlice {
+  slice(start?: number, end?: number): string;
+}
 
 /**
  * Text accessors of `c_char` buffers (arrays, {@link create_string_buffer}).
@@ -824,17 +857,18 @@ type ArgsFromCTypes<TArgs extends readonly any[]> = {
 };
 
 /** JS argument accepted for a function parameter of type `T`. */
-type JsArgFromFFIType<T> = T extends StructureClass ? Buffer | { _buffer: Buffer } | Record<string, any> : JsArgFromCType<T>;
+type JsArgFromFFIType<T> = T extends StructureClass ? Buffer | { _buffer: Buffer } | Record<string, any> : T extends ArrayTypeDef<infer E> ? ArrayInstance<E> | ArrayBufferView | ArrayBuffer | { readonly _as_parameter_: unknown } : JsArgFromCType<T>;
 
 /** Function arguments for `argtypes` `TArgs` (`any[]` when not a literal tuple). */
 type FFIArgs<TArgs extends readonly any[]> = FFIType[] extends TArgs ? any[] : { [K in keyof TArgs]: JsArgFromFFIType<TArgs[K]> };
 
 /**
  * JS value returned by a function with `restype` `T`. As in Python, a
- * `POINTER(T)` restype returns a {@link PointerInstance} and a {@link CFUNCTYPE}
- * restype a callable function (`null` for NULL).
+ * `POINTER(T)` restype returns a {@link PointerInstance}, a {@link CFUNCTYPE}
+ * restype a callable function (`null` for NULL) and a Structure/Union class an
+ * instance of that class.
  */
-type FFIReturn<T> = FFIType extends T ? any : T extends null ? undefined : T extends StructureClass ? Record<string, any> : JsFromCType<T>;
+type FFIReturn<T> = FFIType extends T ? any : T extends null ? undefined : T extends StructureClass ? InstanceType<T> : JsFromCType<T>;
 
 /**
  * A union type definition created by the {@link union} function.
@@ -935,9 +969,43 @@ export interface ArrayTypeDef<E = any> {
  * Proxy interface for array index access and iteration.
  * @category Structures
  */
-export interface ArrayProxy<T = any> {
+export interface ArrayProxy<T = any> extends Pick<
+  T[],
+  | "at"
+  | "copyWithin"
+  | "entries"
+  | "every"
+  | "fill"
+  | "filter"
+  | "find"
+  | "findIndex"
+  | "findLast"
+  | "findLastIndex"
+  | "forEach"
+  | "includes"
+  | "indexOf"
+  | "join"
+  | "keys"
+  | "lastIndexOf"
+  | "map"
+  | "reduce"
+  | "reduceRight"
+  | "reverse"
+  | "slice"
+  | "some"
+  | "sort"
+  | "toLocaleString"
+  | "toReversed"
+  | "toSorted"
+  | "values"
+  | "with"
+> {
   [index: number]: T;
   [Symbol.iterator](): Iterator<T>;
+  /** Number of elements (Python `len(arr)`); the size in bytes is `byteLength`. */
+  readonly length: number;
+  /** The elements, for `JSON.stringify`. */
+  toJSON(): T[];
   /**
    * The Buffer of the array: for an array on native memory
    * ({@link ArrayTypeDef.from_address}) a Buffer over that memory, as
@@ -951,8 +1019,14 @@ export interface ArrayProxy<T = any> {
  * @category Structures
  */
 export interface StructOptions {
-  /** If `true`, disables padding between fields. */
+  /** If `true`, disables padding between fields (as `pack: 1`). */
   packed?: boolean;
+  /** Maximum field alignment in bytes, as Python's `_pack_`. */
+  pack?: number;
+  /** Bit field layout, as Python's `_layout_` (`"ms"` with `pack`, otherwise the platform's). */
+  layout?: "gcc-sysv" | "ms";
+  /** Minimum alignment in bytes, as Python's `_align_`. */
+  align?: number;
 }
 
 /**
@@ -1242,11 +1316,29 @@ export class Structure<F extends Record<string, FieldSpec> = Record<string, any>
   static _pack_?: number | boolean;
 
   /**
+   * Bit field layout, as Python's `_layout_`: `"gcc-sysv"` (default except on
+   * Windows) or `"ms"` (default on Windows and with `_pack_`).
+   */
+  static _layout_?: "gcc-sysv" | "ms";
+
+  /** Minimum alignment in bytes, as Python's `_align_`. */
+  static _align_?: number;
+
+  /**
    * List of field names whose members are promoted to the parent struct.
    *
    * Python equivalent: `_anonymous_`
    */
   static _anonymous_?: ReadonlyArray<string>;
+
+  /** Size in bytes (Python: `sizeof(cls)`). */
+  static readonly size: number;
+
+  /** Alignment in bytes (Python: `alignment(cls)`). */
+  static readonly alignment: number;
+
+  /** Field descriptors, in layout order. */
+  static readonly fields: FieldDef[];
 
   /** Create instance with optional initial values. */
   static create<ThisT extends Structure<F>>(this: new (...args: any[]) => ThisT, values?: Partial<FieldsToInstance<F>> | Buffer): ThisT;
@@ -1260,14 +1352,14 @@ export class Structure<F extends Record<string, FieldSpec> = Record<string, any>
    *
    * Python ctypes parity: `Structure.from_buffer(source, offset=0)`.
    */
-  static from_buffer<ThisT extends Structure<F>>(this: new (...args: any[]) => ThisT, source: Buffer, offset?: number): ThisT;
+  static from_buffer<ThisT extends Structure<F>>(this: new (...args: any[]) => ThisT, source: ArrayBufferView | { _buffer: Buffer }, offset?: number): ThisT;
 
   /**
    * Create an instance whose buffer is an independent copy of the source bytes.
    *
    * Python ctypes parity: `Structure.from_buffer_copy(source, offset=0)`.
    */
-  static from_buffer_copy<ThisT extends Structure<F>>(this: new (...args: any[]) => ThisT, source: Buffer | Uint8Array, offset?: number): ThisT;
+  static from_buffer_copy<ThisT extends Structure<F>>(this: new (...args: any[]) => ThisT, source: ArrayBufferView | { _buffer: Buffer }, offset?: number): ThisT;
 
   /**
    * Create an instance that views raw memory at `address`. Caller is
@@ -1301,7 +1393,10 @@ export class Structure<F extends Record<string, FieldSpec> = Record<string, any>
   /** Convert all fields to a plain JavaScript object (snapshot). */
   toObject(): FieldsToInstance<F>;
 
-  /** Dynamic field access via Proxy. */
+  /** The fields, for `JSON.stringify` (same as {@link toObject}). */
+  toJSON(): FieldsToInstance<F>;
+
+  /** Fields: accessors of the class (not own properties, as in Python). */
   [field: string]: any;
 }
 
@@ -1625,15 +1720,19 @@ export function wstring_at(address: Buffer | bigint | number, size?: number): st
 export function addressof(ptr: Buffer | bigint | number): bigint;
 
 /**
+ * Memory argument of {@link memmove} / {@link memset}: a buffer (any typed
+ * array, DataView or ArrayBuffer, as bytes), a ctypes instance, a pointer or an
+ * address.
+ */
+export type MemoryTarget = ArrayBufferView | ArrayBufferLike | { readonly _buffer: Buffer } | PointerInstance | bigint | number;
+
+/**
  * Copy memory from source to destination.
  *
  * Python equivalent: `ctypes.memmove`
  *
  * @category Memory
  */
-/** Memory argument of {@link memmove} / {@link memset}: a buffer, a ctypes instance, a pointer or an address. */
-export type MemoryTarget = Uint8Array | { readonly _buffer: Buffer } | PointerInstance | bigint | number;
-
 export function memmove(dst: MemoryTarget, src: MemoryTarget, count: number): void;
 
 /**
@@ -1661,8 +1760,8 @@ export function memset(dst: MemoryTarget, value: number, count: number): void;
  *
  * @category Memory
  */
-export function readValue<T extends AnyType>(ptr: Buffer | bigint | number | PointerInstance, type: T, offset?: number): JsFromCType<T>;
-export function readValue(ptr: Buffer | bigint | number | PointerInstance, type: AnyType | StructureClass, offset?: number): any;
+export function readValue<T extends AnyType>(ptr: MemorySource, type: T, offset?: number): JsFromCType<T>;
+export function readValue(ptr: MemorySource, type: AnyType | StructureClass, offset?: number): any;
 
 /**
  * Write a typed value to a buffer at a given offset.
@@ -1674,8 +1773,8 @@ export function readValue(ptr: Buffer | bigint | number | PointerInstance, type:
  *
  * @category Memory
  */
-export function writeValue<T extends AnyType>(ptr: Buffer | bigint | number | PointerInstance, type: T, value: JsArgFromCType<T>, offset?: number): number | void;
-export function writeValue(ptr: Buffer | bigint | number | PointerInstance, type: AnyType | StructureClass, value: any, offset?: number): number | void;
+export function writeValue<T extends AnyType>(ptr: MemorySource, type: T, value: JsArgFromCType<T>, offset?: number): number | void;
+export function writeValue(ptr: MemorySource, type: AnyType | StructureClass, value: any, offset?: number): number | void;
 
 /**
  * Get the size of a type in bytes.
@@ -1691,7 +1790,10 @@ export function writeValue(ptr: Buffer | bigint | number | PointerInstance, type
  *
  * @category Memory
  */
-export function sizeof(type: AnyType | StructDef | ArrayTypeDef | StructureClass | PointerTypeDef | FuncPtrFactory | SimpleCDataInstance | Structure<any> | Uint8Array): number;
+export function sizeof(type: AnyType | StructDef | ArrayTypeDef | StructureClass | PointerTypeDef | FuncPtrFactory | SimpleCDataInstance | Structure<any> | ArrayBufferView): number;
+
+/** Memory read/written by {@link readValue} / {@link writeValue}: a buffer, a ctypes instance, a pointer or an address. */
+type MemorySource = Buffer | ArrayBufferView | { _buffer: Buffer } | bigint | number | PointerInstance;
 
 /**
  * Get the alignment requirement of a type in bytes.
@@ -1734,10 +1836,11 @@ export function struct<F extends Record<string, FieldSpec>>(fields: F, options?:
  * For Python-like class syntax, use {@link Union} instead.
  *
  * @param fields - Object mapping field names to types
+ * @param options - Union options (e.g. `{ pack: 1 }`)
  *
  * @category Structures
  */
-export function union<F extends Record<string, FieldSpec>>(fields: F): UnionDef<F>;
+export function union<F extends Record<string, FieldSpec>>(fields: F, options?: StructOptions): UnionDef<F>;
 
 /**
  * Factory that returns a Structure subclass with typed fields.
@@ -1747,7 +1850,7 @@ export function union<F extends Record<string, FieldSpec>>(fields: F): UnionDef<
  *
  * @category Structures
  */
-export function defineStruct<F extends Record<string, FieldSpec>>(fields: F, options?: StructOptions): new (values?: Partial<FieldsToInstance<F>> | Buffer) => Structure<F> & FieldsToInstance<F>;
+export function defineStruct<F extends Record<string, FieldSpec>>(fields: F, options?: StructOptions): DefinedClass<F, Structure<F> & FieldsToInstance<F>>;
 
 /**
  * Factory that returns a Union subclass with typed fields.
@@ -1756,7 +1859,27 @@ export function defineStruct<F extends Record<string, FieldSpec>>(fields: F, opt
  *
  * @category Structures
  */
-export function defineUnion<F extends Record<string, FieldSpec>>(fields: F): new (values?: Partial<FieldsToInstance<F>> | Buffer) => Union<F> & FieldsToInstance<F>;
+export function defineUnion<F extends Record<string, FieldSpec>>(fields: F, options?: StructOptions): DefinedClass<F, Union<F> & FieldsToInstance<F>>;
+
+/**
+ * Class returned by {@link defineStruct} / {@link defineUnion}: the statics of
+ * {@link Structure} and a constructor with positional values (field order),
+ * an object of field values or a Buffer.
+ * @category Structures
+ */
+export interface DefinedClass<F extends Record<string, FieldSpec>, I> {
+  new (values?: Partial<FieldsToInstance<F>> | Buffer): I;
+  new (...values: any[]): I;
+  readonly size: number;
+  readonly alignment: number;
+  readonly fields: FieldDef[];
+  create(values?: Partial<FieldsToInstance<F>> | Buffer): I;
+  toObject(bufOrInstance: Buffer | I): FieldsToInstance<F>;
+  from_buffer(source: ArrayBufferView | { _buffer: Buffer }, offset?: number): I;
+  from_buffer_copy(source: ArrayBufferView | { _buffer: Buffer }, offset?: number): I;
+  from_address(address: bigint | number): I;
+  in_dll(library: CDLL | Library, name: string): I;
+}
 
 /**
  * Define a fixed-size array type.
@@ -1775,18 +1898,21 @@ export function defineUnion<F extends Record<string, FieldSpec>>(fields: F): new
  *
  * @category Structures
  */
-export function array<E extends AnyType | StructureClass | ArrayTypeDef | PointerTypeDef | FuncPtrFactory>(elementType: E, count: number): ArrayTypeDef<E>;
+export function array<E extends ArrayElementType>(elementType: E, count: number): ArrayTypeDef<E>;
+
+/** Element types of {@link array}: C types, structures and unions (classes or definitions), arrays, pointers, function pointers. */
+type ArrayElementType = SimpleCDataConstructor | StructDef | UnionDef | StructureClass | ArrayTypeDef | PointerTypeDef | FuncPtrFactory;
 
 /**
  * Alias of {@link array}. Python equivalent: `ctypes.ARRAY(type, length)`.
  * @category Structures
  */
-export function ARRAY<E extends AnyType | StructureClass | ArrayTypeDef | PointerTypeDef | FuncPtrFactory>(elementType: E, count: number): ArrayTypeDef<E>;
+export function ARRAY<E extends ArrayElementType>(elementType: E, count: number): ArrayTypeDef<E>;
 
 /**
  * Define a bit field for use in struct `_fields_`.
  *
- * @param baseType - The underlying integer type (e.g. `c_uint32`)
+ * @param baseType - The underlying integer type (e.g. `c_uint32`) or `c_bool`; other types raise TypeError, as in Python
  * @param bits - Number of bits
  *
  * @example
@@ -1801,7 +1927,7 @@ export function ARRAY<E extends AnyType | StructureClass | ArrayTypeDef | Pointe
  *
  * @category Structures
  */
-export function bitfield(baseType: AnyType, bits: number): BitFieldDef;
+export function bitfield(baseType: SimpleCDataConstructor, bits: number): BitFieldDef;
 
 /**
  * Pass an object by reference (returns its underlying buffer).
@@ -1965,7 +2091,7 @@ export function set_last_error(code: number): number;
  * @category Error Handling
  */
 export class ArgumentError extends TypeError {
-  constructor(message?: string);
+  constructor(message?: string, options?: ErrorOptions);
 }
 
 /**
@@ -1985,11 +2111,12 @@ export function FormatError(code?: number): string;
  * Python equivalent: `ctypes.WinError()`
  *
  * @param code - Error code (defaults to `GetLastError()`)
- * @returns Error with `.winerror` property
+ * @param descr - Message (defaults to `FormatError(code)`)
+ * @returns Error with `winerror`, `errno` (mapped as Python's OSError) and `strerror`
  *
  * @category Error Handling
  */
-export function WinError(code?: number): Error & { winerror: number };
+export function WinError(code?: number | null, descr?: string): Error & { winerror: number; errno: number; strerror: string };
 
 // =============================================================================
 // SimpleCData - Base class for simple C data types
@@ -2458,8 +2585,9 @@ export const DEFAULT_MODE: number;
  *   are provided (e.g. `"c"` → `"msvcrt.dll"`).
  * - On Linux, the `ldconfig` cache and common library directories are
  *   searched for the best-matching `libNAME.so.VERSION`.
- * - On macOS, `/usr/lib`, `/usr/local/lib`, Homebrew prefixes and framework
- *   bundles are searched.
+ * - On macOS, the `DYLD_*` paths, the dyld fallback directories, Homebrew and
+ *   the framework directories are searched, including the dyld shared cache
+ *   (system libraries and frameworks are not on disk since macOS 11).
  *
  * Returns `null` if the input is invalid. Returns a best-effort fallback
  * (bare soname) if nothing is found, so the loader can still try its own

@@ -5,6 +5,277 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [2.3.0] - 2026-10-23
+
+### Fixed
+
+- **`threadSafeCallback()` called by several native threads at the same
+  time**: the calls shared one result slot, so a thread could receive the
+  result of another call or wait forever. Each call now waits for its own
+  result; a call whose JavaScript function throws returns `0` instead of a
+  previous result.
+- **Functions keep their library loaded**: a function obtained from a
+  `CDLL` (or with `CFUNCTYPE(...)([name, lib])`) no longer crashes when the
+  library object is garbage-collected. After `close()` its calls throw
+  `Library is closed`, and `close()` throws while a call to one of its
+  functions is in progress (from a callback, or a pending `callAsync()`).
+- **Reentrant calls**: a function called again from a callback during its
+  own call overwrote the string arguments of the outer call.
+- **Memory growth**: strings passed to `c_void_p` parameters accumulated in
+  an internal buffer that was never cleared.
+- **Structure and union layout follows Python ctypes** (`ctypes._layout`):
+  bit fields of different types share storage units as with GCC
+  (`"gcc-sysv"`, the default except on Windows) or MSVC (`"ms"`, on Windows
+  and with `_pack_`); before, a bit field of a different type always started
+  a new unit, so mixed bit fields had a different size and offsets than in
+  C. Checked byte by byte against Python ctypes.
+- **Subclasses of structures and unions**: a subclass with `_fields_` reused
+  the layout of its base once the base had been used, so its own fields were
+  missing; it now extends the fields of the base, which keep their offsets,
+  as in Python. A subclass without `_fields_` has the layout of its base.
+- **Bit fields**: 32-bit wide fields read back as 0, and 64-bit fields wider
+  than 53 bits lost precision. Fields wider than 53 bits now read as BigInt.
+  Bit fields of big-endian structures are laid out from the big end, as in
+  Python.
+- **`BigEndianStructure` / `BigEndianUnion`**: `get()`, `set()` and
+  `toObject()` used little-endian (field access was already correct).
+- **Objects assigned to fields of nested structures** (strings, pointers,
+  callbacks) were kept alive only by the temporary nested view and could be
+  collected while the outer structure still pointed to them; they now live
+  with the memory of the outer structure, as Python `_objects`.
+- **Structures by value**: structures with bit fields, subclasses, `_align_`
+  and arrays of structures (`Cannot assign to read only property '_native'`)
+  are passed and returned with the layout of the JS definition.
+- **Array parameters** (`argtypes = [c_int32 * 4]`) were passed by value,
+  as a structure of N elements, so the C function received the bytes of
+  the array as its pointer; they are now passed by address, as in C and
+  Python. As in Python, only an array of the same element type and length
+  (or a Buffer / typed array) is accepted, other values raise
+  `ArgumentError`.
+- **`errcheck` of functions with `paramflags`** was never called. It now
+  receives `(result, func, args)` with the out-params as instances, and its
+  return value is the result unless it returns `args`, as in Python.
+- **Invalid native types no longer terminate the process**:
+  `StructType.addField()` / `ArrayType` with an invalid type, a negative or
+  fractional array length and a zero-length `char` array initialized from a
+  string threw uncaught C++ exceptions or crashed; they now throw JS errors
+  (and any C++ exception becomes a JS error). Fields of
+  `StructType.create()` objects could not be assigned.
+- **`use_errno` / `use_last_error`** only read `errno` / `GetLastError()`
+  after the call. As in Python, the value set with `set_errno()` /
+  `set_last_error()` is now the system value during the call, and the
+  system value is restored after it (also with `callAsync()`).
+- **Wide strings with characters outside the BMP** (emoji, ...) were passed
+  as UTF-16 code units where `wchar_t` is 32-bit (Linux, macOS): `wcslen("a😀b")`
+  was 4 instead of 3. Surrogate pairs now become one `wchar_t`; lone
+  surrogates are kept, as in Python. `wstring_at()` keeps lone surrogates
+  instead of replacing them with U+FFFD.
+- **`c_wchar` arguments** accepted any string (using its first code unit);
+  as in Python they must be exactly one character.
+- **64-bit and pointer-sized integer arguments** (`c_int64`, `c_uint64`,
+  `c_size_t`, `c_ssize_t`) silently passed `0` for strings, symbols,
+  functions and plain objects; they now raise `ArgumentError`. `null` (0)
+  and Buffer / ArrayBuffer (their address) are still accepted.
+- **`errcheck` of library attributes** (`libc.abs.errcheck = ...`) was set
+  on the function shared by `func()` calls with the same signature, and was
+  lost when `argtypes` / `restype` changed. Each attribute now keeps its
+  own function and its `errcheck`, as in Python.
+- **`func()` cache**: functions with the same signature but different
+  options (`abi`, ...) shared one cache entry.
+- **`OleDLL`**: each `func()` call returning a cached function added another
+  HRESULT check on top of its `errcheck`, and setting `errcheck` removed the
+  HRESULT check. As Python `HRESULT._check_retval_`, the check now runs
+  before `errcheck` and is not replaced by it.
+- **`from_param`** was called after the default conversion of the argument
+  (so it received a Buffer instead of the object passed) and was ignored by
+  `CFUNCTYPE` prototypes. As in Python it now receives the argument as
+  passed, for `CDLL` functions and prototypes, and its errors raise
+  `ArgumentError` (`argument 1: RangeError: ...`).
+- **`memmove()` / `memset()`** crashed with a `Uint8Array` that is not a
+  Buffer and rejected other typed arrays, `DataView` and `ArrayBuffer`;
+  these are now accepted as bytes. `memset()` stops at the end of JS memory
+  as `memmove()` does, instead of throwing.
+- **`find_library()` on Linux** could return the 32-bit library of a
+  multiarch system, and never found versioned sonames outside the ldconfig
+  cache. As Python it returns the soname of the library with the ABI of the
+  process, then the highest version found in the library directories.
+- **Integer values wrap to the bits of the type**, as in Python, instead of
+  throwing `RangeError`: `new c_uint8(256).value === 0`,
+  `new c_uint64(-1).value === 2n ** 64n - 1n`, also for structure fields
+  and array elements.
+- **Structures with `_pack_` by value**: the native description placed the
+  fields at their natural offsets, so the C function received a different
+  layout. The fields now keep the offsets of the JS layout (misaligned ones
+  as bytes), and on x86-64 System V a structure with misaligned fields is
+  passed and returned in memory, as GCC and clang do (Python ctypes uses
+  registers there). Padding of structures with bit fields is no longer
+  passed as bytes, which moved a `float` that shares an eightbyte with
+  padding from an SSE register to an integer register on x86-64.
+- **Native types are recognized by their instances**: `StructType`,
+  `ArrayType` and `Library` objects were recognized by the names of their
+  methods, so a JS object with the same methods reached the native code and
+  failed with an unclear error. Their instances are now marked with a
+  Node-API type tag; other values raise a `TypeError` (`Type must be a CType
+  enum value (number), StructType or ArrayType`). Invalid types of
+  functions, callbacks, fields and arrays raise `TypeError` everywhere.
+- **Arguments of a type that cannot be converted** left their slot
+  uninitialized instead of raising `ArgumentError`.
+- **Errors of a callback result conversion** no longer cross C frames: the
+  callback returns 0 and the error is reported as other callback errors.
+
+- **Callback lifetime**: a `threadSafeCallback()` collected by the GC while
+  calls were still queued freed memory that the queued calls used; a
+  `callback()` called from another thread (for example by a function run with
+  `callAsync`) ran JavaScript off the main thread. The first now keeps its
+  state until the last queued call, the second records an error and returns 0
+  (use `threadSafeCallback()` for other threads).
+- **Pointers** (Python parity): `byref(p)` / `addressof(p)` of a `POINTER`
+  instance give the address of the pointer itself (a `T**` output parameter
+  wrote past the target); `cast()` and `p.add()` keep the source alive;
+  `p.contents = x` rejects an instance smaller than the pointed type;
+  `cast(c_char_p(...), POINTER(c_char))` reads the stored address;
+  `pointer(array)` points to the array.
+- **`cast(x, c_void_p | c_char_p | c_wchar_p)`** read the bytes of `x` as a
+  value: it now returns an instance pointing to `x` (kept alive), as Python.
+- **Structure arguments**: a plain object is converted to an instance of the
+  structure; an array is rejected (Python rejects a tuple).
+- **Variadic arguments**: typed instances (`c_int8(1)`, `c_float(1.5)`, ...)
+  are passed with the C default promotions; typed arrays as pointers.
+- **`_fields_`**: entries keep their order also for integer-like names;
+  duplicate names and malformed entries raise `TypeError`. `struct()` accepts
+  a Structure/Union class as anonymous field; `Union` supports `_anonymous_`
+  (also nested).
+- **Callbacks with `c_char_p` / `c_wchar_p` restype** can return a string
+  (it is kept alive with the callback, as Python does).
+- **Library loading**: on Windows `LoadLibraryExW` (UTF-8 paths) with the
+  flags of Python (`LOAD_LIBRARY_SEARCH_DEFAULT_DIRS`, plus the directory of
+  the library when the name is a path), without changing the DLL search path
+  of the process; `GetProcAddress` errors no longer say `LoadLibraryExA`. On
+  POSIX symbols are resolved at load time (`RTLD_NOW`), as Python.
+- **`find_library()` on macOS** finds libraries and frameworks in the dyld
+  shared cache (`/usr/lib/libc.dylib`, `CoreFoundation.framework`), searching
+  Homebrew first as Homebrew's Python.
+- **`string_at()` / `wstring_at()`** returned `null` for instances, arrays,
+  pointers, `c_char_p`/`c_void_p` and `_as_parameter_`; they read their
+  memory as Python. Strings (also `c_char_p.value`) are no longer truncated
+  at 1 MiB.
+- **`readValue()` / `writeValue()` / `sizeof()`** accept addresses, ctypes
+  instances and typed arrays for every type, with bounds checks.
+- **`c_void_p` fields** accept pointers created from an address,
+  `_as_parameter_` and `c_char_p` instances, and keep assigned memory alive.
+- **`array(struct({...}), n)`** (and `union()`) failed in the native layer.
+- **`Structure.from_buffer()`** accepted negative offsets; it now validates
+  them as Python and accepts typed arrays and ctypes instances.
+- **`String(cdll)`, `JSON.stringify` and other probes** of the lazy loaders
+  tried to load a library named `toString`, `toJSON`, ...; names starting
+  with `_` are not libraries, as in Python.
+- **`f.argtypes = null`** and **`f.errcheck = undefined`** threw.
+- **Unions by value on x86-64 System V** were passed in the wrong registers
+  (libffi has no union type, libffi#33; CPython has the same bug): each
+  eightbyte now gets the class of all the members that cover it.
+- **Silent acceptances where Python raises**: too many positional
+  initializers (`TypeError: too many initializers`), an instance of another
+  type assigned to a field (`incompatible types`), a Buffer too long for a
+  `c_char * n` field (`bytes too long`), bit fields of non-integer types
+  (`bit fields not allowed for type c_float`). A `SimpleCData` instance is a
+  positional initializer (`P(c_int(5))`). `array(c_char, n).create("héllo")`
+  encodes UTF-8 as `.value`.
+
+### Added
+
+- **`_layout_` and `_align_`** on structures and unions, as in Python ctypes.
+
+- **Structures and unions by value as callback arguments**, as in Python;
+  a structure restype of a callback raises `TypeError: invalid result type
+  for callback function` at creation, as in Python.
+- **`winmode`** option of `CDLL` (Windows `LoadLibraryExW` flags), as Python.
+- **`pack`, `layout`, `align` options** of `struct()` / `union()`;
+  `union()` and `defineUnion()` accept options.
+- **`WinError(code, descr)`** has `errno` (mapped from the Windows code as
+  Python's `OSError`) and `strerror`.
+
+### Changed
+
+- **Non-integral numbers for integer types raise `TypeError`** (`'float'
+  object cannot be interpreted as an integer`), as Python does for floats:
+  arguments (`ArgumentError`), constructors, fields, bit fields and callback
+  results. Integral numbers outside the range of the type wrap as before
+  (64-bit values no longer saturate).
+- **Array methods work on the elements**: `slice`, `at`, `indexOf`,
+  `includes`, `forEach`, `map`, `fill`, `join`, `entries`, ... on an array
+  instance use the elements (Python sequence operations), not the bytes of
+  the Buffer; slices of `c_char`/`c_wchar` arrays are strings and
+  `JSON.stringify` gives the elements. Buffer methods (`readInt32LE`,
+  `subarray`, ...) still work on the bytes.
+- **`POINTER(T)` and `array(T, n)` are cached**: the same type object for
+  the same arguments, as in Python.
+- **`errcheck` receives the function itself** (`func === lib.abs`) for every
+  restype, as in Python; it was the native wrapper for simple restypes.
+- **Typings**: statics `size` / `alignment` / `fields` of Structure classes,
+  classes returned by `defineStruct()` / `defineUnion()` with their statics,
+  element-wise array methods, narrower element types of `array()` /
+  `bitfield()`, typed arrays and addresses in `readValue()` / `writeValue()`.
+
+- **Structure/Union fields are accessors of the class** instead of a
+  `Proxy` around each instance (Python: fields are descriptors of the
+  class). Field reads and writes are about 5 times faster (about 4 ns
+  instead of 20-25 ns). `Object.keys(s)` and `{ ...s }` no longer list the
+  fields: use `s.toObject()`; `JSON.stringify(s)` (new `toJSON()`) and
+  `console.log(s)` show them.
+- **A nested structure or union field is an instance of its class**
+  (Python parity) on the memory of the outer instance, instead of a
+  `Proxy` view: `rect.a instanceof POINT`, and its methods and `toObject()`
+  are available. The instance is created on the first access and reused
+  (`rect.a === rect.a`), so `rect.a.x` takes about 6 ns instead of 170 ns.
+- **Faster calls** (measured on macOS arm64 against the previous version):
+  - functions with fixed numeric, pointer or string arguments and a result
+    that is not an array go through a dedicated path without the general
+    call state: `abs` / `sqrt` about 25% faster, `memset` with a Buffer
+    about 40%;
+  - numeric arguments take one Node-API call instead of two, and a Buffer
+    or typed array passed as a pointer one instead of three;
+  - variadic calls (`sprintf`) about 15% faster;
+  - structures returned by value about 2 times faster: the bytes are
+    returned in a Buffer reused by the function instead of a new one per
+    call;
+  - writes of 64-bit integer values given as numbers (`c_int64`,
+    `c_uint64`, `c_size_t`, `c_long` fields and `.value`) about 4 times
+    faster.
+- **Benchmark 7** (`tests/benchmarks/benchmark_koffi.js`) measured reads of
+  two plain JS objects; it now measures structure fields in memory and a
+  structure returned by value.
+- **Error messages follow Python 3.14+ ctypes**: `c_char` / `c_wchar`
+  values (`one character bytes, bytearray, or an integer in range(256)
+  expected, not a string of length 2`, `a unicode character expected, ...`),
+  pointer arguments (`'function' object cannot be interpreted as
+  ctypes.c_void_p` instead of `wrong type`) and numeric arguments
+  (`'string' object cannot be interpreted as an integer`, `must be real
+  number, not string`).
+- **`ArgumentError`** accepts the `options` of `Error` (`{ cause }`).
+- **Python reference tests run in CI** (Python 3.14, with `unittest`; no
+  longer `pytest`).
+- **A Structure/Union `restype` returns an instance of the class** (Python
+  parity) instead of a plain object; `errcheck` receives the instance. A
+  `struct()` definition as `restype` still returns a plain object.
+- **Tests**: `npm test` builds a C test library (`tests/fixtures/`) for
+  structures by value, array parameters and reentrant calls; its Python
+  twin tests check the same behavior with Python ctypes.
+- **C++20 cleanup of the native module**: concepts for the wrapper classes
+  and the direct-call invokers, `constexpr` type helpers, `[[nodiscard]]`
+  results, one parser for native types and one for callback signatures.
+  Values in raw memory (libffi results, C memory) are read with one
+  `LoadAs<T>` helper instead of a union whose inactive members were read
+  (undefined behavior in C++); buffers are passed as `std::span` /
+  `std::wstring_view` with their size.
+  The descriptors of structures, unions and arrays (`StructInfo`,
+  `ArrayInfo`) are in `src/layout.h` / `layout.cc`, separate from their JS
+  wrappers (`StructType` in `struct.h`, `ArrayType` in `array.h`).
+- **Build**: the native module is compiled as standard C++20 without
+  compiler extensions (`-std=c++20` instead of `-std=gnu++20`) and with
+  warnings enabled (`-Wall -Wextra`, `/W4`); it builds without warnings.
+
 ## [2.2.0] - 2026-10-22
 
 ### Added
@@ -436,6 +707,8 @@ It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-
 
 Initial releases.
 
+[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/dmazzella/node-ctypes/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/dmazzella/node-ctypes/compare/v2.1.1...v2.2.0
 [2.1.1]: https://github.com/dmazzella/node-ctypes/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/dmazzella/node-ctypes/compare/v2.0.0...v2.1.0

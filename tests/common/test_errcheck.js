@@ -196,7 +196,7 @@ describe("errcheck (Python ctypes compatible)", function () {
 
       assert.strictEqual(actualResult, 42);
       assert.strictEqual(capturedResult, 42);
-      assert.strictEqual(typeof capturedFunc, "object"); // È l'oggetto wrapper
+      assert.strictEqual(capturedFunc, abs); // Python: la funzione stessa
       assert(Array.isArray(capturedArgs));
       assert.strictEqual(capturedArgs.length, 1);
       assert.strictEqual(capturedArgs[0], -42);
@@ -239,6 +239,46 @@ describe("errcheck (Python ctypes compatible)", function () {
       // Rimuovi
       strlen.errcheck = null;
       assert.strictEqual(strlen("hi"), 2n); // Originale
+    });
+  });
+
+  describe("errcheck of library attributes", function () {
+    it("is kept when argtypes or restype change, as in Python", function () {
+      const abs = libc.abs;
+      abs.argtypes = [ctypes.c_int];
+      abs.restype = ctypes.c_int;
+      const twice = (result) => result * 2;
+      abs.errcheck = twice;
+      assert.strictEqual(abs(-3), 6);
+      abs.argtypes = [ctypes.c_int32];
+      abs.restype = ctypes.c_int32;
+      assert.strictEqual(abs.errcheck, twice);
+      assert.strictEqual(abs(-4), 8);
+      abs.errcheck = null;
+      assert.strictEqual(abs(-4), 4);
+    });
+
+    it("is not shared with functions returned by func()", function () {
+      const shared = libc.func("abs", ctypes.c_int, [ctypes.c_int]);
+      const abs = libc.abs;
+      abs.argtypes = [ctypes.c_int];
+      abs.restype = ctypes.c_int;
+      abs.errcheck = (result) => -result;
+      try {
+        assert.strictEqual(abs(-3), -3);
+        assert.strictEqual(shared(-3), 3);
+        assert.notStrictEqual(shared.errcheck, abs.errcheck);
+      } finally {
+        abs.errcheck = null;
+      }
+    });
+
+    it("func() caches functions per name, types and options", function () {
+      const a = libc.func("abs", ctypes.c_int, [ctypes.c_int]);
+      const b = libc.func("abs", ctypes.c_int, [ctypes.c_int], { abi: "default" });
+      assert.strictEqual(libc.func("abs", ctypes.c_int, [ctypes.c_int]), a);
+      assert.notStrictEqual(a, b);
+      assert.strictEqual(libc.func("abs", ctypes.c_int, [ctypes.c_int], { abi: "default" }), b);
     });
   });
 
@@ -404,11 +444,11 @@ describe("callAsync with errcheck and use_errno / use_last_error", function () {
     const strlen = libc.func("strlen", ctypes.c_size_t, [ctypes.c_char_p]);
     let seen;
     strlen.errcheck = (result, func, args) => {
-      seen = { result, isFunc: typeof func, args: [...args] };
+      seen = { result, isFunc: func === strlen, args: [...args] };
       return result * 10n;
     };
     assert.strictEqual(await strlen.callAsync("hello"), 50n);
-    assert.deepStrictEqual(seen, { result: 5n, isFunc: "object", args: ["hello"] });
+    assert.deepStrictEqual(seen, { result: 5n, isFunc: true, args: ["hello"] });
     libc.close();
   });
 

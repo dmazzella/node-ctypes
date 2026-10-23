@@ -374,6 +374,23 @@ describe("find_library", function () {
     lib.close();
   });
 
+  if (process.platform === "darwin") {
+    it("macOS: resolves libraries and frameworks in the dyld shared cache, as Python", function () {
+      assert.strictEqual(find_library("c"), "/usr/lib/libc.dylib");
+      assert.strictEqual(find_library("CoreFoundation"), "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation");
+      const cf = new CDLL(find_library("CoreFoundation"));
+      assert.strictEqual(typeof cf.CFStringGetLength, "function");
+      cf.close();
+    });
+  }
+
+  if (process.platform === "linux") {
+    it("Linux: returns a soname or path of libc, as Python", function () {
+      assert.match(find_library("c"), /(^|\/)libc\.so(\.\d+)*$/);
+      assert.match(find_library("m"), /(^|\/)libm\.so(\.\d+)*$/);
+    });
+  }
+
   if (process.platform === "win32") {
     it("Windows: resolves 'kernel32'", function () {
       assert.strictEqual(find_library("kernel32"), "kernel32.dll");
@@ -386,6 +403,14 @@ describe("find_library", function () {
 
 describe("cdll / windll lazy loaders", function () {
   const { find_library, cdll, windll, c_uint32 } = ctypes;
+
+  it("String(cdll), JSON and probes do not load libraries (Python: names with _ are not libraries)", function () {
+    assert.match(String(cdll), /LibraryLoader/);
+    assert.strictEqual(JSON.stringify({ cdll }), '{"cdll":{}}');
+    assert.strictEqual(cdll.constructor, undefined);
+    assert.strictEqual(cdll._private, undefined);
+    assert.strictEqual("_private" in cdll, false);
+  });
 
   it("cdll.<lib> lazy-loads and caches", function () {
     const libcName = process.platform === "win32" ? "msvcrt" : find_library("c");
@@ -441,7 +466,9 @@ describe("paramflags (in/out/default)", { skip: process.platform !== "win32" }, 
       { dir: "in", name: "unused", default: 0 },
     ]);
     assert.doesNotThrow(() => {
-      try { show(0n); } catch {}
+      try {
+        show(0n);
+      } catch {}
     });
   });
 
@@ -458,9 +485,6 @@ describe("paramflags (in/out/default)", { skip: process.platform !== "win32" }, 
   it("rejects 'out' on non-POINTER argtype", function () {
     const user32 = new WinDLL("user32.dll");
     const proto = WINFUNCTYPE(c_uint32, c_uint32);
-    assert.throws(
-      () => proto.bind(user32, "foo", [{ dir: "out", name: "x" }]),
-      /not a POINTER/,
-    );
+    assert.throws(() => proto.bind(user32, "foo", [{ dir: "out", name: "x" }]), /not a POINTER/);
   });
 });

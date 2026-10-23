@@ -102,6 +102,20 @@ jobs:
           cd tests
           npm test
 
+      # The Python twins (tests/**/test_*.py) check the reference behavior with
+      # Python ctypes; their error messages are those of Python 3.14+.
+      - name: Setup Python
+        if: ${{ !matrix.container }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Run Python ctypes reference tests
+        if: ${{ !matrix.container }}
+        run: |
+          cd tests
+          npm run test:python
+
       - name: Build and test in ${{ matrix.container }}
         if: ${{ matrix.container }}
         run: docker run --rm -v "$PWD:/work" -w /work ${{ matrix.container }} sh .github/scripts/build-linux.sh

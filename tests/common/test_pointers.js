@@ -5,16 +5,7 @@
 
 import test from "node:test";
 import assert from "node:assert";
-import {
-  POINTER,
-  pointer,
-  cast,
-  c_int32,
-  c_double,
-  c_char,
-  struct,
-  Structure,
-} from "../../lib/index.js";
+import { POINTER, pointer, cast, c_int32, c_double, c_char, struct, Structure } from "../../lib/index.js";
 
 test("POINTER type creation", async (t) => {
   await t.test("POINTER creates a pointer type factory", () => {
@@ -189,7 +180,7 @@ test("pointer() function", async (t) => {
 
   await t.test("pointer(Buffer) creates generic pointer", () => {
     const buf = Buffer.alloc(8);
-    buf.writeBigInt64LE(0x123456789ABCDEFn, 0);
+    buf.writeBigInt64LE(0x123456789abcdefn, 0);
     const p = pointer(buf);
     assert.ok(p, "pointer should return an instance");
     assert.ok(!p.isNull, "Pointer should not be NULL");
@@ -298,7 +289,6 @@ test("POINTER in function definitions", async (t) => {
     assert.ok(result !== 0n && result !== null, "memchr should find 'W'");
   });
 });
-
 
 test("cast(Buffer, POINTER(T)) semantic", async (t) => {
   await t.test("points to buffer memory, not reading bytes as address", () => {

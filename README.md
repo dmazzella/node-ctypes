@@ -115,9 +115,24 @@ const name = array(c_char, 16)();
 name.value = "node"; // .value / .raw as in Python
 ```
 
+An array type in `argtypes` is passed by address, as in C and Python
+(`fill.argtypes = [c_int32 * 4]`). As in Python, the argument must be an
+instance of an array with the same element type and length; a Buffer or a
+typed array is also accepted as its memory. Other values raise
+`ArgumentError`.
+
 Nested structs, anonymous fields (`static _anonymous_ = ["data"]`),
-explicit packing (`static _pack_ = 1`), and self-referential pointers
-(`POINTER(() => Node)`) all work identically to Python.
+explicit packing (`static _pack_ = 1`), minimum alignment
+(`static _align_ = 16`), self-referential pointers (`POINTER(() => Node)`)
+and subclasses that add fields to their base class all work identically to
+Python. The layout of bit fields follows Python's `_layout_`: `"gcc-sysv"`
+by default, `"ms"` on Windows or with `_pack_`. Bit fields wider than 53
+bits read as BigInt.
+
+Structures and unions passed or returned by value keep this layout, also
+with `_pack_`: as with GCC and clang, a structure with misaligned fields is
+passed in memory on x86-64 System V (Linux, macOS Intel), where Python
+ctypes passes it in registers and the called function reads wrong values.
 
 ### Pointers, buffers, and cast
 
@@ -189,12 +204,19 @@ with the `using` declaration for scope-bound cleanup (also on `throw`):
 } // close() + release() run automatically
 ```
 
+A function keeps its library loaded as long as it is referenced, also when
+the `CDLL` object itself is no longer used. After `close()`, its functions
+throw instead of calling unloaded code; `close()` itself throws while a call
+to one of them is in progress (from a callback, or a pending `callAsync()`).
+
 Set `NODE_CTYPES_DEBUG_CALLBACKS=1` to log a stack trace for every
 callback garbage-collected without `.release()`.
 
 Callbacks invoked by native threads need `threadSafeCallback()`: the
 JavaScript function runs on the main thread, and the calling thread waits
-for its result. Like a timer, a thread-safe callback keeps the event loop
+for its result (several threads can call it at the same time; each gets the
+result of its own call, `0` if the function throws). Like a timer, a
+thread-safe callback keeps the event loop
 alive until released; `.unref()` lets the process exit when nothing else
 is pending (calls are still delivered while it runs), `.ref()` restores it:
 
@@ -207,8 +229,11 @@ startWorker(onEvent); // a native library calling onEvent from its own thread
 
 `GetLastError()` / `get_errno()` read a **private thread-local slot** —
 exactly like Python's `ctypes.get_last_error()` / `ctypes.get_errno()`.
-The slot is updated **only** by FFI calls through libraries opened with
-`use_last_error` or `use_errno`; otherwise it stays at 0.
+The slot is used **only** by FFI calls through libraries opened with
+`use_last_error` or `use_errno`; otherwise it stays at 0. As in Python
+those calls swap it with the system value: the function sees the value set
+with `set_errno()` / `set_last_error()`, the value it leaves becomes the
+private one, and the system value is restored after the call.
 
 ```javascript
 const user32 = new WinDLL("user32.dll", { use_last_error: true });
@@ -277,9 +302,12 @@ const [p2, t2] = fn({ hWnd });   // or named-args
 
 fn.errcheck = (result, func, args) => {
   if (!result) throw new Error("call failed");
-  return result; // ignored when outs exist
+  return args; // args: the arguments, out params as instances (args[1].value)
 };
 ```
+
+As in Python, the value returned by `errcheck` is the result of the call,
+unless it is `args` itself: then the out-params are returned.
 
 ### Sharing memory with existing buffers
 
@@ -336,6 +364,10 @@ class StrLen extends c_int32 {
 const abs = libc.func("abs", c_int32, [StrLen]);
 abs("hello"); // 5
 ```
+
+As in Python, `from_param` receives the argument as passed (also with
+`CFUNCTYPE` prototypes), its result is converted as the declared type, and
+an error it throws becomes `ArgumentError` (`"argument 1: RangeError: ..."`).
 
 ### Big-endian structures
 
@@ -471,7 +503,9 @@ Plus the Win32 types, structures and pointer types of `ctypes.wintypes` under `w
 
 ### What works identically
 
-Structs, unions, bit fields, anonymous fields, `_pack_`, nested layouts,
+Structs, unions, bit fields (`_layout_` `"gcc-sysv"` / `"ms"`), anonymous
+fields, `_pack_`, `_align_`, subclasses of structures and unions, nested layouts,
+structures and unions by value (a struct `restype` returns an instance),
 arrays (also of arrays, pointers and function pointers), pointers and
 pointer arithmetic (also `POINTER(POINTER(T))`), callbacks (`CFUNCTYPE` /
 `WINFUNCTYPE`, also as struct fields), `prototype((name, dll), paramflags)`,
@@ -501,13 +535,32 @@ pointer arithmetic (also `POINTER(POINTER(T))`), callbacks (`CFUNCTYPE` /
   (Python: Windows only), so the same code runs everywhere.
 - **64-bit and pointer-sized integers** (`c_int64`, `c_uint64`,
   `c_size_t`, `c_ssize_t`) also accept `null` (as 0) and a `Buffer`
-  (as its address).
+  (as its address) as arguments.
+- **Variadic arguments follow the C promotions**: a `c_float`, `c_int8`,
+  `c_char`, … instance passed beyond `argtypes` is passed as `double` /
+  `int`, where Python fails (`ffi_prep_cif_var failed`).
+- **A plain object is accepted for a structure argument** passed by value
+  (fields by name).
+- **`c_wchar` also accepts a code point** (`new c_wchar(0x4E2D)`), where
+  Python requires a 1-character string.
+- **`memmove()` / `memset()` stop at the end of JS memory** (Buffer, typed
+  array, `ArrayBuffer`) instead of writing past it.
+- **Integer types reject non-integral numbers** (`3.7`, `NaN`) as Python
+  rejects floats; JS has no int/float distinction, so `3.0` is accepted.
+- **Array instances are Buffers whose Array methods work on the elements**
+  (`slice`, `map`, `includes`, …, as Python sequences); the Buffer methods
+  (`readInt32LE`, `subarray`, …) work on the bytes.
+- **Unions by value on x86-64 System V** are passed with the ABI rules;
+  Python passes them in the wrong registers (libffi#33).
+- **Structure/Union fields are accessors of the class**, as Python fields
+  are descriptors (`vars(s)` is empty): `Object.keys(s)` and `{ ...s }` do
+  not list them; use `s.toObject()`. `JSON.stringify(s)` and
+  `console.log(s)` show the fields.
 
 ### Not supported
 
-- **`ctypes.resize(instance, size)`** — our Structure/Union instances are
-  `Proxy` objects wrapping a Node `Buffer`; Buffers aren't resizable in
-  place, and re-pointing the Proxy target would break identity.
+- **`ctypes.resize(instance, size)`** — Structure/Union instances use a
+  Node `Buffer`, and Buffers aren't resizable in place.
   Work-around: `new MyStruct(myBuffer)` with a pre-sized buffer.
 - **`c_longdouble`** (80/128-bit float, `ffi_type_longdouble`) — rarely
   used; fall back to `c_double` or raw bytes.
@@ -523,9 +576,9 @@ needs these changes:
 | `POINTER(T)` restype returned a `bigint` address | returns a pointer object (`null` for NULL); use `.address` for the number |
 | NULL `POINTER` struct fields were pointer objects | they are `null` |
 | `c_char` values were numbers | 1-character strings; `c_char * n` fields read/write as strings |
-| invalid `c_char` values were truncated | `TypeError` (`"one character bytes, bytearray or integer expected"`) |
+| invalid `c_char` values were truncated | `TypeError` (`"one character bytes, bytearray, or an integer in range(256) expected, not ..."`) |
 | wrong argument types raised `TypeError` | raise `ArgumentError` (a `TypeError` subclass), message `"argument N: TypeError: ..."` |
-| unsupported pointer arguments (functions, plain objects) passed NULL | raise `ArgumentError` (`"wrong type"`) |
+| unsupported pointer arguments (functions, plain objects) passed NULL | raise `ArgumentError` (`"'function' object cannot be interpreted as ctypes.c_void_p"`) |
 | functions without `restype` / `argtypes` | default `restype` is `c_int`; without `argtypes` the call uses the fixed-argument ABI |
 | `create_string_buffer(init)` | also takes `size` and returns a Buffer with `.value` / `.raw` |
 | `c_long` / `c_ulong` (and `BOOL`, `LONG`, `DWORD`, `ULONG`) fields and `.value` were numbers on Windows | `BigInt` on every platform, like function results; writes accept numbers and BigInt |
@@ -550,6 +603,11 @@ Each example in `examples/` has its own README; see the [index](examples/README.
 ---
 
 ## Tests & docs
+
+`npm test` first builds a small C library (`tests/fixtures/`, into
+`build/fixture/`) used by the tests of structures by value, array parameters
+and reentrant calls; `npm run build:test-fixture` builds it alone. Python
+twins of the tests (`tests/common/*.py`) load the same library.
 
 ```bash
 cd tests && npm install && npm run test    # unit tests (JS + Python parity)

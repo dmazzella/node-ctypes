@@ -8,6 +8,7 @@
  */
 
 import assert from "node:assert";
+import util from "node:util";
 import os from "node:os";
 import { describe, it, before, after } from "node:test";
 import * as ctypes from "node-ctypes";
@@ -245,8 +246,13 @@ describe("JS fast paths", function () {
 
     it("reflection and special properties", function () {
       const v = new Vec(3, 4);
-      assert.deepStrictEqual(Object.keys(v), ["x", "y"]);
+      // As in Python (fields are descriptors of the class), the fields are
+      // accessors of the prototype, not own properties of the instance.
+      assert.deepStrictEqual(Object.keys(v), []);
       assert.ok("x" in v);
+      assert.deepStrictEqual(v.toObject(), { x: 3, y: 4 });
+      assert.strictEqual(JSON.stringify(v), '{"x":3,"y":4}');
+      assert.strictEqual(util.inspect(v), "Vec { x: 3, y: 4 }");
       assert.strictEqual(Object.prototype.toString.call(v), "[object Vec]");
       assert.strictEqual(v._buffer, v.__buffer);
       assert.strictEqual(v._buffer.readInt32LE(4), 4);

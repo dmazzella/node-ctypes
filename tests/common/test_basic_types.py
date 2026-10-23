@@ -3,8 +3,11 @@ Test Basic Types - Cross Platform
 Tests all basic C types supported by ctypes
 """
 
-import unittest
+import ctypes
+import ctypes.util
+import platform
 import struct
+import unittest
 from ctypes import (
     c_int8, c_uint8, c_int16, c_uint16, c_int32, c_uint32,
     c_int64, c_uint64, c_float, c_double, c_bool, c_void_p, c_size_t,
@@ -286,6 +289,35 @@ class TestAsParameterFromParam(unittest.TestCase):
                 return value
         self.assertEqual(StrLen.from_param("hello"), 5)
         self.assertEqual(StrLen.from_param(42), 42)
+
+    def test_from_param_receives_argument_as_passed(self):
+        libc = ctypes.CDLL(ctypes.util.find_library("c") or ("msvcrt.dll" if platform.system() == "Windows" else None))
+        seen = []
+
+        class Strict(c_int32):
+            @classmethod
+            def from_param(cls, value):
+                seen.append(type(value).__name__)
+                if isinstance(value, str):
+                    raise ValueError("no strings")
+                return value
+
+        class Wrapped:
+            def __init__(self, v):
+                self._as_parameter_ = v
+
+        abs_ = libc.abs
+        abs_.restype = c_int32
+        abs_.argtypes = [Strict]
+        self.assertEqual(abs_(Wrapped(-3)), 3)
+        self.assertEqual(abs_(-4), 4)
+        self.assertEqual(seen, ["Wrapped", "int"])
+        proto = ctypes.CFUNCTYPE(c_int32, Strict)(("abs", libc))
+        self.assertEqual(proto(Wrapped(-9)), 9)
+        for f in (abs_, proto):
+            with self.assertRaises(ctypes.ArgumentError) as cm:
+                f("x")
+            self.assertEqual(str(cm.exception), "argument 1: ValueError: no strings")
 
 
 if __name__ == '__main__':

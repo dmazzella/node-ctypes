@@ -5,170 +5,26 @@
 namespace ctypes {
 
 // ============================================================================
-// ArrayInfo - Core logic
-// ============================================================================
-
-ArrayInfo::ArrayInfo(CType element_type, size_t count, std::shared_ptr<StructInfo> element_struct)
-  : element_type_(element_type), count_(count), element_struct_(element_struct) {
-  if (element_struct) {
-    element_size_ = element_struct->GetSize();
-    alignment_ = element_struct->GetAlignment();
-  } else {
-    element_size_ = CTypeSize(element_type);
-
-    // Alignment dell'elemento
-    switch (element_type) {
-      case CType::CTYPES_INT8:
-      case CType::CTYPES_UINT8:
-      case CType::CTYPES_CHAR:
-      case CType::CTYPES_BOOL:
-        alignment_ = 1;
-        break;
-      case CType::CTYPES_INT16:
-      case CType::CTYPES_UINT16:
-        alignment_ = 2;
-        break;
-      case CType::CTYPES_WCHAR:
-        alignment_ = alignof(wchar_t);  // 2 su Windows, 4 su Unix
-        break;
-      case CType::CTYPES_INT32:
-      case CType::CTYPES_UINT32:
-      case CType::CTYPES_FLOAT:
-        alignment_ = 4;
-        break;
-      case CType::CTYPES_LONG:
-      case CType::CTYPES_ULONG:
-        alignment_ = sizeof(long);  // 4 su Windows (LLP64), 8 su Unix 64-bit (LP64)
-        break;
-      case CType::CTYPES_INT64:
-      case CType::CTYPES_UINT64:
-      case CType::CTYPES_DOUBLE:
-      case CType::CTYPES_POINTER:
-      case CType::CTYPES_STRING:
-      case CType::CTYPES_WSTRING:
-      case CType::CTYPES_SIZE_T:
-      case CType::CTYPES_SSIZE_T:
-        alignment_ = sizeof(void*);
-        break;
-      default:
-        alignment_ = 1;
-    }
-  }
-
-  size_ = element_size_ * count_;
-}
-
-ArrayInfo::~ArrayInfo() = default;
-
-ffi_type* ArrayInfo::GetFFIType() {
-  if (ffi_type_) {
-    return ffi_type_.get();
-  }
-
-  // Array è rappresentato in libffi come struct con elementi ripetuti
-  ffi_element_types_.clear();
-  ffi_element_types_.reserve(count_ + 1);
-
-  ffi_type* element_ffi;
-  if (element_struct_) {
-    element_ffi = element_struct_->GetFFIType();
-  } else {
-    element_ffi = CTypeToFFI(element_type_);
-  }
-
-  // Ripeti element_ffi count_ volte
-  for (size_t i = 0; i < count_; i++) {
-    ffi_element_types_.push_back(element_ffi);
-  }
-  // Terminator NULL
-  ffi_element_types_.push_back(nullptr);
-
-  // Crea ffi_type
-  ffi_type_ = std::make_unique<ffi_type>();
-  ffi_type_->size = size_;
-  ffi_type_->alignment = static_cast<unsigned short>(alignment_);
-  ffi_type_->type = FFI_TYPE_STRUCT;  // Array come struct
-  ffi_type_->elements = ffi_element_types_.data();
-
-  return ffi_type_.get();
-}
-
-bool ArrayInfo::JSToArray(Napi::Env env, Napi::Value val, void* buffer, size_t bufsize) {
-  if (bufsize < size_) {
-    Napi::TypeError::New(env, "Buffer too small for array").ThrowAsJavaScriptException();
-    return false;
-  }
-
-  std::memset(buffer, 0, size_);
-
-  if (val.IsArray()) {
-    Napi::Array arr = val.As<Napi::Array>();
-    size_t arr_len = arr.Length();
-    size_t copy_len = std::min(arr_len, count_);
-
-    for (size_t i = 0; i < copy_len; i++) {
-      Napi::Value elem = arr.Get(i);
-      void* elem_ptr = static_cast<char*>(buffer) + (i * element_size_);
-
-      if (element_struct_) {
-        // Element è struct
-        if (elem.IsObject()) {
-          if (!element_struct_->JSToStruct(env, elem.As<Napi::Object>(), elem_ptr, element_size_)) {
-            return false;
-          }
-        } else if (elem.IsBuffer()) {
-          Napi::Buffer<uint8_t> buf = elem.As<Napi::Buffer<uint8_t>>();
-          if (buf.Length() >= element_size_) {
-            memcpy(elem_ptr, buf.Data(), element_size_);
-          }
-        }
-      } else {
-        // Element è tipo primitivo
-        if (JSToC(env, elem, element_type_, elem_ptr, element_size_) < 0) {
-          return false;
-        }
-      }
-    }
-  } else if (val.IsBuffer()) {
-    // Buffer già pronto
-    Napi::Buffer<uint8_t> buf = val.As<Napi::Buffer<uint8_t>>();
-    size_t copy_size = std::min(buf.Length(), size_);
-    memcpy(buffer, buf.Data(), copy_size);
-  } else if (val.IsString() && (element_type_ == CType::CTYPES_INT8 || element_type_ == CType::CTYPES_CHAR)) {
-    // Stringa → char array
-    std::string str = val.As<Napi::String>().Utf8Value();
-    size_t copy_len = std::min(str.length(), count_ - 1);
-    memcpy(buffer, str.c_str(), copy_len);
-    static_cast<char*>(buffer)[copy_len] = '\0';
-  } else {
-    Napi::TypeError::New(env, "Expected array, buffer, or string").ThrowAsJavaScriptException();
-    return false;
-  }
-
-  return true;
-}
-
-Napi::Array ArrayInfo::ArrayToJS(Napi::Env env, const void* buffer) {
-  Napi::Array arr = Napi::Array::New(env, count_);
-
-  for (size_t i = 0; i < count_; i++) {
-    const void* elem_ptr = static_cast<const char*>(buffer) + (i * element_size_);
-
-    if (element_struct_) {
-      // Element è struct
-      arr.Set(i, element_struct_->StructToJS(env, elem_ptr));
-    } else {
-      // Element è tipo primitivo
-      arr.Set(i, CToJS(env, elem_ptr, element_type_));
-    }
-  }
-
-  return arr;
-}
-
-// ============================================================================
 // ArrayType - Napi wrapper
 // ============================================================================
+
+TypeSpec TypeSpecFromJS(const Napi::Value& value) {
+  if (value.IsNumber()) {
+    return {.type = CTypeFromJS(value)};
+  }
+  if (const StructType* st = UnwrapTagged<StructType>(value)) {
+    return {.type = CType::CTYPES_STRUCT, .struct_info = st->GetStructInfo()};
+  }
+  const ArrayType* at = UnwrapTagged<ArrayType>(value);
+  if (at == nullptr && value.IsObject()) {
+    // Wrapper JS di array(): il tipo nativo è `_native`.
+    at = UnwrapTagged<ArrayType>(value.As<Napi::Object>().Get("_native"));
+  }
+  if (at != nullptr) {
+    return {.type = CType::CTYPES_ARRAY, .array_info = at->GetArrayInfo()};
+  }
+  throw Napi::TypeError::New(value.Env(), "Type must be a CType enum value (number), StructType or ArrayType");
+}
 
 Napi::Function ArrayType::GetClass(Napi::Env env) {
   return DefineClass(env, "ArrayType",
@@ -182,38 +38,32 @@ Napi::Function ArrayType::GetClass(Napi::Env env) {
 
 ArrayType::ArrayType(const Napi::CallbackInfo& info) : Napi::ObjectWrap<ArrayType>(info) {
   Napi::Env env = info.Env();
+  info.This().As<Napi::Object>().TypeTag(&kTypeTag);
 
   if (info.Length() < 2) {
     Napi::TypeError::New(env, "ArrayType requires (element_type, count)").ThrowAsJavaScriptException();
     return;
   }
 
-  CType element_type;
-  std::shared_ptr<StructInfo> element_struct;
-
-  // Parse element type
-  if (info[0].IsNumber()) {
-    int32_t type_int = info[0].As<Napi::Number>().Int32Value();
-    element_type = IntToCType(type_int);
-  } else if (info[0].IsObject()) {
-    Napi::Object type_obj = info[0].As<Napi::Object>();
-
-    // Check if StructType (duck typing: has addField method)
-    if (IsStructType(type_obj)) {
-      StructType* st = Napi::ObjectWrap<StructType>::Unwrap(type_obj);
-      element_struct = st->GetStructInfo();
-      element_type = CType::CTYPES_STRUCT;
-    } else {
-      Napi::TypeError::New(env, "Invalid element type").ThrowAsJavaScriptException();
-      return;
-    }
-  } else {
-    Napi::TypeError::New(env, "Element type must be string or type object").ThrowAsJavaScriptException();
-    return;
+  // Elementi primitivi o struct (un array di array è un array di byte in JS).
+  const TypeSpec element = TypeSpecFromJS(info[0]);
+  if (element.array_info) {
+    throw Napi::TypeError::New(env, "Invalid element type");
   }
+  const CType element_type = element.type;
+  const std::shared_ptr<StructInfo>& element_struct = element.struct_info;
 
-  // Parse count
-  size_t count = static_cast<size_t>(info[1].As<Napi::Number>().Int64Value());
+  // Parse count: intero non negativo, con dimensione totale rappresentabile.
+  if (!info[1].IsNumber()) {
+    throw Napi::TypeError::New(env, "Array length must be a number");
+  }
+  const double length = info[1].As<Napi::Number>().DoubleValue();
+  const size_t element_size = element_struct ? element_struct->GetSize() : CTypeSize(element_type);
+  if (!(length >= 0) || length != std::floor(length) || length > 9007199254740991.0 ||
+      (element_size != 0 && length > static_cast<double>(SIZE_MAX / 2 / element_size))) {
+    throw Napi::RangeError::New(env, "Invalid array length");
+  }
+  size_t count = static_cast<size_t>(length);
 
   array_info_ = std::make_shared<ArrayInfo>(element_type, count, element_struct);
 }
@@ -237,7 +87,7 @@ Napi::Value ArrayType::Create(const Napi::CallbackInfo& info) {
   Napi::Buffer<uint8_t> buffer = Napi::Buffer<uint8_t>::New(env, size);
 
   if (info.Length() > 0) {
-    if (!array_info_->JSToArray(env, info[0], buffer.Data(), size)) {
+    if (!array_info_->JSToArray(env, info[0], std::span(buffer.Data(), size))) {
       return env.Undefined();
     }
   } else {

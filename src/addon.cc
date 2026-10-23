@@ -22,10 +22,12 @@ Napi::Object CreateVersionObject(Napi::Env env) {
   return version;
 }
 
+namespace {
+
 // Electron (V8 memory cage) rifiuta i Buffer su memoria non allocata da V8:
 // napi_create_external_buffer restituisce napi_no_external_buffers_allowed.
 // Si prova una volta all'avvio, invece di riconoscere il runtime dal nome.
-static bool ExternalBuffersAllowed(napi_env env) {
+bool ExternalBuffersAllowed(napi_env env) {
   static uint8_t probe = 0;
   napi_value result;
   napi_status status = napi_create_external_buffer(env, sizeof(probe), &probe, nullptr, nullptr, &result);
@@ -40,62 +42,26 @@ static bool ExternalBuffersAllowed(napi_env env) {
   return false;
 }
 
-template <typename Func>
-auto SafeInvoke(Napi::Env env, Func&& func) -> decltype(func()) {
-  try {
-    return func();
-  } catch (const std::bad_alloc& e) {
-    Napi::Error::New(env, std::format("Memory allocation failed: {}", e.what())).ThrowAsJavaScriptException();
-    if constexpr (std::is_void_v<decltype(func())>) {
-      return;
-    } else {
-      return {};
-    }
-  } catch (const std::runtime_error& e) {
-    Napi::Error::New(env, std::format("Runtime error: {}", e.what())).ThrowAsJavaScriptException();
-    if constexpr (std::is_void_v<decltype(func())>) {
-      return;
-    } else {
-      return {};
-    }
-  } catch (const std::exception& e) {
-    Napi::Error::New(env, std::format("Exception: {}", e.what())).ThrowAsJavaScriptException();
-    if constexpr (std::is_void_v<decltype(func())>) {
-      return;
-    } else {
-      return {};
-    }
-  } catch (...) {
-    Napi::Error::New(env, "Unknown exception occurred").ThrowAsJavaScriptException();
-    if constexpr (std::is_void_v<decltype(func())>) {
-      return;
-    } else {
-      return {};
-    }
-  }
-}
+}  // namespace
 
+// Costruttore JS di una classe wrapper, tenuto dall'addon per tutta la sua vita.
 template <typename WrapperType>
-std::unique_ptr<Napi::FunctionReference> SafeInitializeWrapper(Napi::Env env, const std::string& wrapperName) {
-  return SafeInvoke(env, [&]() -> std::unique_ptr<Napi::FunctionReference> {
-    Napi::Function func = WrapperType::GetClass(env);
-    auto result = std::make_unique<Napi::FunctionReference>();
-    *result = Napi::Persistent(func);
-    if (!result) {
-      throw std::runtime_error(std::format("Failed to initialize {} wrapper constructor", wrapperName));
-    }
-    return result;
-  });
+std::unique_ptr<Napi::FunctionReference> PersistentClass(Napi::Env env) {
+  return std::make_unique<Napi::FunctionReference>(Napi::Persistent(WrapperType::GetClass(env)));
 }
 
 CTypesAddon::CTypesAddon(Napi::Env env, Napi::Object exports) {
+  if (const napi_node_version* node = Napi::VersionManagement::GetNodeVersion(env)) {
+    napi_fast::buffer_info_checks_type = node->major > 20 || (node->major == 20 && node->minor >= 12);
+  }
+
   // Inizializza tutti i constructor come membri di istanza
-  LibraryConstructor = SafeInitializeWrapper<Library>(env, "Library");
-  FFIFunctionConstructor = SafeInitializeWrapper<FFIFunction>(env, "FFIFunction");
-  CallbackConstructor = SafeInitializeWrapper<Callback>(env, "Callback");
-  ThreadSafeCallbackConstructor = SafeInitializeWrapper<ThreadSafeCallback>(env, "ThreadSafeCallback");
-  StructTypeConstructor = SafeInitializeWrapper<StructType>(env, "StructType");
-  ArrayTypeConstructor = SafeInitializeWrapper<ArrayType>(env, "ArrayType");
+  LibraryConstructor = PersistentClass<Library>(env);
+  FFIFunctionConstructor = PersistentClass<FFIFunction>(env);
+  CallbackConstructor = PersistentClass<Callback>(env);
+  ThreadSafeCallbackConstructor = PersistentClass<ThreadSafeCallback>(env);
+  StructTypeConstructor = PersistentClass<StructType>(env);
+  ArrayTypeConstructor = PersistentClass<ArrayType>(env);
 
   // Definisci l'addon con tutte le esportazioni
   DefineAddon(exports, {
@@ -124,6 +90,7 @@ CTypesAddon::CTypesAddon(Napi::Env env, Napi::Object exports) {
                          InstanceMethod("memmove", &CTypesAddon::Memmove),
                          InstanceMethod("readMemory", &CTypesAddon::ReadMemory),
                          InstanceMethod("writeMemory", &CTypesAddon::WriteMemory),
+                         InstanceMethod("dyldSharedCacheContains", &CTypesAddon::DyldSharedCacheContains),
                          // Slot module-level last-error / errno (parity Python ctypes)
                          InstanceMethod("getCapturedLastError", &CTypesAddon::GetCapturedLastError),
                          InstanceMethod("setCapturedLastError", &CTypesAddon::SetCapturedLastError),
@@ -163,6 +130,23 @@ Napi::Value CTypesAddon::LoadLibrary(const Napi::CallbackInfo& info) {
   }
 
   return LibraryConstructor->New({info[0]});
+}
+
+// macOS 11+: system libraries and frameworks live only in the dyld shared
+// cache, not on disk (Python ctypes.macholib.dyld uses the same function).
+Napi::Value CTypesAddon::DyldSharedCacheContains(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+#ifdef __APPLE__
+  if (info.Length() > 0 && info[0].IsString()) {
+    if (__builtin_available(macOS 11.0, *)) {
+      const std::string path = info[0].As<Napi::String>().Utf8Value();
+      return Napi::Boolean::New(env, _dyld_shared_cache_contains_path(path.c_str()));
+    }
+  }
+#else
+  static_cast<void>(info);
+#endif
+  return Napi::Boolean::New(env, false);
 }
 
 Napi::Value CTypesAddon::Alloc(const Napi::CallbackInfo& info) {
@@ -221,13 +205,7 @@ Napi::Value CTypesAddon::ReadValue(const Napi::CallbackInfo& info) {
     return env.Undefined();
   }
 
-  CType ctype;
-  try {
-    ctype = IntToCType(info[1].As<Napi::Number>().Int32Value());
-  } catch (const std::exception& e) {
-    Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
-    return env.Undefined();
-  }
+  const CType ctype = CTypeFromJS(info[1]);
 
   // Parse offset
   if (info.Length() > 2 && info[2].IsNumber()) {
@@ -292,13 +270,7 @@ Napi::Value CTypesAddon::WriteValue(const Napi::CallbackInfo& info) {
     return env.Undefined();
   }
 
-  CType ctype;
-  try {
-    ctype = IntToCType(info[1].As<Napi::Number>().Int32Value());
-  } catch (const std::exception& e) {
-    Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
-    return env.Undefined();
-  }
+  const CType ctype = CTypeFromJS(info[1]);
 
   // Parse offset
   if (info.Length() > 3 && info[3].IsNumber()) {
@@ -326,9 +298,9 @@ Napi::Value CTypesAddon::WriteValue(const Napi::CallbackInfo& info) {
     }
   }
 
-  void* write_ptr = static_cast<uint8_t*>(ptr) + offset;
+  const std::span<uint8_t> target(static_cast<uint8_t*>(ptr) + offset, type_size);
 
-  int written = JSToC(env, info[2], ctype, write_ptr, type_size);
+  int written = JSToC(info[2], ctype, target);
   if (written < 0) {
     Napi::Error::New(env, "Failed to write value").ThrowAsJavaScriptException();
     return env.Undefined();
@@ -345,13 +317,7 @@ Napi::Value CTypesAddon::SizeOf(const Napi::CallbackInfo& info) {
     return env.Undefined();
   }
 
-  CType ctype;
-  try {
-    ctype = IntToCType(info[0].As<Napi::Number>().Int32Value());
-  } catch (const std::exception& e) {
-    Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
-    return env.Undefined();
-  }
+  const CType ctype = CTypeFromJS(info[0]);
 
   return Napi::Number::New(env, static_cast<double>(CTypeSize(ctype)));
 }
@@ -376,21 +342,32 @@ namespace {
 
 // Memoria di partenza di string_at / wstring_at: Buffer (con il suo limite in
 // byte), BigInt o Number. nullptr per NULL o tipi non supportati.
-const uint8_t* StringSource(const Napi::Value& value, size_t& limit_bytes) {
+// Sorgente di string_at / wstring_at: Buffer (letto entro la sua lunghezza) o
+// indirizzo. Il layer JS risolve istanze, array e puntatori; null/undefined
+// danno NULL, qualsiasi altro valore lancia (ritorna false).
+bool StringSource(const Napi::Value& value, const uint8_t*& ptr, size_t& limit_bytes) {
+  ptr = nullptr;
   limit_bytes = SIZE_MAX;
   if (value.IsBuffer()) {
     Napi::Buffer<uint8_t> buf = value.As<Napi::Buffer<uint8_t>>();
     limit_bytes = buf.Length();
-    return buf.Data();
+    ptr = buf.Data();
+    return true;
   }
   if (value.IsBigInt()) {
     bool lossless;
-    return reinterpret_cast<const uint8_t*>(value.As<Napi::BigInt>().Uint64Value(&lossless));
+    ptr = reinterpret_cast<const uint8_t*>(value.As<Napi::BigInt>().Uint64Value(&lossless));
+    return true;
   }
   if (value.IsNumber()) {
-    return reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(value.As<Napi::Number>().Int64Value()));
+    ptr = reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(value.As<Napi::Number>().Int64Value()));
+    return true;
   }
-  return nullptr;
+  if (value.IsNull() || value.IsUndefined()) {
+    return true;
+  }
+  Napi::TypeError::New(value.Env(), "Expected a Buffer, an address or null").ThrowAsJavaScriptException();
+  return false;
 }
 
 // Python string_at / wstring_at: con `size` si leggono esattamente `size`
@@ -422,11 +399,15 @@ Napi::Value CTypesAddon::ReadCString(const Napi::CallbackInfo& info) {
     return env.Undefined();
   }
 
+  const uint8_t* source;
   size_t limit_bytes;
-  const char* ptr = reinterpret_cast<const char*>(StringSource(info[0], limit_bytes));
-  if (!ptr) {
+  if (!StringSource(info[0], source, limit_bytes)) {
+    return env.Undefined();
+  }
+  if (!source) {
     return env.Null();
   }
+  const char* ptr = reinterpret_cast<const char*>(source);
 
   std::optional<size_t> size;
   if (!StringLength(info, 1, limit_bytes, size)) {
@@ -437,10 +418,12 @@ Napi::Value CTypesAddon::ReadCString(const Napi::CallbackInfo& info) {
   if (size) {
     len = *size;
   } else {
-    // Fino al NUL, entro il Buffer o un limite di sicurezza (anti-DoS).
-    const size_t max_len = std::min<size_t>(limit_bytes, 1024 * 1024);
-    while (len < max_len && ptr[len] != '\0') {
-      len++;
+    // Fino al NUL (senza limite, come Python), entro la lunghezza del Buffer.
+    if (limit_bytes == SIZE_MAX) {
+      len = std::strlen(ptr);
+    } else {
+      const void* nul = std::memchr(ptr, '\0', limit_bytes);
+      len = nul ? static_cast<size_t>(static_cast<const char*>(nul) - ptr) : limit_bytes;
     }
   }
 
@@ -455,8 +438,11 @@ Napi::Value CTypesAddon::ReadWString(const Napi::CallbackInfo& info) {
     return env.Undefined();
   }
 
+  const uint8_t* ptr;
   size_t limit_bytes;
-  const uint8_t* ptr = StringSource(info[0], limit_bytes);
+  if (!StringSource(info[0], ptr, limit_bytes)) {
+    return env.Undefined();
+  }
   if (!ptr) {
     return env.Null();
   }
@@ -467,43 +453,26 @@ Napi::Value CTypesAddon::ReadWString(const Napi::CallbackInfo& info) {
   }
 
   // Lettura per memcpy: l'indirizzo può non essere allineato a wchar_t.
-  auto at = [ptr](size_t i) {
-    wchar_t wc;
-    memcpy(&wc, ptr + i * sizeof(wchar_t), sizeof(wchar_t));
-    return wc;
-  };
+  auto at = [ptr](size_t i) { return LoadAs<wchar_t>(ptr + i * sizeof(wchar_t)); };
 
   size_t len = 0;
   if (size) {
     len = *size;
   } else {
-    const size_t max_len = std::min<size_t>(limit_bytes / sizeof(wchar_t), 1024 * 1024);
+    const size_t max_len = limit_bytes == SIZE_MAX ? SIZE_MAX : limit_bytes / sizeof(wchar_t);
     while (len < max_len && at(len) != L'\0') {
       len++;
     }
   }
 
-  std::u16string out;
-  out.reserve(len);
-  for (size_t i = 0; i < len; i++) {
-#ifdef _WIN32
-    out.push_back(static_cast<char16_t>(at(i)));
-#else
-    // wchar_t è UTF-32: code point non validi diventano U+FFFD.
-    uint32_t cp = static_cast<uint32_t>(at(i));
-    if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
-      cp = 0xFFFD;
-    }
-    if (cp >= 0x10000) {
-      cp -= 0x10000;
-      out.push_back(static_cast<char16_t>(0xD800 + (cp >> 10)));
-      out.push_back(static_cast<char16_t>(0xDC00 + (cp & 0x3FF)));
-    } else {
-      out.push_back(static_cast<char16_t>(cp));
-    }
-#endif
+  if (reinterpret_cast<uintptr_t>(ptr) % alignof(wchar_t) == 0) {
+    return WideToJS(env, std::wstring_view(reinterpret_cast<const wchar_t*>(ptr), len));
   }
-  return Napi::String::New(env, out);
+  std::vector<wchar_t> aligned(len);
+  for (size_t i = 0; i < len; i++) {
+    aligned[i] = at(i);
+  }
+  return WideToJS(env, std::wstring_view(aligned.data(), len));
 }
 
 Napi::Value CTypesAddon::AddressOf(const Napi::CallbackInfo& info) {
@@ -596,7 +565,9 @@ struct MemoryRange {
   size_t length = 0;
 };
 
-static MemoryRange MemoryRangeArguments(const Napi::CallbackInfo& info) {
+namespace {
+
+MemoryRange MemoryRangeArguments(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   if (info.Length() < 4) {
     throw Napi::TypeError::New(env, "readMemory/writeMemory(buf, offset, length, address)");
@@ -620,6 +591,8 @@ static MemoryRange MemoryRangeArguments(const Napi::CallbackInfo& info) {
   }
   return {buf.Data() + offset, reinterpret_cast<uint8_t*>(address), length};
 }
+
+}  // namespace
 
 Napi::Value CTypesAddon::ReadMemory(const Napi::CallbackInfo& info) {
   MemoryRange range = MemoryRangeArguments(info);

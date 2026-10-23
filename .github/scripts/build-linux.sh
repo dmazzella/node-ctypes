@@ -36,3 +36,14 @@ npm install
 npm test
 # Again as in Electron, where external buffers are not allowed.
 NODE_CTYPES_NO_EXTERNAL_BUFFERS=1 npm test
+
+# Python ctypes reference tests (the Python twins of the JS tests), with the
+# first Python 3.14+ available: manylinux ships it in /opt/python.
+for python in /opt/python/cp314-cp314/bin/python3 python3; do
+  if command -v "$python" >/dev/null 2>&1 && "$python" -c 'import sys; sys.exit(sys.version_info < (3, 14))'; then
+    "$python" -B -m unittest discover -s common -p 'test_*.py'
+    "$python" -B -m unittest discover -s windows -p 'test_*.py'
+    exit 0
+  fi
+done
+echo "Python 3.14+ not available: Python ctypes reference tests skipped"

@@ -43,12 +43,7 @@ describe("wintypes aliases (Python ctypes.wintypes parity)", function () {
 
   it("HANDLE family all reduce to c_void_p", function () {
     const w = ctypes.wintypes;
-    const HANDLE_ALIASES = [
-      "HANDLE", "HWND", "HINSTANCE", "HMODULE", "HICON", "HCURSOR",
-      "HBRUSH", "HMENU", "HFONT", "HBITMAP", "HGDIOBJ", "HKEY",
-      "HDC", "HRGN",
-      "PVOID", "LPVOID", "LPCVOID",
-    ];
+    const HANDLE_ALIASES = ["HANDLE", "HWND", "HINSTANCE", "HMODULE", "HICON", "HCURSOR", "HBRUSH", "HMENU", "HFONT", "HBITMAP", "HGDIOBJ", "HKEY", "HDC", "HRGN", "PVOID", "LPVOID", "LPCVOID"];
     for (const name of HANDLE_ALIASES) {
       assert.strictEqual(w[name], ctypes.c_void_p, `${name} === c_void_p`);
     }

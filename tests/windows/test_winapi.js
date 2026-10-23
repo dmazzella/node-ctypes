@@ -5,7 +5,7 @@
 
 import assert, { strictEqual, throws } from "node:assert";
 import { describe, it, before, after } from "node:test";
-import { WinDLL, SetLastError, GetLastError, struct, create_string_buffer, create_unicode_buffer, wstring_at, writeValue, c_void, c_void_p, c_uint16, c_uint32, c_int32, c_size_t, c_wchar_p } from "node-ctypes";
+import { WinDLL, WinError, SetLastError, GetLastError, struct, create_string_buffer, create_unicode_buffer, wstring_at, writeValue, c_void, c_void_p, c_uint16, c_uint32, c_int32, c_size_t, c_wchar_p } from "node-ctypes";
 
 describe("Windows API", { skip: process.platform !== "win32" }, function () {
   let kernel32;
@@ -206,6 +206,18 @@ describe("Windows API", { skip: process.platform !== "win32" }, function () {
       }, /GetModuleHandleW failed/);
 
       assert(errcheckCalled, "errcheck should have been called for failure case");
+    });
+  });
+
+  describe("WinError", function () {
+    it("has winerror, errno and strerror as Python's OSError", function () {
+      const err = WinError(2);
+      strictEqual(err.winerror, 2);
+      strictEqual(err.errno, 2); // ENOENT
+      strictEqual(typeof err.strerror, "string");
+      assert(err.message.startsWith("[WinError 2] "));
+      strictEqual(WinError(5).errno, 13); // EACCES
+      strictEqual(WinError(87, "bad").strerror, "bad");
     });
   });
 });

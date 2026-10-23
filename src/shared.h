@@ -8,6 +8,7 @@
 #include <bit>
 #include <chrono>
 #include <cmath>
+#include <concepts>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -21,6 +22,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -43,10 +45,14 @@
 #include <dlfcn.h>
 #endif
 
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+
 // ssize_t non esiste su Windows MSVC
 #ifdef _MSC_VER
 #include <BaseTsd.h>
-typedef SSIZE_T ssize_t;
+using ssize_t = SSIZE_T;
 #endif
 
 #include <ffi.h>
@@ -56,37 +62,47 @@ typedef SSIZE_T ssize_t;
 // unico caller, call-overhead misurato ~5% sui bench primitive.
 //   GCC/Clang: [[gnu::always_inline]] inline   (C++ attribute)
 //   MSVC:      __forceinline                   (prefisso non-standard)
+// CTYPES_NOINLINE: percorsi lenti tenuti fuori dal codice inline del percorso caldo.
 #if defined(_MSC_VER)
 #define CTYPES_ALWAYS_INLINE __forceinline
+#define CTYPES_NOINLINE __declspec(noinline)
 #elif defined(__GNUC__) || defined(__clang__)
 #define CTYPES_ALWAYS_INLINE [[gnu::always_inline]] inline
+#define CTYPES_NOINLINE [[gnu::noinline]]
 #else
 #define CTYPES_ALWAYS_INLINE inline
+#define CTYPES_NOINLINE
 #endif
 
 namespace ctypes {
-// Helper per verificare se un oggetto è un StructType (ha metodo addField)
-inline bool IsStructType(Napi::Object obj) {
-  if (obj.IsEmpty() || obj.IsNull() || obj.IsUndefined()) {
-    return false;
-  }
-  return obj.Has("addField") && obj.Get("addField").IsFunction();
+
+// Classi wrapper riconosciute dal type tag delle loro istanze (Node-API
+// napi_type_tag_object): un oggetto JS con gli stessi metodi non passa per
+// una di esse, come accadeva riconoscendole dai nomi dei metodi.
+template <typename T>
+concept TypeTaggedWrap = std::derived_from<T, Napi::ObjectWrap<T>> && requires {
+  { T::kTypeTag } -> std::convertible_to<const napi_type_tag&>;
+};
+
+// Valore di tipo T letto da memoria grezza (risultati di libffi, slot degli
+// argomenti, memoria C). memcpy è il modo definito dallo standard
+// (std::start_lifetime_as è C++23); il compilatore lo riduce a un load.
+template <typename T>
+  requires std::is_trivially_copyable_v<T>
+[[nodiscard]] inline T LoadAs(const void* p) noexcept {
+  T value;
+  std::memcpy(&value, p, sizeof(T));
+  return value;
 }
 
-// Helper per verificare se un oggetto è un ArrayType (ha metodo getLength)
-inline bool IsArrayType(Napi::Object obj) {
-  if (obj.IsEmpty() || obj.IsNull() || obj.IsUndefined()) {
-    return false;
+// Istanza nativa di `value` se è un oggetto creato da T, altrimenti nullptr.
+template <TypeTaggedWrap T>
+[[nodiscard]] T* UnwrapTagged(const Napi::Value& value) {
+  if (!value.IsObject()) {
+    return nullptr;
   }
-  return obj.Has("getLength") && obj.Get("getLength").IsFunction();
+  const Napi::Object object = value.As<Napi::Object>();
+  return object.CheckTypeTag(&T::kTypeTag) ? Napi::ObjectWrap<T>::Unwrap(object) : nullptr;
 }
 
-// Helper per verificare se un oggetto è un TypeInfo (ha metodo name ma non addField/getLength)
-inline bool IsTypeInfo(Napi::Object obj) {
-  if (obj.IsEmpty() || obj.IsNull() || obj.IsUndefined()) {
-    return false;
-  }
-  // TypeInfo ha "name" e "size" ma non "addField" né "getLength"
-  return obj.Has("name") && obj.Get("name").IsFunction() && !obj.Has("addField") && !obj.Has("getLength");
-}
 }  // namespace ctypes

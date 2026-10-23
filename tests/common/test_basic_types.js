@@ -148,6 +148,25 @@ describe("Basic Types", function () {
       assert.strictEqual(val.value, 0x12345678n);
     });
 
+    it("c_void_p accepts pointers, instances, _as_parameter_ and keeps the memory alive", function () {
+      class S extends ctypes.Structure {
+        static _fields_ = [["p", ctypes.c_void_p]];
+      }
+      const buf = ctypes.create_string_buffer("hi");
+      const addr = ctypes.addressof(buf);
+      const s = new S();
+      for (const value of [{ _as_parameter_: addr }, ctypes.POINTER(ctypes.c_char).fromAddress(addr), new ctypes.c_void_p(addr), ctypes.cast(addr, ctypes.c_char_p), buf]) {
+        s.p = value;
+        assert.strictEqual(s.p, addr);
+      }
+      s.p = ctypes.create_string_buffer("kept");
+      for (let i = 0; i < 3; i++) globalThis.gc?.();
+      assert.strictEqual(ctypes.string_at(s.p), "kept");
+      assert.throws(() => {
+        s.p = {};
+      }, /cannot be converted to pointer/);
+    });
+
     it("should handle size_t / c_size_t", function () {
       const val = new ctypes.c_size_t(1024n);
       assert.strictEqual(val.value, 1024n);
@@ -235,7 +254,10 @@ describe("Basic Types", function () {
     it("should work with struct instances", function () {
       // Python: ref = byref(pt); assertIsNotNone(ref)
       class Point extends ctypes.Structure {
-        static _fields_ = [["x", ctypes.c_int32], ["y", ctypes.c_int32]];
+        static _fields_ = [
+          ["x", ctypes.c_int32],
+          ["y", ctypes.c_int32],
+        ];
       }
       const pt = new Point(10, 20);
       const ref = ctypes.byref(pt);
@@ -416,14 +438,20 @@ describe("Basic Types", function () {
 
     it("should return correct alignment for Structure", function () {
       class Point extends ctypes.Structure {
-        static _fields_ = [["x", ctypes.c_int32], ["y", ctypes.c_int32]];
+        static _fields_ = [
+          ["x", ctypes.c_int32],
+          ["y", ctypes.c_int32],
+        ];
       }
       assert.strictEqual(ctypes.alignment(Point), 4);
     });
 
     it("should return correct alignment for Structure with mixed types", function () {
       class Mixed extends ctypes.Structure {
-        static _fields_ = [["a", ctypes.c_uint8], ["b", ctypes.c_double]];
+        static _fields_ = [
+          ["a", ctypes.c_uint8],
+          ["b", ctypes.c_double],
+        ];
       }
       assert.strictEqual(ctypes.alignment(Mixed), 8);
     });
@@ -443,7 +471,10 @@ describe("Basic Types", function () {
     it("should work on Structure instance", function () {
       // Python: alignment(Point(1, 2)) == 4
       class Point extends ctypes.Structure {
-        static _fields_ = [["x", ctypes.c_int32], ["y", ctypes.c_int32]];
+        static _fields_ = [
+          ["x", ctypes.c_int32],
+          ["y", ctypes.c_int32],
+        ];
       }
       const p = new Point(1, 2);
       assert.strictEqual(ctypes.alignment(p), 4);
@@ -502,7 +533,10 @@ describe("Basic Types", function () {
     it("should create pointer to struct", function () {
       // Python: pt = Point(10,20); p = pointer(pt); assertEqual(p.contents.x, 10)
       class Point extends ctypes.Structure {
-        static _fields_ = [["x", ctypes.c_int32], ["y", ctypes.c_int32]];
+        static _fields_ = [
+          ["x", ctypes.c_int32],
+          ["y", ctypes.c_int32],
+        ];
       }
       const pt = new Point(10, 20);
       const p = ctypes.pointer(pt);
@@ -546,7 +580,10 @@ describe("Basic Types", function () {
 
     it("should work with struct", function () {
       class Point extends ctypes.Structure {
-        static _fields_ = [["x", ctypes.c_int32], ["y", ctypes.c_int32]];
+        static _fields_ = [
+          ["x", ctypes.c_int32],
+          ["y", ctypes.c_int32],
+        ];
       }
       const pt = new Point(10, 20);
       const addr = ctypes.addressof(pt);
@@ -602,7 +639,7 @@ describe("Basic Types", function () {
       const val = new ctypes.c_float(1.0);
       const p = ctypes.pointer(val);
       const p2 = ctypes.cast(p, ctypes.POINTER(ctypes.c_uint32));
-      assert.strictEqual(p2[0], 0x3F800000);
+      assert.strictEqual(p2[0], 0x3f800000);
     });
 
     it("should allow write-through", function () {
@@ -708,8 +745,8 @@ describe("Basic Types", function () {
   describe("POINTER.fromAddress()", function () {
     it("should create pointer at given address", function () {
       const IntPtr = ctypes.POINTER(ctypes.c_int32);
-      const p = IntPtr.fromAddress(0xDEADBEEFn);
-      assert.strictEqual(p.address, 0xDEADBEEFn);
+      const p = IntPtr.fromAddress(0xdeadbeefn);
+      assert.strictEqual(p.address, 0xdeadbeefn);
       assert.strictEqual(p.isNull, false);
     });
 
@@ -748,7 +785,10 @@ describe("Basic Types", function () {
 
     it("should work with struct pointer", function () {
       class Point extends ctypes.Structure {
-        static _fields_ = [["x", ctypes.c_int32], ["y", ctypes.c_int32]];
+        static _fields_ = [
+          ["x", ctypes.c_int32],
+          ["y", ctypes.c_int32],
+        ];
       }
       const PointPtr = ctypes.POINTER(Point);
       const pt = new Point({ x: 10, y: 20 });
@@ -812,8 +852,7 @@ describe("Basic Types", function () {
 describe("in_dll", function () {
   const { c_int32 } = ctypes;
 
-  it("SimpleCData.in_dll binds to exported global (Win only)",
-     { skip: process.platform !== "win32" }, function () {
+  it("SimpleCData.in_dll binds to exported global (Win only)", { skip: process.platform !== "win32" }, function () {
     const libc = new ctypes.CDLL(ctypes.find_library("c"));
     const tz = c_int32.in_dll(libc, "_timezone");
     assert.strictEqual(typeof tz.value, "number");
@@ -822,15 +861,11 @@ describe("in_dll", function () {
 
   it("throws on missing symbol", function () {
     const libc = new ctypes.CDLL(ctypes.find_library("c"));
-    assert.throws(
-      () => c_int32.in_dll(libc, "symbol_that_definitely_does_not_exist_12345"),
-      /not found|Symbol/i,
-    );
+    assert.throws(() => c_int32.in_dll(libc, "symbol_that_definitely_does_not_exist_12345"), /not found|Symbol/i);
     libc.close();
   });
 
-  it("Structure.in_dll is callable (inherited)",
-     { skip: process.platform !== "win32" }, function () {
+  it("Structure.in_dll is callable (inherited)", { skip: process.platform !== "win32" }, function () {
     class Dummy extends ctypes.Structure {
       static _fields_ = [["x", c_int32]];
     }
@@ -851,7 +886,9 @@ describe("_as_parameter_ / from_param", function () {
     const libc = new CDLL(find_library("c"));
     const abs = libc.func("abs", c_int32, [c_int32]);
     class Handle {
-      constructor(v) { this._as_parameter_ = v; }
+      constructor(v) {
+        this._as_parameter_ = v;
+      }
     }
     assert.strictEqual(abs(new Handle(-42)), 42);
     libc.close();
@@ -867,6 +904,36 @@ describe("_as_parameter_ / from_param", function () {
     const abs = libc.func("abs", c_int32, [StrLen]);
     assert.strictEqual(abs("hello"), 5);
     assert.strictEqual(abs(-7), 7);
+    libc.close();
+  });
+
+  it("from_param receives the argument as passed, also with CFUNCTYPE", function () {
+    const libc = new CDLL(find_library("c"));
+    const seen = [];
+    class Strict extends c_int32 {
+      static from_param(value) {
+        seen.push(value?.constructor?.name ?? typeof value);
+        if (typeof value === "string") throw new RangeError("no strings");
+        return value;
+      }
+    }
+    class Wrapped {
+      constructor(v) {
+        this._as_parameter_ = v;
+      }
+    }
+    const abs = libc.func("abs", c_int32, [Strict]);
+    assert.strictEqual(abs(new Wrapped(-3)), 3);
+    assert.strictEqual(abs(-4), 4);
+    assert.deepStrictEqual(seen, ["Wrapped", "Number"]);
+    const proto = ctypes.CFUNCTYPE(c_int32, Strict)(["abs", libc]);
+    assert.strictEqual(proto(new Wrapped(-9)), 9);
+    for (const f of [abs, proto]) {
+      assert.throws(
+        () => f("x"),
+        (e) => e instanceof ctypes.ArgumentError && e.message === "argument 1: RangeError: no strings" && e.cause instanceof RangeError,
+      );
+    }
     libc.close();
   });
 });

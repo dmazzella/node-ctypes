@@ -252,6 +252,26 @@ class TestErrcheck(unittest.TestCase):
         del strlen.errcheck
         self.assertEqual(strlen(b"hi"), 2)  # Original
 
+    def test_errcheck_kept_on_type_change(self):
+        """errcheck is kept when argtypes or restype change"""
+        abs_ = self.libc.abs
+        abs_.argtypes = [c_int]
+        abs_.restype = c_int
+
+        def twice(result, func, args):
+            return result * 2
+
+        abs_.errcheck = twice
+        try:
+            self.assertEqual(abs_(-3), 6)
+            abs_.argtypes = [ctypes.c_int32]
+            abs_.restype = ctypes.c_int32
+            self.assertIs(abs_.errcheck, twice)
+            self.assertEqual(abs_(-4), 8)
+        finally:
+            del abs_.errcheck
+        self.assertEqual(abs_(-4), 4)
+
     def test_python_ctypes_compatibility(self):
         """Test that behavior matches Python ctypes exactly"""
         abs_func = self.libc.abs

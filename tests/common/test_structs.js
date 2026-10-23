@@ -84,7 +84,7 @@ describe("Structs and Unions", function () {
       // Python: class IntOrDouble(Union): _fields_ = [("i", c_int32), ("d", c_double)]
       class IntOrDouble extends ctypes.Union {
         static _fields_ = [
-          ["i", ctypes.c_int32],  // 4 bytes
+          ["i", ctypes.c_int32], // 4 bytes
           ["d", ctypes.c_double], // 8 bytes
         ];
       }
@@ -103,8 +103,8 @@ describe("Structs and Unions", function () {
       }
 
       const f = new Flags();
-      f.low = 0xABCD;
-      assert.strictEqual(f.low, 0xABCD);
+      f.low = 0xabcd;
+      assert.strictEqual(f.low, 0xabcd);
 
       f.high = 0x1234;
       assert.strictEqual(f.high, 0x1234);
@@ -239,18 +239,30 @@ describe("Structs and Unions", function () {
     it("should honor numeric _pack_ values (Python semantics)", function () {
       class P1 extends ctypes.Structure {
         static _pack_ = 1;
-        static _fields_ = [["a", ctypes.c_uint8], ["b", ctypes.c_uint32]];
+        static _fields_ = [
+          ["a", ctypes.c_uint8],
+          ["b", ctypes.c_uint32],
+        ];
       }
       class P2 extends ctypes.Structure {
         static _pack_ = 2;
-        static _fields_ = [["a", ctypes.c_uint8], ["b", ctypes.c_uint32]];
+        static _fields_ = [
+          ["a", ctypes.c_uint8],
+          ["b", ctypes.c_uint32],
+        ];
       }
       class P4 extends ctypes.Structure {
         static _pack_ = 4;
-        static _fields_ = [["a", ctypes.c_uint8], ["b", ctypes.c_uint32]];
+        static _fields_ = [
+          ["a", ctypes.c_uint8],
+          ["b", ctypes.c_uint32],
+        ];
       }
       class NP extends ctypes.Structure {
-        static _fields_ = [["a", ctypes.c_uint8], ["b", ctypes.c_uint32]];
+        static _fields_ = [
+          ["a", ctypes.c_uint8],
+          ["b", ctypes.c_uint32],
+        ];
       }
       assert.strictEqual(P1.size, 5, "_pack_=1 → 1 + 4 = 5");
       assert.strictEqual(P2.size, 6, "_pack_=2 → 1 + pad1 + 4 = 6");
@@ -272,21 +284,33 @@ describe("Structs and Unions", function () {
     it("should propagate _pack_ to nested struct alignment", function () {
       class Inner extends ctypes.Structure {
         static _pack_ = 4;
-        static _fields_ = [["a", ctypes.c_uint8], ["b", ctypes.c_uint32]];
+        static _fields_ = [
+          ["a", ctypes.c_uint8],
+          ["b", ctypes.c_uint32],
+        ];
       }
       class Outer1 extends ctypes.Structure {
         static _pack_ = 1;
-        static _fields_ = [["i", ctypes.c_uint8], ["n", Inner]];
+        static _fields_ = [
+          ["i", ctypes.c_uint8],
+          ["n", Inner],
+        ];
       }
       class Outer2 extends ctypes.Structure {
         static _pack_ = 2;
-        static _fields_ = [["i", ctypes.c_uint8], ["n", Inner]];
+        static _fields_ = [
+          ["i", ctypes.c_uint8],
+          ["n", Inner],
+        ];
       }
       class OuterN extends ctypes.Structure {
-        static _fields_ = [["i", ctypes.c_uint8], ["n", Inner]];
+        static _fields_ = [
+          ["i", ctypes.c_uint8],
+          ["n", Inner],
+        ];
       }
       assert.strictEqual(Inner.size, 8);
-      assert.strictEqual(Outer1.size, 9,  "pack=1: i[1] + n[8]");
+      assert.strictEqual(Outer1.size, 9, "pack=1: i[1] + n[8]");
       assert.strictEqual(Outer2.size, 10, "pack=2: i[1] + pad[1] + n[8]");
       assert.strictEqual(OuterN.size, 12, "no pack: i[1] + pad[3] + n[8]");
     });
@@ -401,7 +425,10 @@ describe("Structs and Unions", function () {
       // Python: assertEqual(sizeof(S), 16 if ptr==8 else 8)
       const IntPtr = ctypes.POINTER(ctypes.c_int32);
       class S extends ctypes.Structure {
-        static _fields_ = [["value", ctypes.c_int32], ["pData", IntPtr]];
+        static _fields_ = [
+          ["value", ctypes.c_int32],
+          ["pData", IntPtr],
+        ];
       }
       const expected = ctypes.POINTER_SIZE === 8 ? 16 : 8;
       assert.strictEqual(ctypes.sizeof(S), expected);
@@ -450,7 +477,10 @@ describe("Structs and Unions", function () {
       const IntPtr = ctypes.POINTER(ctypes.c_int32);
       const DblPtr = ctypes.POINTER(ctypes.c_double);
       class S extends ctypes.Structure {
-        static _fields_ = [["pInt", IntPtr], ["pDbl", DblPtr]];
+        static _fields_ = [
+          ["pInt", IntPtr],
+          ["pDbl", DblPtr],
+        ];
       }
       const iv = new ctypes.c_int32(10);
       const dv = new ctypes.c_double(3.14);
@@ -464,7 +494,10 @@ describe("Structs and Unions", function () {
     it("should support POINTER to struct in _fields_", function () {
       // Python: outer.pInner = pointer(inner); outer.pInner.contents.x
       class Inner extends ctypes.Structure {
-        static _fields_ = [["x", ctypes.c_int32], ["y", ctypes.c_int32]];
+        static _fields_ = [
+          ["x", ctypes.c_int32],
+          ["y", ctypes.c_int32],
+        ];
       }
       const InnerPtr = ctypes.POINTER(Inner);
       class Outer extends ctypes.Structure {
@@ -483,7 +516,10 @@ describe("Structs and Unions", function () {
       // Python: class U(Union): _fields_ = [("asInt", c_uint32), ("asPtr", POINTER(c_int32))]
       const IntPtr = ctypes.POINTER(ctypes.c_int32);
       class U extends ctypes.Union {
-        static _fields_ = [["asInt", ctypes.c_uint32], ["asPtr", IntPtr]];
+        static _fields_ = [
+          ["asInt", ctypes.c_uint32],
+          ["asPtr", IntPtr],
+        ];
       }
       const u = new U();
       assert.strictEqual(u.asPtr, null);
@@ -597,10 +633,7 @@ describe("Structure.from_buffer / from_buffer_copy / from_address", function () 
 // ────────────────────────────────────────────────────────────────────
 
 describe("BigEndianStructure / LittleEndianStructure", function () {
-  const {
-    BigEndianStructure, LittleEndianStructure, Structure,
-    c_uint32, c_uint16, c_uint8, c_float, c_double, c_int64,
-  } = ctypes;
+  const { BigEndianStructure, LittleEndianStructure, Structure, c_uint32, c_uint16, c_uint8, c_float, c_double, c_int64 } = ctypes;
 
   it("serializes scalar fields in big-endian byte order", function () {
     class H extends BigEndianStructure {
@@ -664,7 +697,10 @@ describe("BigEndianStructure / LittleEndianStructure", function () {
 
   it("1-byte fields are unaffected", function () {
     class B extends BigEndianStructure {
-      static _fields_ = [["a", c_uint8], ["b", c_uint8]];
+      static _fields_ = [
+        ["a", c_uint8],
+        ["b", c_uint8],
+      ];
     }
     const b = new B();
     b.a = 0xab;
@@ -679,7 +715,10 @@ describe("BigEndianStructure / LittleEndianStructure", function () {
       static _fields_ = [["x", c_uint32]];
     }
     class OuterBE extends BigEndianStructure {
-      static _fields_ = [["hdr", c_uint16], ["inner", InnerLE]];
+      static _fields_ = [
+        ["hdr", c_uint16],
+        ["inner", InnerLE],
+      ];
     }
     const o = new OuterBE();
     o.hdr = 0x1234;
@@ -1036,7 +1075,10 @@ describe("BigEndianUnion / LittleEndianUnion", function () {
 
   it("BigEndianUnion stores primitive fields in BE order", function () {
     class V extends BigEndianUnion {
-      static _fields_ = [["i", c_uint32], ["bytes", array(c_uint8, 4)]];
+      static _fields_ = [
+        ["i", c_uint32],
+        ["bytes", array(c_uint8, 4)],
+      ];
     }
     const v = new V();
     v.i = 0x12345678;

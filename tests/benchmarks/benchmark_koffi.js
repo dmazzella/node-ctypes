@@ -320,51 +320,85 @@ console.log("└─────────────────────�
 // ============================================================================
 
 console.log("┌─────────────────────────────────────────────────────────────────┐");
-console.log("│ Benchmark 7: Struct read/write                                  │");
+console.log("│ Benchmark 7: Struct fields in memory and struct by value        │");
 console.log("└─────────────────────────────────────────────────────────────────┘");
 
 {
-  // Define struct in node-ctypes
-  const Point_ctypes = ctypes.struct({
-    x: ctypes.c_int32,
-    y: ctypes.c_int32,
-  });
+  // 7a: read and write the fields of a structure in memory. node-ctypes
+  // instances access their buffer directly; koffi has no live struct objects,
+  // the equivalent is koffi.decode / koffi.encode of each field.
+  class Point_ctypes extends ctypes.Structure {
+    static _fields_ = [
+      ["x", ctypes.c_int32],
+      ["y", ctypes.c_int32],
+    ];
+  }
+  const p_ctypes = new Point_ctypes(10, 20);
+  const p_koffi = Buffer.alloc(8);
+  pkg.encode(p_koffi, 0, "int", 10);
+  pkg.encode(p_koffi, 4, "int", 20);
 
-  // Define struct in koffi
-  const Point_koffi = pkg.struct("Point", {
-    x: "int",
-    y: "int",
-  });
+  const iterations = 1_000_000;
+  let sink = 0;
 
-  const iterations = 500_000;
-
-  // Create instances - both use plain objects for fair comparison
-  const p_ctypes = Point_ctypes.create({ x: 10, y: 20 }).toObject();
-  const p_koffi = { x: 10, y: 20 };
-
-  // Warmup
-  for (let i = 0; i < 1000; i++) {
-    p_ctypes.x;
-    p_koffi.x;
+  for (let i = 0; i < 10_000; i++) {
+    p_ctypes.x = i;
+    sink += p_ctypes.y;
+    pkg.encode(p_koffi, 0, "int", i);
+    sink += pkg.decode(p_koffi, 4, "int");
   }
 
-  // Benchmark ctypes struct read via toObject() (plain object)
   let start = performance.now();
   for (let i = 0; i < iterations; i++) {
-    const x = p_ctypes.x;
-    const y = p_ctypes.y;
+    p_ctypes.x = i;
+    sink += p_ctypes.x + p_ctypes.y;
   }
   const ctypes_time = performance.now() - start;
 
-  // Benchmark koffi struct read (koffi uses plain objects)
   start = performance.now();
   for (let i = 0; i < iterations; i++) {
-    const x = p_koffi.x;
-    const y = p_koffi.y;
+    pkg.encode(p_koffi, 0, "int", i);
+    sink += pkg.decode(p_koffi, 0, "int") + pkg.decode(p_koffi, 4, "int");
   }
   const koffi_time = performance.now() - start;
 
-  benchmark("struct read (2 fields)", ctypes_time, koffi_time, iterations);
+  benchmark("struct fields (1 w, 2 r)", ctypes_time, koffi_time, iterations);
+  if (sink === 0) console.log("");
+}
+
+{
+  // 7b: structure returned by value: div(7, 2) -> div_t { quot, rem }.
+  class div_t_ctypes extends ctypes.Structure {
+    static _fields_ = [
+      ["quot", ctypes.c_int32],
+      ["rem", ctypes.c_int32],
+    ];
+  }
+  const div_t_koffi = pkg.struct("div_t", { quot: "int", rem: "int" });
+  const ctypes_div = ctypes_libc.func("div", div_t_ctypes, [ctypes.c_int32, ctypes.c_int32]);
+  const koffi_div = koffi_libc.func("div", div_t_koffi, ["int", "int"]);
+
+  const iterations = 500_000;
+  let sink = 0;
+
+  for (let i = 0; i < 1000; i++) {
+    sink += ctypes_div(i, 7).rem + koffi_div(i, 7).rem;
+  }
+
+  let start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    sink += ctypes_div(i, 7).rem;
+  }
+  const ctypes_time = performance.now() - start;
+
+  start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    sink += koffi_div(i, 7).rem;
+  }
+  const koffi_time = performance.now() - start;
+
+  benchmark("struct by value (div)", ctypes_time, koffi_time, iterations);
+  if (sink === 0) console.log("");
 }
 
 // ============================================================================

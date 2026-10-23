@@ -20,7 +20,9 @@ std::string GetErrorMessage(const uint32_t errorCode) {
 
   LPWSTR msgBufW = nullptr;
   DWORD dwFlags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_MAX_WIDTH_MASK;
-  if (FormatMessageW(dwFlags, NULL, static_cast<DWORD>(errorCode), langId, (LPWSTR)&msgBufW, 0, NULL) && msgBufW) {
+  if (FormatMessageW(dwFlags, nullptr, static_cast<DWORD>(errorCode), langId, reinterpret_cast<LPWSTR>(&msgBufW), 0,
+                     nullptr) &&
+      msgBufW) {
     int utf8Length = WideCharToMultiByte(CP_UTF8, 0, msgBufW, -1, nullptr, 0, nullptr, nullptr);
     if (utf8Length > 0) {
       std::vector<char> utf8Buffer(utf8Length);
@@ -37,20 +39,57 @@ std::string GetErrorMessage(const uint32_t errorCode) {
   return result;
 }
 
-// Platform-specific implementations
-void* LoadSharedLibrary(const std::string& path, std::string& error, int mode) {
 #ifdef _WIN32
-  (void)mode;
-  HMODULE handle = LoadLibraryExA(path.c_str(), NULL, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_USER_DIRS);
+namespace {
+
+std::wstring Utf8ToWide(std::string_view utf8) {
+  if (utf8.empty()) {
+    return {};
+  }
+  const int length = MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), nullptr, 0);
+  std::wstring wide(static_cast<size_t>(length), L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), wide.data(), length);
+  return wide;
+}
+
+std::string WindowsError(std::string_view function, DWORD err) {
+  return std::format("{} failed: 0x{:08x} {}", function, static_cast<uint32_t>(err),
+                     GetErrorMessage(static_cast<uint32_t>(err)));
+}
+
+}  // namespace
+#endif
+
+// Platform-specific implementations
+void* LoadSharedLibrary(const std::string& path, std::string& error, [[maybe_unused]] int mode) {
+#ifdef _WIN32
+  // Python ctypes (CDLL.__init__ + _ctypes.LoadLibrary): `mode` is winmode;
+  // -1 (winmode=None) selects LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, plus the
+  // library's own directory when the name is a path (made absolute, as
+  // LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR requires). The DLL search path of the
+  // process is never changed.
+  std::wstring name = Utf8ToWide(path);
+  DWORD flags = static_cast<DWORD>(mode);
+  if (mode == -1) {
+    flags = LOAD_LIBRARY_SEARCH_DEFAULT_DIRS;
+    if (name.find_first_of(L"/\\") != std::wstring::npos) {
+      std::error_code ec;
+      std::filesystem::path absolute = std::filesystem::absolute(std::filesystem::path(name), ec);
+      if (!ec) {
+        name = absolute.make_preferred().wstring();
+      }
+      flags |= LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR;
+    }
+  }
+  HMODULE handle = LoadLibraryExW(name.c_str(), nullptr, flags);
   if (!handle) {
-    DWORD err = GetLastError();
-    error = std::format("LoadLibraryExA failed: 0x{:08x} {}", static_cast<uint32_t>(err),
-                        GetErrorMessage(static_cast<uint32_t>(err)));
+    error = WindowsError("LoadLibraryExW", GetLastError());
     return nullptr;
   }
   return static_cast<void*>(handle);
 #else
-  void* handle = dlopen(path.c_str(), RTLD_LAZY | mode);
+  // Python ctypes (py_dl_open): symbols are always resolved at load time.
+  void* handle = dlopen(path.empty() ? nullptr : path.c_str(), RTLD_NOW | mode);
   if (!handle) {
     error = dlerror();
     return nullptr;
@@ -63,9 +102,7 @@ void* GetSymbolAddress(void* handle, const std::string& name, std::string& error
 #ifdef _WIN32
   void* addr = reinterpret_cast<void*>(GetProcAddress(static_cast<HMODULE>(handle), name.c_str()));
   if (!addr) {
-    DWORD err = GetLastError();
-    error = std::format("LoadLibraryExA failed: 0x{:08x} {}", static_cast<uint32_t>(err),
-                        GetErrorMessage(static_cast<uint32_t>(err)));
+    error = WindowsError("GetProcAddress", GetLastError());
     return nullptr;
   }
   return addr;
@@ -108,6 +145,7 @@ Napi::Function Library::GetClass(Napi::Env env) {
 Library::Library(const Napi::CallbackInfo& info)
   : Napi::ObjectWrap<Library>(info), handle_(nullptr), is_loaded_(false) {
   Napi::Env env = info.Env();
+  info.This().As<Napi::Object>().TypeTag(&kTypeTag);
 
   if (info.Length() < 1) {
     Napi::TypeError::New(env, "Library path expected").ThrowAsJavaScriptException();
@@ -124,60 +162,27 @@ Library::Library(const Napi::CallbackInfo& info)
     return;
   }
 
-  // Python ctypes: CDLL(name, mode) — RTLD_LOCAL di default.
+  // Python ctypes: CDLL(name, mode, winmode=None). `mode` is the dlopen flag
+  // (RTLD_LOCAL by default), `winmode` the LoadLibraryExW flags (-1 = None).
 #ifdef _WIN32
-  int mode = 0;
+  int mode = -1;
+  constexpr size_t kModeArg = 2;
 #else
   int mode = RTLD_LOCAL;
+  constexpr size_t kModeArg = 1;
 #endif
-  if (info.Length() > 1 && info[1].IsNumber()) {
-    mode = info[1].As<Napi::Number>().Int32Value();
+  if (info.Length() > kModeArg && info[kModeArg].IsNumber()) {
+    mode = info[kModeArg].As<Napi::Number>().Int32Value();
   }
 
   std::string error;
 
   // Se path è vuoto, carica l'eseguibile corrente (RTLD_DEFAULT su Unix)
-  if (path_.empty()) {
 #ifdef _WIN32
-    handle_ = GetModuleHandle(NULL);
+  handle_ = path_.empty() ? static_cast<void*>(GetModuleHandleW(nullptr)) : LoadSharedLibrary(path_, error, mode);
 #else
-    handle_ = dlopen(NULL, RTLD_LAZY);
+  handle_ = LoadSharedLibrary(path_, error, mode);
 #endif
-  } else {
-#ifdef _WIN32
-    try {
-      std::filesystem::path lib_path(path_);
-      if (lib_path.has_parent_path() && lib_path.parent_path() != std::filesystem::path(".")) {
-        std::filesystem::path parent_dir;
-        if (lib_path.is_absolute()) {
-          parent_dir = lib_path.parent_path();
-        } else {
-          parent_dir = std::filesystem::current_path() / lib_path.parent_path();
-        }
-
-        if (!parent_dir.empty() && std::filesystem::exists(parent_dir)) {
-          if (SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_USER_DIRS)) {
-            std::wstring wparent = parent_dir.wstring();
-            DLL_DIRECTORY_COOKIE cookie = AddDllDirectory(wparent.c_str());
-            if (!cookie) {
-              DWORD err = GetLastError();
-              std::string errMsg = GetErrorMessage(err);
-              throw std::runtime_error(std::format("AddDllDirectory failed: {}", errMsg));
-            } else {
-              m_dll_directory_cookie.reset(reinterpret_cast<void*>(cookie));
-            }
-          }
-        }
-      }
-    } catch (const std::exception& ex) {
-      Napi::Error::New(env, std::format("Failed to set DLL directory: {}", ex.what())).ThrowAsJavaScriptException();
-      return;
-    }
-    handle_ = LoadSharedLibrary(path_, error, mode);
-#else
-    handle_ = LoadSharedLibrary(path_, error, mode);
-#endif
-  }
 
   if (!handle_) {
     Napi::Error::New(env, std::format("Failed to load library{}{}", path_.empty() ? "" : std::format(" '{}'", path_),
@@ -253,7 +258,9 @@ Napi::Value Library::GetFunction(const Napi::CallbackInfo& info) {
     Napi::Error::New(env, "FFIFunction constructor not available").ThrowAsJavaScriptException();
     return env.Undefined();
   }
-  return addon->FFIFunctionConstructor->New(args);
+  Napi::Object function = addon->FFIFunctionConstructor->New(args);
+  Napi::ObjectWrap<FFIFunction>::Unwrap(function)->AttachLibrary(Value());
+  return function;
 }
 
 Napi::Value Library::GetSymbol(const Napi::CallbackInfo& info) {
@@ -286,6 +293,15 @@ Napi::Value Library::GetSymbol(const Napi::CallbackInfo& info) {
 
 Napi::Value Library::Close(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
+
+  // Una chiamata in corso (un callback che chiude la libreria della funzione
+  // che lo sta eseguendo, o un callAsync non ancora terminato) userebbe codice
+  // scaricato.
+  if (active_calls_ != 0) {
+    Napi::Error::New(env, "Cannot close the library while calls to its functions are in progress")
+      .ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
 
   if (is_loaded_ && handle_ && !path_.empty()) {
     CloseSharedLibrary(handle_);

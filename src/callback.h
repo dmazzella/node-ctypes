@@ -1,5 +1,6 @@
 #pragma once
 
+#include "array.h"
 #include "shared.h"
 #include "types.h"
 
@@ -16,12 +17,14 @@ struct CallbackData {
   void* code_ptr = nullptr;
   ffi_cif cif;
   CType return_type;
-  std::vector<CType> arg_types;
+  std::vector<TypeSpec> arg_types;  // primitivi o struct per valore
   std::vector<ffi_type*> ffi_arg_types;
   ffi_type* ffi_return_type = nullptr;
   std::atomic<bool> released{false};
   std::string last_error;  // Ultimo errore catturato
   std::mutex error_mutex;  // Protezione per last_error
+  // Thread che ha creato il callback, l'unico su cui può eseguire JS.
+  std::thread::id thread_id;
 };
 
 class Callback : public Napi::ObjectWrap<Callback> {
@@ -44,8 +47,22 @@ class Callback : public Napi::ObjectWrap<Callback> {
 // ThreadSafeCallback - Supporta chiamate da qualsiasi thread
 // ========================================================================
 
+// Una chiamata da un thread esterno: vive sullo stack del thread chiamante,
+// che resta bloccato finché il main thread non ha scritto il risultato in
+// `ret`. args e ret sono quelli di libffi (validi per tutta l'attesa).
+struct PendingCallbackCall {
+  PendingCallbackCall(void** call_args, void* call_ret) : args(call_args), ret(call_ret) {}
+  PendingCallbackCall(const PendingCallbackCall&) = delete;
+  PendingCallbackCall& operator=(const PendingCallbackCall&) = delete;
+
+  void** args;
+  void* ret;
+  std::mutex mutex;
+  std::condition_variable cv;
+  bool done = false;
+};
+
 struct ThreadSafeCallbackData {
-  Napi::ThreadSafeFunction tsfn;
   Napi::FunctionReference js_function_ref;
   Napi::FunctionReference error_handler_ref;  // Error handler opzionale
   std::thread::id main_thread_id;
@@ -53,17 +70,29 @@ struct ThreadSafeCallbackData {
   void* code_ptr = nullptr;
   ffi_cif cif;
   CType return_type;
-  std::vector<CType> arg_types;
+  std::vector<TypeSpec> arg_types;  // primitivi o struct per valore
   std::vector<ffi_type*> ffi_arg_types;
   ffi_type* ffi_return_type = nullptr;
   std::atomic<bool> released{false};
-
-  // Sincronizzazione per thread esterni
-  std::mutex result_mutex;
-  std::condition_variable result_cv;
-  std::vector<uint8_t> result_buffer;  // Dynamic buffer to prevent overflow
-  std::atomic<bool> result_ready{false};
   std::string last_error;  // Ultimo errore catturato
+  std::mutex error_mutex;  // Protezione per last_error
+};
+
+// Eseguita sul main thread per ogni chiamata in coda (env nullo quando la
+// coda viene svuotata alla chiusura dell'environment).
+void CallThreadSafeCallback(Napi::Env env,
+                            Napi::Function js_callback,
+                            ThreadSafeCallbackData* data,
+                            PendingCallbackCall* call);
+
+using ThreadSafeCallbackFunction =
+  Napi::TypedThreadSafeFunction<ThreadSafeCallbackData, PendingCallbackCall, CallThreadSafeCallback>;
+
+struct ThreadSafeCallbackState : ThreadSafeCallbackData {
+  ThreadSafeCallbackFunction tsfn;
+  // Impostato dal finalizzatore della TSFN (main thread): dopo, `tsfn` non è
+  // più valida e non va rilasciata.
+  bool tsfn_finalized = false;
 };
 
 class ThreadSafeCallback : public Napi::ObjectWrap<ThreadSafeCallback> {
@@ -81,7 +110,12 @@ class ThreadSafeCallback : public Napi::ObjectWrap<ThreadSafeCallback> {
   Napi::Value Unref(const Napi::CallbackInfo& info);
 
  private:
-  std::unique_ptr<ThreadSafeCallbackData> data_;
+  // Libera closure e riferimenti e rilascia la TSFN: release() o GC del wrapper.
+  void ReleaseResources();
+
+  // Condiviso con il finalizzatore della TSFN: le chiamate già in coda usano i
+  // dati anche dopo il GC del wrapper.
+  std::shared_ptr<ThreadSafeCallbackState> data_;
 };
 
 }  // namespace ctypes

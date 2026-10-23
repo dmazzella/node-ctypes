@@ -1,22 +1,85 @@
 #include "function.h"
 
 #include "addon.h"  // CTypesAddon per gli slot captured_last_error / captured_errno
+#include "array.h"  // TypeSpecFromJS
 
 namespace ctypes {
 
 namespace {
 
+// Chiamata a una funzione di una libreria: rifiutata dopo close(), e contata
+// finché è in corso così che close() non scarichi il codice in esecuzione.
+class LibraryCallScope {
+ public:
+  LibraryCallScope(Library* library, Napi::Env env) : library_(library) {
+    if (library_ == nullptr) {
+      return;
+    }
+    if (!library_->IsLoaded()) [[unlikely]] {
+      throw Napi::Error::New(env, "Library is closed");
+    }
+    library_->BeginCall();
+  }
+  ~LibraryCallScope() {
+    if (library_ != nullptr) {
+      library_->EndCall();
+    }
+  }
+  LibraryCallScope(const LibraryCallScope&) = delete;
+  LibraryCallScope& operator=(const LibraryCallScope&) = delete;
+
+ private:
+  Library* library_;
+};
+
+// Incrementa un contatore (se non nullo) per la durata dello scope: profondità
+// di rientranza, uso di uno slot della cache variadica.
+class CountScope {
+ public:
+  explicit CountScope(uint32_t* counter) noexcept : counter_(counter) {
+    if (counter_ != nullptr) {
+      ++*counter_;
+    }
+  }
+  ~CountScope() {
+    if (counter_ != nullptr) {
+      --*counter_;
+    }
+  }
+  CountScope(const CountScope&) = delete;
+  CountScope& operator=(const CountScope&) = delete;
+
+ private:
+  uint32_t* counter_;
+};
+
 // Data pointer of a Buffer argument, or nullptr.
 // Python ctypes rifiuta i valori non convertibili in puntatore con
 // ArgumentError "wrong type": mai NULL implicito per funzioni o oggetti.
-[[noreturn]] inline void ThrowWrongType(const Napi::Value& val) {
-  throw Napi::TypeError::New(val.Env(), "wrong type");
+// Nome Python del tipo argomento nei messaggi: "... cannot be interpreted as ctypes.c_void_p".
+constexpr std::string_view PointerTypeName(CType type) {
+  switch (type) {
+    case CType::CTYPES_STRING:
+      return "c_char_p";
+    case CType::CTYPES_WSTRING:
+      return "c_wchar_p";
+    default:
+      return "c_void_p";
+  }
+}
+
+[[noreturn]] inline void ThrowWrongType(const Napi::Value& val, CType type) {
+  throw Napi::TypeError::New(
+    val.Env(), std::format("'{}' object cannot be interpreted as ctypes.{}", JSTypeName(val), PointerTypeName(type)));
 }
 
 // Memoria di un oggetto passato a un parametro puntatore: Buffer e ogni
 // TypedArray/DataView/ArrayBuffer (in place); altri oggetti sono un TypeError.
-inline void* ObjectData(const Napi::Value& val) {
-  if (val.IsBuffer()) [[likely]] {
+inline void* ObjectData(const Napi::Value& val, CType type) {
+  if (void* data = napi_fast::TryViewData(val)) [[likely]] {
+    return data;
+  }
+  if (val.IsBuffer()) {
     return val.As<Napi::Buffer<uint8_t>>().Data();
   }
   if (val.IsTypedArray()) {
@@ -30,7 +93,7 @@ inline void* ObjectData(const Napi::Value& val) {
   if (val.IsArrayBuffer()) {
     return val.As<Napi::ArrayBuffer>().Data();
   }
-  ThrowWrongType(val);
+  ThrowWrongType(val, type);
 }
 
 // Address carried by a BigInt / Number pointer argument.
@@ -43,39 +106,54 @@ inline uintptr_t AddressFromNumber(const Napi::Value& val) {
   return static_cast<uintptr_t>(val.As<Napi::Number>().Int64Value());
 }
 
+// Tipi convertiti da JSToC (wchar e simili): un -1 significa che il tipo non
+// è un argomento valido, e lo slot non deve restare non inizializzato.
+inline void MarshalOther(const Napi::Value& val, CType type, uint8_t* slot) {
+  if (JSToC(val, type, std::span(slot, ARG_SLOT_SIZE)) < 0) {
+    throw Napi::TypeError::New(val.Env(), "unsupported argument type");
+  }
+}
+
+// Puntatore da un valore che non è una stringa: memoria di Buffer / TypedArray
+// / DataView / ArrayBuffer, indirizzo BigInt o number, NULL per null e
+// undefined; true e false solo per c_void_p (Python: un int).
+inline void* PointerArg(const Napi::Value& val, napi_valuetype kind, CType type) {
+  switch (kind) {
+    case napi_object:
+      return ObjectData(val, type);
+    case napi_bigint:
+      return reinterpret_cast<void*>(AddressFromBigInt(val));
+    case napi_number:
+      return reinterpret_cast<void*>(AddressFromNumber(val));
+    case napi_boolean:
+      if (type == CType::CTYPES_POINTER) {
+        return reinterpret_cast<void*>(static_cast<uintptr_t>(val.As<Napi::Boolean>().Value()));
+      }
+      break;
+    case napi_null:
+    case napi_undefined:
+      return nullptr;
+    default:
+      break;
+  }
+  ThrowWrongType(val, type);
+}
+
 // Argomenti numerici, parity Python ctypes: accettano number, boolean
 // (true → 1) e BigInt (troncato ai bit del tipo, come Python maschera gli int);
 // stringhe, null e oggetti sono un TypeError (Python: ArgumentError).
-[[noreturn]] inline void ThrowNotNumeric(const Napi::Value& val, const char* kind) {
-  throw Napi::TypeError::New(val.Env(), std::format("Expected a number, boolean or BigInt for {} argument", kind));
+enum class NumericKind { Integer, Real };
+
+[[noreturn]] inline void ThrowNotNumeric(const Napi::Value& val, NumericKind kind) {
+  throw Napi::TypeError::New(val.Env(),
+                             kind == NumericKind::Integer
+                               ? std::format("'{}' object cannot be interpreted as an integer", JSTypeName(val))
+                               : std::format("must be real number, not {}", JSTypeName(val)));
 }
 
-inline int32_t Int32Arg(const Napi::Value& val) {
+// Valori che non sono number (boolean, BigInt, errori): fuori dal percorso caldo.
+CTYPES_NOINLINE int64_t IntegerArgSlow(const Napi::Value& val) {
   switch (val.Type()) {
-    case napi_number:
-      return val.As<Napi::Number>().Int32Value();
-    case napi_boolean:
-      return val.As<Napi::Boolean>().Value() ? 1 : 0;
-    case napi_bigint: {
-      bool lossless;
-      return static_cast<int32_t>(val.As<Napi::BigInt>().Uint64Value(&lossless));
-    }
-    default:
-      ThrowNotNumeric(val, "an integer");
-  }
-}
-
-inline uint32_t Uint32Arg(const Napi::Value& val) {
-  if (val.Type() == napi_number) {
-    return val.As<Napi::Number>().Uint32Value();
-  }
-  return static_cast<uint32_t>(Int32Arg(val));
-}
-
-inline int64_t Int64Arg(const Napi::Value& val) {
-  switch (val.Type()) {
-    case napi_number:
-      return val.As<Napi::Number>().Int64Value();
     case napi_boolean:
       return val.As<Napi::Boolean>().Value() ? 1 : 0;
     case napi_bigint: {
@@ -83,42 +161,56 @@ inline int64_t Int64Arg(const Napi::Value& val) {
       return static_cast<int64_t>(val.As<Napi::BigInt>().Uint64Value(&lossless));
     }
     default:
-      ThrowNotNumeric(val, "an integer");
+      ThrowNotNumeric(val, NumericKind::Integer);
   }
 }
 
-// Python c_char: bytes di 1 byte o intero 0..255. In JS stringa di 1 carattere
-// (codice 0..255), Buffer/Uint8Array di 1 byte, numero o boolean.
-inline uint8_t CharArg(const Napi::Value& val) {
-  switch (val.Type()) {
-    case napi_string: {
-      const std::u16string str = val.As<Napi::String>().Utf16Value();
-      if (str.size() == 1 && str[0] <= 0xff) {
-        return static_cast<uint8_t>(str[0]);
+CTYPES_ALWAYS_INLINE int32_t Int32Arg(const Napi::Value& val) {
+  if (double d; napi_fast::TryDouble(val, d)) [[likely]] {
+    if (d >= -2147483648.0 && d <= 2147483647.0) [[likely]] {
+      if (const auto v = static_cast<int32_t>(d); static_cast<double>(v) == d) [[likely]] {
+        return v;
       }
-      break;
     }
-    case napi_number: {
-      const double d = val.As<Napi::Number>().DoubleValue();
-      if (d >= 0 && d <= 0xff && d == static_cast<double>(static_cast<int>(d))) {
-        return static_cast<uint8_t>(d);
-      }
-      break;
-    }
-    case napi_boolean:
-      return val.As<Napi::Boolean>().Value() ? 1 : 0;
-    case napi_object:
-      if (val.IsTypedArray()) {
-        Napi::TypedArray ta = val.As<Napi::TypedArray>();
-        if (ta.TypedArrayType() == napi_uint8_array && ta.ElementLength() == 1) {
-          return static_cast<const uint8_t*>(ta.ArrayBuffer().Data())[ta.ByteOffset()];
-        }
-      }
-      break;
-    default:
-      break;
+    return static_cast<int32_t>(static_cast<uint32_t>(IntegerBitsFromDouble(val, d)));
   }
-  throw Napi::TypeError::New(val.Env(), "one character bytes, bytearray or integer expected");
+  return static_cast<int32_t>(IntegerArgSlow(val));
+}
+
+CTYPES_ALWAYS_INLINE uint32_t Uint32Arg(const Napi::Value& val) {
+  if (double d; napi_fast::TryDouble(val, d)) [[likely]] {
+    if (d >= 0.0 && d <= 4294967295.0) [[likely]] {
+      if (const auto v = static_cast<uint32_t>(d); static_cast<double>(v) == d) [[likely]] {
+        return v;
+      }
+    }
+    return static_cast<uint32_t>(IntegerBitsFromDouble(val, d));
+  }
+  return static_cast<uint32_t>(IntegerArgSlow(val));
+}
+
+// Number intero a 64 bit: true se `val` è un number (gli altri tipi restano
+// al chiamante).
+CTYPES_ALWAYS_INLINE bool TryInt64Number(const Napi::Value& val, int64_t& out) {
+  double d;
+  if (!napi_fast::TryDouble(val, d)) {
+    return false;
+  }
+  if (d >= -9223372036854775808.0 && d < 9223372036854775808.0) [[likely]] {
+    if (const auto v = static_cast<int64_t>(d); static_cast<double>(v) == d) [[likely]] {
+      out = v;
+      return true;
+    }
+  }
+  out = static_cast<int64_t>(IntegerBitsFromDouble(val, d));
+  return true;
+}
+
+CTYPES_ALWAYS_INLINE int64_t Int64Arg(const Napi::Value& val) {
+  if (int64_t v; TryInt64Number(val, v)) [[likely]] {
+    return v;
+  }
+  return IntegerArgSlow(val);
 }
 
 // Errore di conversione dell'argomento `index` come ctypes.ArgumentError di Python:
@@ -137,10 +229,9 @@ Napi::Error ArgumentErrorFor(Napi::Env env, size_t index, const Napi::Error& cau
   return Napi::TypeError::New(env, message);
 }
 
-inline double DoubleArg(const Napi::Value& val) {
+// Valori che non sono number (boolean, BigInt, errori): fuori dal percorso caldo.
+CTYPES_NOINLINE double DoubleArgSlow(const Napi::Value& val) {
   switch (val.Type()) {
-    case napi_number:
-      return val.As<Napi::Number>().DoubleValue();
     case napi_boolean:
       return val.As<Napi::Boolean>().Value() ? 1.0 : 0.0;
     case napi_bigint: {
@@ -156,13 +247,20 @@ inline double DoubleArg(const Napi::Value& val) {
       throw Napi::RangeError::New(val.Env(), "BigInt out of range for a floating point argument");
     }
     default:
-      ThrowNotNumeric(val, "a floating point");
+      ThrowNotNumeric(val, NumericKind::Real);
   }
+}
+
+CTYPES_ALWAYS_INLINE double DoubleArg(const Napi::Value& val) {
+  if (double v; napi_fast::TryDouble(val, v)) [[likely]] {
+    return v;
+  }
+  return DoubleArgSlow(val);
 }
 
 }  // namespace
 
-CallConv StringToCallConv(const std::string& name) {
+CallConv StringToCallConv(std::string_view name) {
   if (name == "cdecl" || name == "default") {
     return CallConv::CTYPES_CDECL;
   }
@@ -223,8 +321,6 @@ FFIFunction::FFIFunction(const Napi::CallbackInfo& info)
     abi_(FFI_DEFAULT_ABI),
     return_type_(CType::CTYPES_VOID),
     ffi_return_type_(nullptr),
-    inline_string_offset_(0),
-    use_inline_storage_(true),
     next_cache_slot_(0),
     capture_last_error_(false),
     capture_errno_(false),
@@ -263,9 +359,7 @@ FFIFunction::FFIFunction(const Napi::CallbackInfo& info)
     name_ = info[1].As<Napi::String>().Utf8Value();
   } else if (info[1].IsNull() || info[1].IsUndefined()) {
     // Raw function pointer — use hex address as name for error messages
-    char buf[32];
-    snprintf(buf, sizeof(buf), "0x%llx", reinterpret_cast<unsigned long long>(fn_ptr_));
-    name_ = buf;
+    name_ = std::format("{}", fn_ptr_);
   } else {
     Napi::TypeError::New(env, "Second argument must be function name (string) or null").ThrowAsJavaScriptException();
     return;
@@ -273,66 +367,29 @@ FFIFunction::FFIFunction(const Napi::CallbackInfo& info)
 
   // 3. Return type
   try {
-    if (info[2].IsNumber()) {
-      return_type_ = IntToCType(info[2].As<Napi::Number>().Int32Value());
-    } else if (info[2].IsObject()) {
-      Napi::Object obj = info[2].As<Napi::Object>();
-      if (IsStructType(obj)) {
-        // Return type è struct
-        return_type_ = CType::CTYPES_STRUCT;
-        return_struct_info_ = Napi::ObjectWrap<StructType>::Unwrap(obj)->GetStructInfo();
-      } else if (IsArrayType(obj)) {
-        // Return type è array
-        return_type_ = CType::CTYPES_ARRAY;
-        return_array_info_ = Napi::ObjectWrap<ArrayType>::Unwrap(obj)->GetArrayInfo();
-      } else {
-        throw std::runtime_error("Invalid return type object");
-      }
-    } else {
-      throw std::runtime_error("Return type must be CType enum value (number) or CType object");
-    }
-  } catch (const std::exception& e) {
-    Napi::Error::New(env, std::string("Invalid return type: ") + e.what()).ThrowAsJavaScriptException();
-    return;
+    const TypeSpec spec = TypeSpecFromJS(info[2]);
+    return_type_ = spec.type;
+    return_struct_info_ = spec.struct_info;
+    return_array_info_ = spec.array_info;
+  } catch (const Napi::Error& e) {
+    throw Napi::TypeError::New(env, std::format("Invalid return type: {}", e.Message()));
   }
 
   // 4. Argument types
   if (info.Length() > 3 && info[3].IsArray()) {
-    Napi::Array arr = info[3].As<Napi::Array>();
-    arg_types_.reserve(arr.Length());
-    arg_struct_infos_.resize(arr.Length());  // Resize to match, null by default
-    arg_array_infos_.resize(arr.Length());
-
-    for (uint32_t i = 0; i < arr.Length(); i++) {
-      Napi::Value elem = arr.Get(i);
-
+    const Napi::Array arr = info[3].As<Napi::Array>();
+    const uint32_t count = arr.Length();
+    arg_types_.reserve(count);
+    arg_struct_infos_.reserve(count);
+    arg_array_infos_.reserve(count);
+    for (uint32_t i = 0; i < count; i++) {
       try {
-        if (elem.IsNumber()) {
-          arg_types_.push_back(IntToCType(elem.As<Napi::Number>().Int32Value()));
-          arg_struct_infos_[i] = nullptr;
-          arg_array_infos_[i] = nullptr;
-        } else if (elem.IsObject()) {
-          Napi::Object obj = elem.As<Napi::Object>();
-          if (IsStructType(obj)) {
-            // Argument type è struct
-            arg_types_.push_back(CType::CTYPES_STRUCT);
-            arg_struct_infos_[i] = Napi::ObjectWrap<StructType>::Unwrap(obj)->GetStructInfo();
-            arg_array_infos_[i] = nullptr;
-          } else if (IsArrayType(obj)) {
-            // Argument type è array
-            arg_types_.push_back(CType::CTYPES_ARRAY);
-            arg_struct_infos_[i] = nullptr;
-            arg_array_infos_[i] = Napi::ObjectWrap<ArrayType>::Unwrap(obj)->GetArrayInfo();
-          } else {
-            throw std::runtime_error("Invalid type object");
-          }
-        } else {
-          throw std::runtime_error("Type must be CType enum value (number) or CType object");
-        }
-      } catch (const std::exception& e) {
-        Napi::Error::New(env, std::format("Invalid argument type at index {}: {}", i, e.what()))
-          .ThrowAsJavaScriptException();
-        return;
+        TypeSpec spec = TypeSpecFromJS(arr.Get(i));
+        arg_types_.push_back(spec.type);
+        arg_struct_infos_.push_back(std::move(spec.struct_info));
+        arg_array_infos_.push_back(std::move(spec.array_info));
+      } catch (const Napi::Error& e) {
+        throw Napi::TypeError::New(env, std::format("Invalid argument type at index {}: {}", i, e.Message()));
       }
     }
   }
@@ -349,42 +406,21 @@ FFIFunction::FFIFunction(const Napi::CallbackInfo& info)
     if (opts.Has("use_errno")) {
       capture_errno_ = opts.Get("use_errno").ToBoolean().Value();
     }
-  }
-
-  // Determina se usare storage inline o heap
-  use_inline_storage_ = (arg_types_.size() <= MAX_INLINE_ARGS);
-
-  // Precalcola a construction time: la signature usa argomenti stringa
-  // (STRING/WSTRING) o overflow (STRUCT/UNION/ARRAY oltre ARG_SLOT_SIZE)?
-  // L'hot path di Call() usa questi flag per saltare il reset di
-  // string_buffer_ e sync_large_arg_buffers_.clear() quando nessuno dei
-  // due è stato toccato dalla call precedente.
-  has_string_args_ = false;
-  has_struct_array_args_ = false;
-  for (const auto& t : arg_types_) {
-    if (t == CType::CTYPES_STRING || t == CType::CTYPES_WSTRING) {
-      has_string_args_ = true;
-    } else if (t == CType::CTYPES_STRUCT || t == CType::CTYPES_UNION || t == CType::CTYPES_ARRAY) {
-      has_struct_array_args_ = true;
+    struct_as_buffer_ = opts.Get("struct_buffer").ToBoolean().Value();
+    // CFUNCTYPE((name, dll)): la libreria del simbolo, come Library::GetFunction.
+    Napi::Value library = opts.Get("library");
+    if (!library.IsUndefined() && !library.IsNull()) {
+      if (UnwrapTagged<Library>(library) == nullptr) {
+        throw Napi::TypeError::New(env, "library option must be a Library");
+      }
+      AttachLibrary(library.As<Napi::Object>());
     }
   }
 
-  // Pre-alloca heap storage se necessario (come CPython - pool struct argument)
-  if (!use_inline_storage_) {
-    heap_arg_storage_.resize(arg_types_.size() * ARG_SLOT_SIZE);
-    heap_arg_values_.resize(arg_types_.size());
-  }
-  // Per arg counts piccoli usiamo sempre inline_arg_values_ (stack allocation)
-
-  // Pre-alloca string buffer (stima iniziale)
-  size_t string_count = 0;
-  for (const auto& type : arg_types_) {
-    if (type == CType::CTYPES_STRING) {
-      string_count++;
-    }
-  }
-  if (string_count > 0) {
-    string_buffer_.reserve(string_count * 128);  // 128 bytes per stringa media
+  // Pre-alloca lo scratch dell'istanza (come CPython - pool struct argument)
+  if (arg_types_.size() > MAX_INLINE_ARGS) {
+    scratch_.arg_storage.resize(arg_types_.size() * ARG_SLOT_SIZE);
+    scratch_.arg_values.resize(arg_types_.size());
   }
 
   if (!PrepareFFI(env)) {
@@ -394,8 +430,19 @@ FFIFunction::FFIFunction(const Napi::CallbackInfo& info)
   InstallFastCall(env);
 }
 
+void FFIFunction::AttachLibrary(Napi::Object library) {
+  library_ = Napi::ObjectWrap<Library>::Unwrap(library);
+  library_ref_ = Napi::Persistent(library);
+}
+
 Napi::Value FFIFunction::FastCall(const Napi::CallbackInfo& info) {
-  return static_cast<FFIFunction*>(info.Data())->Call(info);
+  FFIFunction* self = static_cast<FFIFunction*>(info.Data());
+  if (self->simple_call_ && info.Length() >= self->arg_types_.size()) [[likely]] {
+    if (Napi::Value result; self->SimpleCall(info, result)) [[likely]] {
+      return result;
+    }
+  }
+  return self->Call(info);
 }
 
 // Shadows the prototype `call` (InstanceMethod) with an own-property function
@@ -417,16 +464,11 @@ FFIFunction::~FFIFunction() {
     errcheck_callback_.Reset();
   }
 
-  // Free reusable call plans (signature fissa + entry variadiche in cache).
+  // Free reusable call plan della signature fissa (le entry variadiche
+  // liberano il proprio nel distruttore).
   if (call_plan_) {
     ffi_call_plan_free(call_plan_);
     call_plan_ = nullptr;
-  }
-  for (auto& entry : variadic_cache_) {
-    if (entry.plan) {
-      ffi_call_plan_free(entry.plan);
-      entry.plan = nullptr;
-    }
   }
 }
 
@@ -476,6 +518,28 @@ bool FFIFunction::PrepareFFI(Napi::Env env) {
   call_plan_ = ffi_call_plan_alloc(&cif_);
 
   SetupDirectCall();
+
+  if (struct_as_buffer_ && return_type_ == CType::CTYPES_STRUCT && return_struct_info_) {
+    Napi::Buffer<uint8_t> result = Napi::Buffer<uint8_t>::New(env, return_struct_info_->GetSize());
+    struct_result_data_ = result.Data();
+    struct_result_ = Napi::Persistent(result);
+  }
+  const bool simple_return =
+    return_type_ == CType::CTYPES_STRUCT
+      ? struct_result_data_ != nullptr && return_struct_info_->GetSize() <= kMaxSimpleStructReturn
+      : return_type_ != CType::CTYPES_ARRAY && return_type_ != CType::CTYPES_UNION;
+  simple_call_ =
+    arg_types_.size() <= kMaxSimpleArgs && simple_return && std::ranges::all_of(arg_types_, [](CType type) {
+      switch (type) {
+        case CType::CTYPES_STRUCT:
+        case CType::CTYPES_UNION:
+        case CType::CTYPES_ARRAY:
+        case CType::CTYPES_WSTRING:
+          return false;
+        default:
+          return true;
+      }
+    });
 
   return true;
 }
@@ -543,40 +607,102 @@ void FFIFunction::SetupDirectCall() {
   direct_invoker_ = direct::Select(ret, arg_types_.size(), code);
 }
 
+namespace {
+
+// Istanza SimpleCData passata oltre gli argtypes (variadici, o senza
+// argtypes): come in Python conta il suo tipo, non quello dedotto dal valore
+// (printf("%f", c_double(2.0))). Tipo e valore seguono le promozioni degli
+// argomenti variadici del C, che libffi richiede: float → double, interi più
+// stretti di int → int, char e wchar_t → il loro codice.
+std::optional<VariadicValue> SimpleCDataArgument(const Napi::Value& val) {
+  const Napi::Object object = val.As<Napi::Object>();
+  const Napi::Value ctor = object.Get("constructor");
+  if (!ctor.IsFunction()) {
+    return std::nullopt;
+  }
+  const Napi::Value code = ctor.As<Napi::Object>().Get("_type");
+  if (!code.IsNumber() || !ctor.As<Napi::Object>().Get("_isSimpleCData").ToBoolean()) {
+    return std::nullopt;
+  }
+  const std::optional<CType> type = ToCType(code.As<Napi::Number>().Int32Value());
+  if (!type) {
+    return std::nullopt;
+  }
+  const Napi::Env env = val.Env();
+  const Napi::Value value = object.Get("value");
+  switch (*type) {
+    case CType::CTYPES_FLOAT:
+      return VariadicValue{CType::CTYPES_DOUBLE, value};
+    case CType::CTYPES_INT8:
+    case CType::CTYPES_UINT8:
+    case CType::CTYPES_INT16:
+    case CType::CTYPES_UINT16:
+    case CType::CTYPES_BOOL:
+      return VariadicValue{CType::CTYPES_INT32, value};
+    case CType::CTYPES_CHAR:
+      return VariadicValue{CType::CTYPES_INT32, Napi::Number::New(env, CharFromJS(value))};
+    case CType::CTYPES_WCHAR:
+      return VariadicValue{CType::CTYPES_INT32,
+                           Napi::Number::New(env, static_cast<int32_t>(static_cast<uint32_t>(WcharFromJS(value))))};
+    case CType::CTYPES_VOID:
+    case CType::CTYPES_STRUCT:
+    case CType::CTYPES_UNION:
+    case CType::CTYPES_ARRAY:
+      return std::nullopt;
+    default:
+      return VariadicValue{*type, value};
+  }
+}
+
+}  // namespace
+
+VariadicValue FFIFunction::InferVariadic(const Napi::Value& val) {
+  if (val.IsObject() && !val.IsBuffer()) {
+    if (std::optional<VariadicValue> instance = SimpleCDataArgument(val)) {
+      return *instance;
+    }
+  }
+  return {InferTypeFromJS(val), val};
+}
+
 // ============================================================================
 // InferTypeFromJS - Shared by Call() and CallAsync() for variadic inference
 // ============================================================================
 
 CType FFIFunction::InferTypeFromJS(const Napi::Value& val) {
-  if (val.IsString()) {
-    return CType::CTYPES_STRING;
-  }
-  if (val.IsNumber()) {
-    double d = val.As<Napi::Number>().DoubleValue();
-    // Integer fits in int32 → INT32 (the common sprintf("%d", …) case).
-    if (d == static_cast<double>(static_cast<int32_t>(d))) {
-      return CType::CTYPES_INT32;
+  // Una sola napi_typeof (IsString/IsNumber/IsBigInt/... ne fanno una ciascuna).
+  switch (val.Type()) {
+    case napi_string:
+      return CType::CTYPES_STRING;
+    case napi_number: {
+      const double d = val.As<Napi::Number>().DoubleValue();
+      // Integer fits in int32 → INT32 (the common sprintf("%d", …) case).
+      // Range checked before the cast (NaN or out of range is UB).
+      if (d >= -2147483648.0 && d <= 2147483647.0 && d == std::trunc(d)) {
+        return CType::CTYPES_INT32;
+      }
+      // Integer that overflows int32 but is still an exact integer (within
+      // JS's 2^53 safe range) → INT64. Without this, values such as
+      // 5_000_000_000 used with %lld would be silently passed as doubles and
+      // observed as garbage on the C side. We intentionally keep non-integer
+      // numbers as DOUBLE.
+      if (d == std::trunc(d) && std::isfinite(d) && d >= -9007199254740992.0 && d <= 9007199254740992.0) {
+        return CType::CTYPES_INT64;
+      }
+      return CType::CTYPES_DOUBLE;
     }
-    // Integer that overflows int32 but is still an exact integer (within
-    // JS's 2^53 safe range) → INT64. Without this, values such as
-    // 5_000_000_000 used with %lld would be silently passed as doubles and
-    // observed as garbage on the C side. We intentionally keep non-integer
-    // numbers as DOUBLE.
-    if (d == std::trunc(d) && std::isfinite(d) && d >= -9007199254740992.0 && d <= 9007199254740992.0) {
+    case napi_bigint:
       return CType::CTYPES_INT64;
-    }
-    return CType::CTYPES_DOUBLE;
+    case napi_object:
+      // Memoria (Buffer, TypedArray, DataView, ArrayBuffer): il suo indirizzo.
+      return val.IsTypedArray() || val.IsDataView() || val.IsArrayBuffer() ? CType::CTYPES_POINTER
+                                                                           : CType::CTYPES_INT32;
+    case napi_null:
+    case napi_undefined:
+      return CType::CTYPES_POINTER;
+    default:
+      return CType::CTYPES_INT32;  // fallback
   }
-  if (val.IsBigInt()) {
-    return CType::CTYPES_INT64;
-  }
-  if (val.IsBuffer()) {
-    return CType::CTYPES_POINTER;
-  }
-  if (val.IsNull() || val.IsUndefined()) {
-    return CType::CTYPES_POINTER;
-  }
-  return CType::CTYPES_INT32;  // fallback
 }
 
 // ============================================================================
@@ -587,102 +713,84 @@ Napi::Value FFIFunction::ConvertReturn(Napi::Env env,
                                        void* return_data,
                                        CType type,
                                        const std::shared_ptr<StructInfo>& struct_info,
-                                       const std::shared_ptr<ArrayInfo>& array_info) {
-  // For primitive types, interpret return_data as ReturnValue*
-  ReturnValue* rv = static_cast<ReturnValue*>(return_data);
+                                       const std::shared_ptr<ArrayInfo>& array_info,
+                                       bool struct_as_buffer) {
+  // Tipi primitivi: i byte del valore restituito (ReturnValue).
+  const void* rv = return_data;
 
   switch (type) {
     case CType::CTYPES_VOID:
       return env.Undefined();
 
     case CType::CTYPES_INT32:
-      return Napi::Number::New(env, rv->i32);
+      return napi_fast::Int32(env, LoadAs<int32_t>(rv));
 
     case CType::CTYPES_UINT32:
-      return Napi::Number::New(env, rv->u32);
+      return napi_fast::Uint32(env, LoadAs<uint32_t>(rv));
 
     case CType::CTYPES_INT64:
-      return Napi::BigInt::New(env, rv->i64);
+      return Napi::BigInt::New(env, LoadAs<int64_t>(rv));
 
     case CType::CTYPES_UINT64:
     case CType::CTYPES_SIZE_T:
-      return Napi::BigInt::New(env, rv->u64);
+      return Napi::BigInt::New(env, LoadAs<uint64_t>(rv));
 
     case CType::CTYPES_DOUBLE:
-      return Napi::Number::New(env, rv->d);
+      return Napi::Number::New(env, LoadAs<double>(rv));
 
     case CType::CTYPES_FLOAT:
-      return Napi::Number::New(env, static_cast<double>(rv->f));
+      return Napi::Number::New(env, static_cast<double>(LoadAs<float>(rv)));
 
     case CType::CTYPES_BOOL:
-      return Napi::Boolean::New(env, rv->u8 != 0);
+      return Napi::Boolean::New(env, LoadAs<uint8_t>(rv) != 0);
 
-    case CType::CTYPES_POINTER:
-      if (rv->p == nullptr) {
+    case CType::CTYPES_POINTER: {
+      void* const ptr = LoadAs<void*>(rv);
+      if (ptr == nullptr) {
         return env.Null();
       }
-      return Napi::BigInt::New(env, reinterpret_cast<uint64_t>(rv->p));
+      return Napi::BigInt::New(env, reinterpret_cast<uint64_t>(ptr));
+    }
 
     case CType::CTYPES_STRING: {
-      if (rv->str == nullptr) {
+      const char* const str = LoadAs<const char*>(rv);
+      if (str == nullptr) {
         return env.Null();
       }
-      return Napi::String::New(env, rv->str);
+      return Napi::String::New(env, str);
     }
 
     case CType::CTYPES_WSTRING: {
-      if (rv->wstr == nullptr) {
+      const wchar_t* const str = LoadAs<const wchar_t*>(rv);
+      if (str == nullptr) {
         return env.Null();
       }
-#ifdef _WIN32
-      // Windows: wchar_t è 16-bit (UTF-16)
-      return Napi::String::New(env, reinterpret_cast<const char16_t*>(rv->wstr));
-#else
-      // Unix: wchar_t è 32-bit, converti a UTF-8
-      std::wstring wstr(rv->wstr);
-      std::string utf8;
-      utf8.reserve(wstr.size() * 4);
-      for (wchar_t wc : wstr) {
-        if (wc < 0x80) {
-          utf8.push_back(static_cast<char>(wc));
-        } else if (wc < 0x800) {
-          utf8.push_back(static_cast<char>(0xC0 | (wc >> 6)));
-          utf8.push_back(static_cast<char>(0x80 | (wc & 0x3F)));
-        } else if (wc < 0x10000) {
-          utf8.push_back(static_cast<char>(0xE0 | (wc >> 12)));
-          utf8.push_back(static_cast<char>(0x80 | ((wc >> 6) & 0x3F)));
-          utf8.push_back(static_cast<char>(0x80 | (wc & 0x3F)));
-        } else {
-          utf8.push_back(static_cast<char>(0xF0 | (wc >> 18)));
-          utf8.push_back(static_cast<char>(0x80 | ((wc >> 12) & 0x3F)));
-          utf8.push_back(static_cast<char>(0x80 | ((wc >> 6) & 0x3F)));
-          utf8.push_back(static_cast<char>(0x80 | (wc & 0x3F)));
-        }
-      }
-      return Napi::String::New(env, utf8);
-#endif
+      return WideToJS(env, std::wstring_view(str));
     }
 
     case CType::CTYPES_LONG:
-      return Napi::BigInt::New(env, rv->i64);
+      return Napi::BigInt::New(env, LoadAs<int64_t>(rv));
 
     case CType::CTYPES_ULONG:
-      return Napi::BigInt::New(env, rv->u64);
+      return Napi::BigInt::New(env, LoadAs<uint64_t>(rv));
 
     case CType::CTYPES_INT8:
-      return Napi::Number::New(env, rv->i8);
+      return napi_fast::Int32(env, LoadAs<int8_t>(rv));
 
     case CType::CTYPES_UINT8:
-      return Napi::Number::New(env, rv->u8);
+      return napi_fast::Uint32(env, LoadAs<uint8_t>(rv));
 
     case CType::CTYPES_INT16:
-      return Napi::Number::New(env, rv->i16);
+      return napi_fast::Int32(env, LoadAs<int16_t>(rv));
 
     case CType::CTYPES_UINT16:
-      return Napi::Number::New(env, rv->u16);
+      return napi_fast::Uint32(env, LoadAs<uint16_t>(rv));
 
     case CType::CTYPES_STRUCT: {
       // return_data points to the actual struct buffer (may be larger than ReturnValue)
+      if (struct_info && struct_as_buffer) {
+        return Napi::Buffer<uint8_t>::Copy(env, static_cast<const uint8_t*>(return_data), struct_info->GetSize());
+      }
       if (struct_info) {
         return struct_info->StructToJS(env, return_data);
       }
@@ -707,7 +815,7 @@ Napi::Value FFIFunction::ConvertReturn(Napi::Env env,
 // Returns true if type was handled, false if not a primitive
 // ============================================================================
 
-inline bool FFIFunction::MarshalPrimitive(Napi::Env env, const Napi::Value& val, CType type, uint8_t* slot) {
+CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalPrimitive(const Napi::Value& val, CType type, uint8_t* slot) {
   switch (type) {
     case CType::CTYPES_INT32: {
       int32_t v = Int32Arg(val);
@@ -723,13 +831,14 @@ inline bool FFIFunction::MarshalPrimitive(Napi::Env env, const Napi::Value& val,
     case CType::CTYPES_UINT64:
     case CType::CTYPES_SIZE_T:
     case CType::CTYPES_SSIZE_T: {
-      // Una sola Value::Type() invece di IsBigInt/IsNull/IsUndefined in cascata
-      // (ognuna è una napi_typeof separata).
+      // number con una sola chiamata; poi una sola Value::Type() invece di
+      // IsBigInt/IsNull/IsUndefined in cascata (ognuna è una napi_typeof).
       int64_t v = 0;
+      if (TryInt64Number(val, v)) [[likely]] {
+        memcpy(slot, &v, sizeof(v));
+        return true;
+      }
       switch (val.Type()) {
-        case napi_number:
-          v = val.As<Napi::Number>().Int64Value();
-          break;
         case napi_bigint: {
           bool lossless;
           v = val.As<Napi::BigInt>().Int64Value(&lossless);
@@ -738,15 +847,23 @@ inline bool FFIFunction::MarshalPrimitive(Napi::Env env, const Napi::Value& val,
         case napi_boolean:
           v = val.As<Napi::Boolean>().Value() ? 1 : 0;
           break;
+        // Estensioni node-ctypes per gli interi a 64 bit e pointer-sized:
+        // null/undefined valgono 0, Buffer/ArrayBuffer il loro indirizzo.
+        case napi_null:
+        case napi_undefined:
+          break;
         case napi_object:
           if (val.IsBuffer()) {
             v = static_cast<int64_t>(reinterpret_cast<intptr_t>(val.As<Napi::Buffer<uint8_t>>().Data()));
-          } else if (val.IsArrayBuffer()) {
-            v = static_cast<int64_t>(reinterpret_cast<intptr_t>(val.As<Napi::ArrayBuffer>().Data()));
+            break;
           }
-          break;
+          if (val.IsArrayBuffer()) {
+            v = static_cast<int64_t>(reinterpret_cast<intptr_t>(val.As<Napi::ArrayBuffer>().Data()));
+            break;
+          }
+          ThrowNotNumeric(val, NumericKind::Integer);
         default:
-          break;
+          ThrowNotNumeric(val, NumericKind::Integer);
       }
       memcpy(slot, &v, sizeof(v));
       return true;
@@ -762,12 +879,16 @@ inline bool FFIFunction::MarshalPrimitive(Napi::Env env, const Napi::Value& val,
       return true;
     }
     case CType::CTYPES_BOOL: {
-      uint8_t v = val.ToBoolean().Value() ? 1 : 0;
+      bool b;
+      if (!napi_fast::TryBool(val, b)) {
+        b = val.ToBoolean().Value();
+      }
+      const uint8_t v = b ? 1 : 0;
       memcpy(slot, &v, sizeof(v));
       return true;
     }
     case CType::CTYPES_CHAR: {
-      uint8_t v = CharArg(val);
+      uint8_t v = CharFromJS(val);
       memcpy(slot, &v, sizeof(v));
       return true;
     }
@@ -858,7 +979,7 @@ bool FFIFunction::MarshalStructArg(Napi::Env env,
         return false;
       }
     } else {
-      if (!struct_info->JSToStruct(env, obj, dest, dest_size)) {
+      if (!struct_info->JSToStruct(env, obj, std::span(dest, dest_size))) {
         Napi::Error::New(env, std::format("Failed to convert JS object to struct at argument {}", arg_index))
           .ThrowAsJavaScriptException();
         return false;
@@ -910,7 +1031,7 @@ bool FFIFunction::MarshalArrayArg(Napi::Env env,
       return false;
     }
   } else {
-    if (!array_info->JSToArray(env, val, dest, dest_size)) {
+    if (!array_info->JSToArray(env, val, std::span(dest, dest_size))) {
       Napi::Error::New(env, std::format("Failed to convert JS value to array at argument {}", arg_index))
         .ThrowAsJavaScriptException();
       return false;
@@ -964,12 +1085,12 @@ CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalArguments(CallContext& ctx) {
   const size_t expected_argc = ctx.expected_argc;
   uint8_t* const arg_storage = ctx.arg_storage;
   void** const arg_values = ctx.arg_values;
-  string_fixups_.clear();
+  CallScratch& scratch = *ctx.scratch;
 
   for (size_t i = 0; i < argc; i++) {
     uint8_t* slot = arg_storage + (i * ARG_SLOT_SIZE);
     arg_values[i] = slot;
-    const Napi::Value& val = info[i];
+    const Napi::Value val = i < expected_argc ? info[i] : ctx.extra_values[i - expected_argc];
 
     CType type;
     if (i < expected_argc) [[likely]] {
@@ -982,7 +1103,7 @@ CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalArguments(CallContext& ctx) {
 
     // Fast path: primitivi.
     try {
-      if (MarshalPrimitive(env, val, type, slot)) {
+      if (MarshalPrimitive(val, type, slot)) {
         continue;
       }
     } catch (const Napi::Error& e) {
@@ -997,26 +1118,7 @@ CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalArguments(CallContext& ctx) {
     try {
       switch (type) {
         case CType::CTYPES_POINTER: {
-          void* ptr = nullptr;
-          switch (val.Type()) {
-            case napi_object:
-              ptr = ObjectData(val);
-              break;
-            case napi_bigint:
-              ptr = reinterpret_cast<void*>(AddressFromBigInt(val));
-              break;
-            case napi_number:
-              ptr = reinterpret_cast<void*>(AddressFromNumber(val));
-              break;
-            case napi_boolean:
-              ptr = reinterpret_cast<void*>(static_cast<uintptr_t>(val.As<Napi::Boolean>().Value()));
-              break;
-            case napi_null:
-            case napi_undefined:
-              break;
-            default:
-              ThrowWrongType(val);
-          }
+          void* ptr = PointerArg(val, val.Type(), type);
           memcpy(slot, &ptr, sizeof(ptr));
           break;
         }
@@ -1027,25 +1129,25 @@ CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalArguments(CallContext& ctx) {
             case napi_string: {
               const Napi::String js_str = val.As<Napi::String>();
               // SBO: prova prima il buffer inline (una sola copia, vedi napi_fast.h)
-              char* dest = inline_string_buffer_ + inline_string_offset_;
-              if (auto copied =
-                    napi_fast::TryCopyUtf8Into(js_str, dest, kInlineStringBufferSize - inline_string_offset_)) {
+              char* dest = ctx.inline_strings + ctx.inline_string_offset;
+              if (auto copied = napi_fast::TryCopyUtf8Into(
+                    js_str, std::span(dest, kInlineStringBufferSize - ctx.inline_string_offset))) {
                 str_ptr = dest;
-                inline_string_offset_ += *copied + 1;
+                ctx.inline_string_offset += *copied + 1;
                 break;
               }
-              // Fallback: heap string_buffer_. Il puntatore viene scritto a fine
-              // marshalling (string_fixups_) perché resize() successivi possono riallocare.
+              // Fallback: heap scratch.strings. Il puntatore viene scritto a fine
+              // marshalling (string_fixups) perché resize() successivi possono riallocare.
               const std::string str = js_str.Utf8Value();
               const size_t needed = str.size() + 1;
-              size_t offset = string_buffer_.size();
-              string_buffer_.resize(offset + needed);
-              memcpy(string_buffer_.data() + offset, str.c_str(), needed);
-              string_fixups_.emplace_back(i, offset);
+              size_t offset = scratch.strings.size();
+              scratch.strings.resize(offset + needed);
+              memcpy(scratch.strings.data() + offset, str.c_str(), needed);
+              scratch.string_fixups.emplace_back(i, offset);
               break;
             }
             case napi_object:
-              str_ptr = static_cast<const char*>(ObjectData(val));
+              str_ptr = static_cast<const char*>(ObjectData(val, type));
               break;
             case napi_bigint:
               str_ptr = reinterpret_cast<const char*>(AddressFromBigInt(val));
@@ -1057,7 +1159,7 @@ CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalArguments(CallContext& ctx) {
             case napi_undefined:
               break;
             default:
-              ThrowWrongType(val);
+              ThrowWrongType(val, type);
           }
           memcpy(slot, &str_ptr, sizeof(str_ptr));
           break;
@@ -1071,24 +1173,16 @@ CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalArguments(CallContext& ctx) {
               constexpr size_t wchar_size = sizeof(wchar_t);
               constexpr size_t wchar_align = alignof(wchar_t);
               size_t byte_len = (u16str.length() + 1) * wchar_size;
-              size_t offset = string_buffer_.size();
+              size_t offset = scratch.strings.size();
               offset = (offset + wchar_align - 1) & ~(wchar_align - 1);
-              string_buffer_.resize(offset + byte_len);
-              wchar_t* wptr = reinterpret_cast<wchar_t*>(string_buffer_.data() + offset);
-#ifdef _WIN32
-              // wchar_t è UTF-16 su Windows: copia diretta.
-              memcpy(wptr, u16str.data(), u16str.length() * wchar_size);
-#else
-              for (size_t j = 0; j < u16str.length(); j++) {
-                wptr[j] = static_cast<wchar_t>(u16str[j]);
-              }
-#endif
-              wptr[u16str.length()] = L'\0';
-              string_fixups_.emplace_back(i, offset);
+              scratch.strings.resize(offset + byte_len);
+              Utf16ToWide(u16str,
+                          std::span(reinterpret_cast<wchar_t*>(scratch.strings.data() + offset), u16str.size() + 1));
+              scratch.string_fixups.emplace_back(i, offset);
               break;
             }
             case napi_object:
-              str_ptr = static_cast<const wchar_t*>(ObjectData(val));
+              str_ptr = static_cast<const wchar_t*>(ObjectData(val, type));
               break;
             case napi_bigint:
               str_ptr = reinterpret_cast<const wchar_t*>(AddressFromBigInt(val));
@@ -1100,7 +1194,7 @@ CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalArguments(CallContext& ctx) {
             case napi_undefined:
               break;
             default:
-              ThrowWrongType(val);
+              ThrowWrongType(val, type);
           }
           memcpy(slot, &str_ptr, sizeof(str_ptr));
           break;
@@ -1108,30 +1202,29 @@ CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalArguments(CallContext& ctx) {
 
         case CType::CTYPES_STRUCT: {
           if (i < expected_argc && arg_struct_infos_[i]) {
-            if (!MarshalStructArg(env, val, i, arg_struct_infos_[i], slot, &arg_values[i], sync_large_arg_buffers_,
+            if (!MarshalStructArg(env, val, i, arg_struct_infos_[i], slot, &arg_values[i], scratch.large_args,
                                   nullptr)) {
               return false;
             }
           } else {
-            JSToC(env, val, type, slot, ARG_SLOT_SIZE);
+            MarshalOther(val, type, slot);
           }
           break;
         }
 
         case CType::CTYPES_ARRAY: {
           if (i < expected_argc && arg_array_infos_[i]) {
-            if (!MarshalArrayArg(env, val, i, arg_array_infos_[i], slot, &arg_values[i], sync_large_arg_buffers_,
-                                 nullptr)) {
+            if (!MarshalArrayArg(env, val, i, arg_array_infos_[i], slot, &arg_values[i], scratch.large_args, nullptr)) {
               return false;
             }
           } else {
-            JSToC(env, val, type, slot, ARG_SLOT_SIZE);
+            MarshalOther(val, type, slot);
           }
           break;
         }
 
         default:
-          JSToC(env, val, type, slot, ARG_SLOT_SIZE);
+          MarshalOther(val, type, slot);
           break;
       }
     } catch (const Napi::Error& e) {
@@ -1139,53 +1232,92 @@ CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalArguments(CallContext& ctx) {
     }
   }
 
-  // Puntatori alle stringhe nel heap string_buffer_: scritti solo ora, quando il
+  // Puntatori alle stringhe nel heap scratch.strings: scritti solo ora, quando il
   // buffer non verrà più riallocato in questa call.
-  for (const auto& [slot_index, offset] : string_fixups_) {
-    const char* str_ptr = string_buffer_.data() + offset;
+  for (const auto& [slot_index, offset] : scratch.string_fixups) {
+    const char* str_ptr = scratch.strings.data() + offset;
     memcpy(arg_storage + (slot_index * ARG_SLOT_SIZE), &str_ptr, sizeof(str_ptr));
   }
   return true;
 }
 
-// Seleziona il return buffer: inline ReturnValue per tipi primitivi,
-// sync_return_buffer_ per struct/array > sizeof(ReturnValue).
+// Seleziona il return buffer: ReturnValue della chiamata per tipi primitivi,
+// scratch.return_buffer per struct/array > sizeof(ReturnValue).
 CTYPES_ALWAYS_INLINE void FFIFunction::SelectReturnPtr(CallContext& ctx) {
-  ctx.return_ptr = &return_value_;
+  ctx.return_ptr = ctx.return_value;
+  size_t ret_size = 0;
   if (return_type_ == CType::CTYPES_STRUCT && return_struct_info_) {
-    size_t ret_size = return_struct_info_->GetSize();
-    if (ret_size > sizeof(ReturnValue)) {
-      sync_return_buffer_.resize(ret_size);
-      ctx.return_ptr = sync_return_buffer_.data();
-    }
+    ret_size = return_struct_info_->GetSize();
   } else if (return_type_ == CType::CTYPES_ARRAY && return_array_info_) {
-    size_t ret_size = return_array_info_->GetSize();
-    if (ret_size > sizeof(ReturnValue)) {
-      sync_return_buffer_.resize(ret_size);
-      ctx.return_ptr = sync_return_buffer_.data();
-    }
+    ret_size = return_array_info_->GetSize();
+  }
+  if (ret_size > sizeof(ReturnValue)) {
+    ctx.scratch->return_buffer.resize(ret_size);
+    ctx.return_ptr = ctx.scratch->return_buffer.data();
   }
 }
 
-// Snapshot di errno / GetLastError subito dopo ffi_call.
-// Parity Python ctypes use_last_error / use_errno.
-CTYPES_ALWAYS_INLINE void FFIFunction::CaptureErrorState() {
-  if (capture_last_error_ || capture_errno_) [[unlikely]] {
-    CTypesAddon* addon = addon_;
-    if (capture_last_error_) {
+// Python use_errno / use_last_error: il valore privato (set_errno(),
+// set_last_error()) è il valore di sistema durante la chiamata; dopo, il valore
+// prodotto dalla chiamata diventa quello privato e quello di sistema torna
+// com'era (lo scambio di _ctypes_callproc).
+CTYPES_ALWAYS_INLINE SavedErrorState SwapErrorStateIn([[maybe_unused]] bool use_last_error,
+                                                      bool use_errno,
+                                                      [[maybe_unused]] uint32_t last_error,
+                                                      int errno_value) {
+  SavedErrorState saved;
 #ifdef _WIN32
-      last_error_ = static_cast<uint32_t>(::GetLastError());
-#else
-      last_error_ = static_cast<uint32_t>(errno);
+  if (use_last_error) {
+    saved.last_error = static_cast<uint32_t>(::GetLastError());
+    ::SetLastError(static_cast<DWORD>(last_error));
+  }
 #endif
-      if (addon) {
-        addon->captured_last_error = last_error_;
+  if (use_errno) {
+    saved.errno_value = errno;
+    errno = errno_value;
+  }
+  return saved;
+}
+
+CTYPES_ALWAYS_INLINE void SwapErrorStateOut(bool use_last_error,
+                                            bool use_errno,
+                                            const SavedErrorState& saved,
+                                            uint32_t& last_error,
+                                            int& errno_value) {
+  if (use_last_error) {
+#ifdef _WIN32
+    last_error = static_cast<uint32_t>(::GetLastError());
+    ::SetLastError(static_cast<DWORD>(saved.last_error));
+#else
+    // Fuori da Windows get_last_error() è l'errno della chiamata.
+    last_error = static_cast<uint32_t>(errno);
+#endif
+  }
+  if (use_errno) {
+    errno_value = errno;
+    errno = saved.errno_value;
+  }
+}
+
+CTYPES_ALWAYS_INLINE SavedErrorState FFIFunction::SwapInErrorState() {
+  if (!(capture_last_error_ || capture_errno_)) [[likely]] {
+    return {};
+  }
+  return SwapErrorStateIn(capture_last_error_, capture_errno_, addon_ ? addon_->captured_last_error : 0,
+                          addon_ ? addon_->captured_errno : 0);
+}
+
+// Snapshot di errno / GetLastError subito dopo la chiamata, pubblicato negli
+// slot privati. Parity Python ctypes use_last_error / use_errno.
+CTYPES_ALWAYS_INLINE void FFIFunction::CaptureErrorState(const SavedErrorState& saved) {
+  if (capture_last_error_ || capture_errno_) [[unlikely]] {
+    SwapErrorStateOut(capture_last_error_, capture_errno_, saved, last_error_, last_errno_);
+    if (addon_) {
+      if (capture_last_error_) {
+        addon_->captured_last_error = last_error_;
       }
-    }
-    if (capture_errno_) {
-      last_errno_ = errno;
-      if (addon) {
-        addon->captured_errno = last_errno_;
+      if (capture_errno_) {
+        addon_->captured_errno = last_errno_;
       }
     }
   }
@@ -1208,13 +1340,221 @@ void FFIFunction::PublishErrorState(uint32_t last_error, int last_errno) {
   }
 }
 
+Napi::Value FFIFunction::StructResult(const void* bytes) {
+  memcpy(struct_result_data_, bytes, return_struct_info_->GetSize());
+  return struct_result_.Value();
+}
+
 // Convert return value e applica errcheck se presente.
 CTYPES_ALWAYS_INLINE Napi::Value FFIFunction::FinalizeCall(CallContext& ctx) {
-  Napi::Value result = ConvertReturn(ctx.env, ctx.return_ptr, return_type_, return_struct_info_, return_array_info_);
+  Napi::Value result = struct_result_data_ != nullptr
+                         ? StructResult(ctx.return_ptr)
+                         : ConvertReturn(ctx.env, ctx.return_ptr, return_type_, return_struct_info_, return_array_info_,
+                                         struct_as_buffer_);
   if (errcheck_callback_.IsEmpty()) [[likely]] {
     return result;
   }
   return ApplyErrcheck(ctx.env, result, ctx.info);
+}
+
+VariadicCifCache* FFIFunction::AcquireVariadicCif(Napi::Env env,
+                                                  size_t argc,
+                                                  const CType* extra_types,
+                                                  size_t num_extra,
+                                                  std::optional<VariadicCifCache>& fallback) {
+  for (VariadicCifCache& entry : variadic_cache_) {
+    if (entry.valid && entry.total_args == argc && entry.extra_types.size() == num_extra &&
+        std::equal(extra_types, extra_types + num_extra, entry.extra_types.begin())) {
+      return &entry;
+    }
+  }
+
+  // Cache miss: ricostruisce uno slot (round-robin) non usato da una chiamata
+  // in corso; se sono tutti in uso (chiamate rientranti) il CIF è locale.
+  VariadicCifCache* target = nullptr;
+  for (size_t attempt = 0; attempt < MAX_CACHED_VARIADIC_CIFS && target == nullptr; attempt++) {
+    VariadicCifCache& candidate = variadic_cache_[next_cache_slot_];
+    next_cache_slot_ = (next_cache_slot_ + 1) % MAX_CACHED_VARIADIC_CIFS;
+    if (candidate.in_use == 0) {
+      target = &candidate;
+    }
+  }
+  if (target == nullptr) [[unlikely]] {
+    target = &fallback.emplace();
+  }
+
+  VariadicCifCache& entry = *target;
+  const size_t fixed_args = arg_types_.size();
+  entry.valid = false;
+  entry.ResetPlan();
+  entry.total_args = argc;
+  entry.extra_types.assign(extra_types, extra_types + num_extra);
+  entry.ffi_types.resize(argc);
+  std::copy(ffi_arg_types_.begin(), ffi_arg_types_.end(), entry.ffi_types.begin());
+  for (size_t i = 0; i < num_extra; i++) {
+    entry.ffi_types[fixed_args + i] = CTypeToFFI(extra_types[i]);
+  }
+
+  // Python ctypes: senza argtypes gli argomenti sono fissi (ffi_prep_cif),
+  // altrimenti quelli oltre gli argtypes sono variadici.
+  ffi_status status =
+    fixed_args == 0
+      ? ffi_prep_cif(&entry.cif, abi_, static_cast<unsigned int>(argc), ffi_return_type_, entry.ffi_types.data())
+      : ffi_prep_cif_var(&entry.cif, abi_, static_cast<unsigned int>(fixed_args), static_cast<unsigned int>(argc),
+                         ffi_return_type_, entry.ffi_types.data());
+  if (status != FFI_OK) {
+    Napi::Error::New(env, "Failed to prepare variadic FFI call").ThrowAsJavaScriptException();
+    return nullptr;
+  }
+
+  entry.plan = ffi_call_plan_alloc(&entry.cif);
+  entry.valid = true;
+  return &entry;
+}
+
+// Firme semplici (simple_call_): slot e risultato sullo stack, senza
+// CallContext, scratch e cache variadica. Le stringhe corte vanno nel buffer
+// inline dell'istanza, come in Call(); una stringa che non ci sta e le chiamate
+// rientranti passano a Call() prima di qualunque effetto.
+bool FFIFunction::SimpleCall(const Napi::CallbackInfo& info, Napi::Value& result) {
+  // Chiamata rientrante: il buffer inline delle stringhe è della chiamata esterna.
+  if (call_depth_ != 0) [[unlikely]] {
+    return false;
+  }
+  const size_t argc = info.Length();
+  const size_t expected_argc = arg_types_.size();
+  if (argc > kMaxSimpleArgs) [[unlikely]] {
+    return false;
+  }
+  Napi::Env env = info.Env();
+  const LibraryCallScope library_scope(library_, env);
+  alignas(16) std::array<uint64_t, kMaxSimpleArgs*(ARG_SLOT_SIZE / sizeof(uint64_t))> slots;
+  std::array<void*, kMaxSimpleArgs> values;
+  // Argomenti variadici (oltre argtypes): tipo dedotto dal valore, come Call().
+  std::array<CType, kMaxSimpleArgs> extra_types;
+  const size_t num_extra = argc - expected_argc;
+  size_t string_offset = 0;
+
+  for (size_t i = 0; i < argc; i++) {
+    uint8_t* slot = reinterpret_cast<uint8_t*>(slots.data()) + i * ARG_SLOT_SIZE;
+    values[i] = slot;
+    Napi::Value val = info[i];
+    CType type;
+    if (i < expected_argc) [[likely]] {
+      type = arg_types_[i];
+    } else {
+      const VariadicValue extra = InferVariadic(val);
+      type = extra.type;
+      val = extra.value;
+      extra_types[i - expected_argc] = type;
+    }
+    try {
+      if (MarshalPrimitive(val, type, slot)) [[likely]] {
+        continue;
+      }
+      // Puntatori e stringhe con il minimo di chiamate a V8 (napi_typeof è
+      // una sequenza di test, e per gli oggetti tra i più lenti): per
+      // c_char_p prima la copia della stringa, poi la memoria di una vista
+      // (Buffer, TypedArray), poi il tipo.
+      void* ptr = nullptr;
+      char* dest = inline_strings_.data() + string_offset;
+      const size_t capacity = kInlineStringBufferSize - string_offset;
+      bool is_string = false;
+      std::optional<size_t> copied;
+      if (type == CType::CTYPES_STRING) {
+        copied = napi_fast::TryCopyUtf8IfString(val, std::span(dest, capacity), is_string);
+      }
+      if (!is_string) {
+        ptr = napi_fast::TryViewData(val);
+        if (ptr == nullptr) {
+          const napi_valuetype kind = val.Type();
+          if (kind == napi_string) {
+            // Python: c_void_p accetta anche bytes/str.
+            is_string = true;
+            copied = napi_fast::TryCopyUtf8Into(val.As<Napi::String>(), std::span(dest, capacity));
+          } else {
+            ptr = PointerArg(val, kind, type);
+          }
+        }
+      }
+      if (is_string) {
+        if (!copied) {
+          return false;
+        }
+        string_offset += *copied + 1;
+        ptr = dest;
+      }
+      memcpy(slot, &ptr, sizeof(ptr));
+    } catch (const Napi::Error& e) {
+      throw ArgumentErrorFor(env, i, e);
+    }
+  }
+
+  // CIF della chiamata variadica: dalla cache, con lo slot segnato in uso così
+  // che una chiamata rientrante (da un callback) non lo ricostruisca.
+  VariadicCifCache* cache_entry = nullptr;
+  std::optional<VariadicCifCache> fallback_entry;
+  if (num_extra != 0) {
+    cache_entry = AcquireVariadicCif(env, argc, extra_types.data(), num_extra, fallback_entry);
+    if (cache_entry == nullptr) {
+      result = env.Undefined();
+      return true;
+    }
+  }
+  const CountScope cache_scope(cache_entry != nullptr ? &cache_entry->in_use : nullptr);
+
+  const CountScope depth_scope(&call_depth_);
+  // Valore restituito: primitivo, o i byte di una struct fino a kMaxSimpleStructReturn.
+  alignas(16) std::array<std::byte, kMaxSimpleStructReturn> return_storage{};
+  void* const return_value = return_storage.data();
+  const SavedErrorState saved_errors = SwapInErrorState();
+  if (cache_entry != nullptr) {
+    if (cache_entry->plan) {
+      ffi_call_plan_invoke(cache_entry->plan, FFI_FN(fn_ptr_), return_value, values.data());
+    } else {
+      ffi_call(&cache_entry->cif, FFI_FN(fn_ptr_), return_value, values.data());
+    }
+  } else if (direct_invoker_) [[likely]] {
+    for (uint8_t k = 0; k < direct_arg_widen_count_; k++) {
+      const direct::Widen& w = direct_arg_widen_[k];
+      direct::WidenInPlace(values[w.index], w.size, w.is_signed);
+    }
+    direct_invoker_(fn_ptr_, values.data(), return_value);
+    if (direct_ret_widen_size_) {
+      direct::WidenInPlace(return_value, direct_ret_widen_size_, direct_ret_signed_);
+    }
+  } else if (call_plan_) {
+    ffi_call_plan_invoke(call_plan_, FFI_FN(fn_ptr_), return_value, values.data());
+  } else {
+    ffi_call(&cif_, FFI_FN(fn_ptr_), return_value, values.data());
+  }
+  CaptureErrorState(saved_errors);
+
+  switch (return_type_) {
+    case CType::CTYPES_VOID:
+      result = env.Undefined();
+      break;
+    case CType::CTYPES_INT32:
+      result = napi_fast::Int32(env, LoadAs<int32_t>(return_value));
+      break;
+    case CType::CTYPES_UINT32:
+      result = napi_fast::Uint32(env, LoadAs<uint32_t>(return_value));
+      break;
+    case CType::CTYPES_DOUBLE:
+      result = Napi::Number::New(env, LoadAs<double>(return_value));
+      break;
+    case CType::CTYPES_STRUCT:
+      result = StructResult(return_value);
+      break;
+    default:
+      result =
+        ConvertReturn(env, return_value, return_type_, return_struct_info_, return_array_info_, struct_as_buffer_);
+      break;
+  }
+  if (!errcheck_callback_.IsEmpty()) [[unlikely]] {
+    result = ApplyErrcheck(env, result, info);
+  }
+  return true;
 }
 
 Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
@@ -1225,112 +1565,78 @@ Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
   if (!ValidateAndResolveArgc(env, info, argc, need_reprep)) {
     return env.Undefined();
   }
+  const LibraryCallScope library_scope(library_, env);
   const size_t expected_argc = arg_types_.size();
+
+  // Una chiamata rientrante (da un callback durante la chiamata a questa
+  // stessa funzione) non può toccare i buffer della chiamata esterna: usa
+  // stringhe e scratch propri, sullo stack di questo frame.
+  struct NestedCallState {
+    CallScratch scratch;
+    alignas(16) std::array<char, kInlineStringBufferSize> strings;
+  };
+  std::optional<NestedCallState> nested;
+  CallScratch* scratch = &scratch_;
+  char* inline_strings = inline_strings_.data();
+  if (call_depth_ != 0) [[unlikely]] {
+    NestedCallState& state = nested.emplace();
+    scratch = &state.scratch;
+    inline_strings = state.strings.data();
+  }
+  const CountScope depth_scope(&call_depth_);
+  scratch->Reset();
+
   // =====================================================================
   // Gestione variadic ottimizzata (ispirata a CPython ctypes)
   // =====================================================================
   ffi_cif* active_cif = &cif_;
   ffi_call_plan* active_plan = call_plan_;
   VariadicCifCache* cache_entry = nullptr;
+  std::optional<VariadicCifCache> fallback_entry;
   size_t num_extra = 0;  // Numero di argomenti extra variadic
 
   // Stack-allocated array per piccoli numeri di argomenti extra (come alloca in CPython)
-  CType extra_types_stack[MAX_VARIADIC_EXTRA_ARGS];
+  std::array<CType, MAX_VARIADIC_EXTRA_ARGS> extra_types_stack;
   std::vector<CType> extra_types_heap;
+  CType* extra_types = nullptr;
+  // Valori degli argomenti extra (un'istanza SimpleCData passa il suo valore).
+  std::array<Napi::Value, MAX_VARIADIC_EXTRA_ARGS> extra_values_stack;
+  std::vector<Napi::Value> extra_values_heap;
+  Napi::Value* extra_values = nullptr;
 
   if (need_reprep) {
-    size_t fixed_args = expected_argc;
-    num_extra = argc - fixed_args;
-
-    // Inferisci tipi degli argomenti extra
-    CType* extra_types;
+    num_extra = argc - expected_argc;
     if (num_extra <= MAX_VARIADIC_EXTRA_ARGS) {
-      extra_types = extra_types_stack;
+      extra_types = extra_types_stack.data();
+      extra_values = extra_values_stack.data();
     } else {
       extra_types_heap.resize(num_extra);
+      extra_values_heap.resize(num_extra);
       extra_types = extra_types_heap.data();
+      extra_values = extra_values_heap.data();
     }
-
     for (size_t i = 0; i < num_extra; i++) {
-      extra_types[i] = InferTypeFromJS(info[fixed_args + i]);
+      const VariadicValue extra = InferVariadic(info[expected_argc + i]);
+      extra_types[i] = extra.type;
+      extra_values[i] = extra.value;
     }
 
-    // Cerca in cache
-    for (size_t i = 0; i < MAX_CACHED_VARIADIC_CIFS; i++) {
-      if (variadic_cache_[i].valid && variadic_cache_[i].total_args == argc &&
-          variadic_cache_[i].extra_types.size() == num_extra) {
-        // Verifica match dei tipi extra
-        bool match = true;
-        for (size_t j = 0; j < num_extra; j++) {
-          if (variadic_cache_[i].extra_types[j] != extra_types[j]) {
-            match = false;
-            break;
-          }
-        }
-
-        if (match) {
-          cache_entry = &variadic_cache_[i];
-          active_cif = &cache_entry->cif;
-          active_plan = cache_entry->plan;
-          break;
-        }
-      }
+    cache_entry = AcquireVariadicCif(env, argc, extra_types, num_extra, fallback_entry);
+    if (cache_entry == nullptr) {
+      return env.Undefined();
     }
-
-    // Cache miss — prepara il nuovo CIF direttamente nello slot di cache
-    // (così riutilizzabile per chiamate successive) invece di prepararlo
-    // due volte.
-    if (!cache_entry) {
-      size_t slot = next_cache_slot_;
-      next_cache_slot_ = (next_cache_slot_ + 1) % MAX_CACHED_VARIADIC_CIFS;
-
-      VariadicCifCache& entry = variadic_cache_[slot];
-      entry.valid = false;  // invalidate durante rebuild
-      if (entry.plan) {
-        ffi_call_plan_free(entry.plan);
-        entry.plan = nullptr;
-      }
-      entry.total_args = argc;
-      entry.extra_types.assign(extra_types, extra_types + num_extra);
-      entry.ffi_types.resize(argc);
-
-      // Copia tipi fissi
-      for (size_t i = 0; i < fixed_args; i++) {
-        entry.ffi_types[i] = ffi_arg_types_[i];
-      }
-      // Aggiungi tipi extra
-      for (size_t i = 0; i < num_extra; i++) {
-        entry.ffi_types[fixed_args + i] = CTypeToFFI(extra_types[i]);
-      }
-
-      // Python ctypes: senza argtypes gli argomenti sono fissi (ffi_prep_cif),
-      // altrimenti quelli oltre gli argtypes sono variadici.
-      ffi_status status =
-        fixed_args == 0
-          ? ffi_prep_cif(&entry.cif, abi_, static_cast<unsigned int>(argc), ffi_return_type_, entry.ffi_types.data())
-          : ffi_prep_cif_var(&entry.cif, abi_, static_cast<unsigned int>(fixed_args), static_cast<unsigned int>(argc),
-                             ffi_return_type_, entry.ffi_types.data());
-
-      if (status != FFI_OK) {
-        Napi::Error::New(env, "Failed to prepare variadic FFI call").ThrowAsJavaScriptException();
-        return env.Undefined();
-      }
-
-      entry.plan = ffi_call_plan_alloc(&entry.cif);
-
-      entry.valid = true;
-      cache_entry = &entry;
-      active_cif = &entry.cif;
-      active_plan = entry.plan;
-    }
+    active_cif = &cache_entry->cif;
+    active_plan = cache_entry->plan;
   }
+  const CountScope cache_scope(cache_entry != nullptr ? &cache_entry->in_use : nullptr);
 
   // =====================================================================
-  // Populate CallContext with argc + variadic state.
-  // Le fasi successive operano esclusivamente via helper privati (vedi
-  // function.h::CallContext e i 4 helper MarshalArguments /
-  // SelectReturnPtr / CaptureErrorState / FinalizeCall).
+  // Stato della chiamata: slot e return value sullo stack.
   // =====================================================================
+  alignas(16) std::array<uint8_t, MAX_INLINE_ARGS * ARG_SLOT_SIZE> inline_arg_storage;
+  std::array<void*, MAX_INLINE_ARGS> inline_arg_values;
+  alignas(16) ReturnValue return_value{};
+
   CallContext ctx{env, info};
   ctx.argc = argc;
   ctx.expected_argc = expected_argc;
@@ -1338,59 +1644,26 @@ Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
   ctx.active_plan = active_plan;
   ctx.cache_entry = cache_entry;
   ctx.num_extra = num_extra;
-  // Punta al primo elemento dell'array di tipi inferiti (stack o heap).
-  // Valido solo se need_reprep (altrimenti non c'è extra).
-  ctx.extra_types_ptr =
-    need_reprep ? (num_extra <= MAX_VARIADIC_EXTRA_ARGS ? extra_types_stack : extra_types_heap.data()) : nullptr;
+  ctx.extra_types_ptr = extra_types;
+  ctx.extra_values = extra_values;
+  ctx.scratch = scratch;
+  ctx.inline_strings = inline_strings;
+  ctx.return_value = &return_value;
 
   // ---- Select arg storage (inline vs heap) --------------------------
-  const bool use_inline_for_call = (argc <= MAX_INLINE_ARGS);
-  if (use_inline_for_call) {
-    ctx.arg_storage = inline_arg_storage_;
-    ctx.arg_values = inline_arg_values_;
+  if (argc <= MAX_INLINE_ARGS) [[likely]] {
+    ctx.arg_storage = inline_arg_storage.data();
+    ctx.arg_values = inline_arg_values.data();
   } else {
     const size_t required_size = argc * ARG_SLOT_SIZE;
-    if (heap_arg_storage_.capacity() < required_size) {
-      heap_arg_storage_.reserve(required_size * 2);
+    if (scratch->arg_storage.size() < required_size) {
+      scratch->arg_storage.resize(required_size);
     }
-    if (heap_arg_storage_.size() < required_size) {
-      heap_arg_storage_.resize(required_size);
+    if (scratch->arg_values.size() < argc) {
+      scratch->arg_values.resize(argc);
     }
-    if (heap_arg_values_.capacity() < argc) {
-      heap_arg_values_.reserve(argc * 2);
-    }
-    if (heap_arg_values_.size() < argc) {
-      heap_arg_values_.resize(argc);
-    }
-    ctx.arg_storage = heap_arg_storage_.data();
-    ctx.arg_values = heap_arg_values_.data();
-  }
-
-  // ---- Reset string buffers ----------------------------------------
-  // Le stringhe che non stanno nel buffer inline finiscono in string_buffer_;
-  // i loro puntatori sono scritti dopo il marshalling (string_fixups_), quindi
-  // non serve pre-riservare la capacità con un passaggio extra sugli argomenti.
-  const bool call_has_strings = has_string_args_ || (need_reprep && [&] {
-                                  for (size_t i = 0; i < num_extra; i++) {
-                                    CType t = ctx.extra_types_ptr[i];
-                                    if (t == CType::CTYPES_STRING || t == CType::CTYPES_WSTRING) {
-                                      return true;
-                                    }
-                                  }
-                                  return false;
-                                }());
-  if (call_has_strings) {
-    inline_string_offset_ = 0;
-    string_buffer_.clear();
-    if (string_buffer_.capacity() > 10 * 1024 * 1024) {
-      string_buffer_.shrink_to_fit();
-    }
-  }
-
-  // Overflow buffer per struct/array grandi viene ripulito solo se può
-  // essere stato popolato da una call precedente (flag precalcolato).
-  if (has_struct_array_args_) {
-    sync_large_arg_buffers_.clear();
+    ctx.arg_storage = scratch->arg_storage.data();
+    ctx.arg_values = scratch->arg_values.data();
   }
 
   // ---- Marshal arguments -------------------------------------------
@@ -1410,18 +1683,20 @@ Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
       const direct::Widen& w = direct_arg_widen_[k];
       direct::WidenInPlace(ctx.arg_values[w.index], w.size, w.is_signed);
     }
+    const SavedErrorState saved_errors = SwapInErrorState();
     direct_invoker_(fn_ptr_, ctx.arg_values, ctx.return_ptr);
-    CaptureErrorState();
+    CaptureErrorState(saved_errors);
     if (direct_ret_widen_size_) {
       direct::WidenInPlace(ctx.return_ptr, direct_ret_widen_size_, direct_ret_signed_);
     }
   } else {
+    const SavedErrorState saved_errors = SwapInErrorState();
     if (ctx.active_plan) [[likely]] {
       ffi_call_plan_invoke(ctx.active_plan, FFI_FN(fn_ptr_), ctx.return_ptr, ctx.arg_values);
     } else {
       ffi_call(ctx.active_cif, FFI_FN(fn_ptr_), ctx.return_ptr, ctx.arg_values);
     }
-    CaptureErrorState();
+    CaptureErrorState(saved_errors);
   }
 
   // ---- Convert return + apply errcheck -----------------------------
@@ -1487,6 +1762,9 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
   if (!ValidateAndResolveArgc(env, info, argc, is_variadic)) {
     return env.Undefined();
   }
+  if (library_ != nullptr && !library_->IsLoaded()) {
+    throw Napi::Error::New(env, "Library is closed");
+  }
   const size_t expected_argc = arg_types_.size();
 
   // ---- Validate argc (shared with Call sync, done above) -----------
@@ -1497,10 +1775,14 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
   // Tipi per argomenti extra variadic (inferiti dai valori JS)
   // =====================================================================
   std::vector<CType> extra_types;
+  std::vector<Napi::Value> extra_values;
   if (is_variadic) {
     extra_types.reserve(argc - expected_argc);
+    extra_values.reserve(argc - expected_argc);
     for (size_t i = expected_argc; i < argc; i++) {
-      extra_types.push_back(InferTypeFromJS(info[i]));
+      const VariadicValue extra = InferVariadic(info[i]);
+      extra_types.push_back(extra.type);
+      extra_values.push_back(extra.value);
     }
   }
 
@@ -1514,7 +1796,6 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
   // =====================================================================
   std::unique_ptr<ffi_cif> owned_cif;
   std::vector<ffi_type*> owned_ffi_types;
-  ffi_cif* active_cif = &cif_;
 
   if (is_variadic) {
     owned_cif = std::make_unique<ffi_cif>();
@@ -1540,8 +1821,6 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
       Napi::Error::New(env, "Failed to prepare variadic FFI call for async").ThrowAsJavaScriptException();
       return env.Undefined();
     }
-
-    active_cif = owned_cif.get();
   }
 
   // =====================================================================
@@ -1582,11 +1861,11 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
     uint8_t* slot = arg_storage + (i * ARG_SLOT_SIZE);
 
     CType type = (i < expected_argc) ? arg_types_[i] : extra_types[i - expected_argc];
-    const Napi::Value& val = info[i];
+    const Napi::Value val = (i < expected_argc) ? info[i] : extra_values[i - expected_argc];
 
     // Fast path: primitive types (shared implementation)
     try {
-      if (MarshalPrimitive(env, val, type, slot)) {
+      if (MarshalPrimitive(val, type, slot)) {
         continue;
       }
     } catch (const Napi::Error& e) {
@@ -1604,7 +1883,7 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
           if (val.IsNull() || val.IsUndefined()) {
             ptr = nullptr;
           } else if (val.IsObject()) {
-            ptr = ObjectData(val);
+            ptr = ObjectData(val, type);
             // Pin: impedisci al GC di raccogliere la memoria durante la chiamata
             buffer_refs.push_back(Napi::Persistent(val.As<Napi::Object>()));
           } else if (val.IsBigInt()) {
@@ -1615,7 +1894,7 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
           } else if (val.IsBoolean()) {
             ptr = reinterpret_cast<void*>(static_cast<uintptr_t>(val.As<Napi::Boolean>().Value()));
           } else {
-            ThrowWrongType(val);
+            ThrowWrongType(val, type);
           }
           memcpy(slot, &ptr, sizeof(ptr));
           break;
@@ -1635,7 +1914,7 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
             // Registra per fixup post-move
             string_fixups.emplace_back(i, offset);
           } else if (val.IsObject()) {
-            const char* ptr = static_cast<const char*>(ObjectData(val));
+            const char* ptr = static_cast<const char*>(ObjectData(val, type));
             memcpy(slot, &ptr, sizeof(ptr));
             buffer_refs.push_back(Napi::Persistent(val.As<Napi::Object>()));
           } else if (val.IsBigInt()) {
@@ -1652,7 +1931,7 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
             const char* null_ptr = nullptr;
             memcpy(slot, &null_ptr, sizeof(null_ptr));
           } else {
-            ThrowWrongType(val);
+            ThrowWrongType(val, type);
           }
           break;
         }
@@ -1670,22 +1949,15 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
             offset = (offset + wchar_align - 1) & ~(wchar_align - 1);
             async_string_buffer.resize(offset + byte_len);
 
-#ifdef _WIN32
-            memcpy(async_string_buffer.data() + offset, u16str.data(), byte_len);
-#else
-            wchar_t* wptr = reinterpret_cast<wchar_t*>(async_string_buffer.data() + offset);
-            for (size_t j = 0; j < u16str.length(); j++) {
-              wptr[j] = static_cast<wchar_t>(u16str[j]);
-            }
-            wptr[u16str.length()] = L'\0';
-#endif
+            Utf16ToWide(u16str,
+                        std::span(reinterpret_cast<wchar_t*>(async_string_buffer.data() + offset), u16str.size() + 1));
 
             const wchar_t* str_ptr = reinterpret_cast<const wchar_t*>(async_string_buffer.data() + offset);
             memcpy(slot, &str_ptr, sizeof(str_ptr));
 
             wstring_fixups.emplace_back(i, offset);
           } else if (val.IsObject()) {
-            const wchar_t* ptr = static_cast<const wchar_t*>(ObjectData(val));
+            const wchar_t* ptr = static_cast<const wchar_t*>(ObjectData(val, type));
             memcpy(slot, &ptr, sizeof(ptr));
             buffer_refs.push_back(Napi::Persistent(val.As<Napi::Object>()));
           } else if (val.IsBigInt()) {
@@ -1702,7 +1974,7 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
             const wchar_t* null_ptr = nullptr;
             memcpy(slot, &null_ptr, sizeof(null_ptr));
           } else {
-            ThrowWrongType(val);
+            ThrowWrongType(val, type);
           }
           break;
         }
@@ -1714,7 +1986,7 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
               return env.Undefined();
             }
           } else {
-            JSToC(env, val, type, slot, ARG_SLOT_SIZE);
+            MarshalOther(val, type, slot);
           }
           break;
         }
@@ -1726,13 +1998,13 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
               return env.Undefined();
             }
           } else {
-            JSToC(env, val, type, slot, ARG_SLOT_SIZE);
+            MarshalOther(val, type, slot);
           }
           break;
         }
 
         default:
-          JSToC(env, val, type, slot, ARG_SLOT_SIZE);
+          MarshalOther(val, type, slot);
           break;
       }
     } catch (const Napi::Error& e) {
@@ -1807,10 +2079,19 @@ FFIFunction::CallWorker::CallWorker(Napi::Env env,
     deferred_(Napi::Promise::Deferred::New(env)),
     errcheck_ref_(errcheck_ref),
     capture_last_error_(parent->capture_last_error_),
-    capture_errno_(parent->capture_errno_) {
+    capture_errno_(parent->capture_errno_),
+    struct_as_buffer_(parent->struct_as_buffer_) {
   ffi_function_->Ref();  // Pin the FFIFunction instance
+  if (parent->addon_ != nullptr) {
+    last_error_in_ = parent->addon_->captured_last_error;
+    errno_in_ = parent->addon_->captured_errno;
+  }
+  // La libreria non può essere chiusa finché la chiamata non è terminata.
+  if (ffi_function_->library_ != nullptr) {
+    ffi_function_->library_->BeginCall();
+  }
 
-  memset(&return_value_, 0, sizeof(return_value_));
+  return_value_ = {};
 
   // Seleziona il CIF attivo: owned (variadic) o esterno (fisso)
   active_cif_ = owned_cif_ ? owned_cif_.get() : cif;
@@ -1875,24 +2156,19 @@ void FFIFunction::CallWorker::KeepArguments(const Napi::CallbackInfo& info) {
 }
 
 FFIFunction::CallWorker::~CallWorker() {
+  if (ffi_function_->library_ != nullptr) {
+    ffi_function_->library_->EndCall();
+  }
   ffi_function_->Unref();  // Unpin the FFIFunction instance
 }
 
 void FFIFunction::CallWorker::Execute() {
   // *** WORKER THREAD - Nessun accesso a V8! ***
   try {
+    const SavedErrorState saved = SwapErrorStateIn(capture_last_error_, capture_errno_, last_error_in_, errno_in_);
     ffi_call(active_cif_, FFI_FN(fn_ptr_), return_ptr_, arg_values_.empty() ? nullptr : arg_values_.data());
     // Snapshot su questo thread, subito dopo la chiamata (come CaptureErrorState).
-    if (capture_last_error_) {
-#ifdef _WIN32
-      last_error_ = static_cast<uint32_t>(::GetLastError());
-#else
-      last_error_ = static_cast<uint32_t>(errno);
-#endif
-    }
-    if (capture_errno_) {
-      last_errno_ = errno;
-    }
+    SwapErrorStateOut(capture_last_error_, capture_errno_, saved, last_error_, last_errno_);
   } catch (...) {
     SetError("Native function threw an exception");
   }
@@ -1910,8 +2186,8 @@ void FFIFunction::CallWorker::OnOK() {
 
   try {
     // Riusa ConvertReturn statico (shared con ConvertReturnValue sync)
-    Napi::Value result =
-      FFIFunction::ConvertReturn(env, return_ptr_, return_type_, return_struct_info_, return_array_info_);
+    Napi::Value result = FFIFunction::ConvertReturn(env, return_ptr_, return_type_, return_struct_info_,
+                                                    return_array_info_, struct_as_buffer_);
 
     // Errcheck (se presente)
     if (errcheck_ref_ && !errcheck_ref_->IsEmpty()) {

@@ -112,7 +112,10 @@ describe("Arrays", function () {
       const a = A.create([1, 2, 3, 4]);
       // Proxy set trap ritorna false per tentare assegnazione; in strict
       // mode JS lancia, in sloppy mode viene silentemente ignorata.
-      assert.throws(() => { "use strict"; a.length = 10; });
+      assert.throws(() => {
+        "use strict";
+        a.length = 10;
+      });
       assert.strictEqual(a.length, 4);
     });
   });
@@ -246,6 +249,34 @@ describe("Arrays", function () {
       assert.strictEqual(arr[0], "H".charCodeAt(0));
       assert.strictEqual(arr[1], "e".charCodeAt(0));
       assert.strictEqual(arr[7], "W".charCodeAt(0));
+    });
+  });
+
+  describe("Arrays of struct() / union() definitions", function () {
+    it("index elements as views and work as by-value struct fields", function () {
+      const P = ctypes.struct({ x: ctypes.c_int32, y: ctypes.c_int8 });
+      const A = ctypes.array(P, 3);
+      assert.strictEqual(ctypes.sizeof(A), 24);
+      assert.strictEqual(A.getAlignment(), 4);
+      const a = A();
+      a[1].x = 5;
+      a[2] = { x: 7, y: 1 };
+      assert.deepStrictEqual([a[1].x, a[2].x, a[2].y], [5, 7, 1]);
+      class S extends ctypes.Structure {
+        static _fields_ = [
+          ["n", ctypes.c_int32],
+          ["pts", A],
+        ];
+      }
+      const s = new S();
+      s.pts[2].y = 9;
+      assert.strictEqual(s.pts[2].y, 9);
+      assert.strictEqual(ctypes.sizeof(S), 28);
+      const U = ctypes.union({ i: ctypes.c_int32, f: ctypes.c_float });
+      const b = ctypes.array(U, 2)();
+      b[1].i = 3;
+      assert.strictEqual(b[1].i, 3);
+      assert.throws(() => ctypes.array(ctypes.c_int32._type, 3), TypeError);
     });
   });
 });

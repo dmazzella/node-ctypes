@@ -267,7 +267,9 @@ function main() {
       opts.setValueHelp ? `help="${opts.setValueHelp}"` : null,
       opts.setValueEnabled !== undefined ? `enabled=${opts.setValueEnabled}` : null,
       opts.setValueUrl ? `url="${opts.setValueUrl}"` : null,
-    ].filter(Boolean).join(" ");
+    ]
+      .filter(Boolean)
+      .join(" ");
 
     if (!target) {
       console.log(`\n[6] No element found matching ${desc} — skipping --set-value.`);

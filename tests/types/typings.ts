@@ -13,6 +13,9 @@ import {
   struct,
   union,
   defineStruct,
+  defineUnion,
+  bitfield,
+  writeValue,
   readValue,
   sizeof,
   create_string_buffer,
@@ -61,9 +64,21 @@ class Point extends Structure {
   ] as any;
 }
 
+// Fields are accessors of the class; toObject() / toJSON() give a plain object.
+const point = new Point(1, 2);
+const pointFields: object = point.toJSON();
+void pointFields;
+
 // Structure classes, POINTER and array types are valid argtypes/restype.
 libc.func("byValue", c_int32, [Point]);
 libc.func("byPointer", c_int32, [POINTER(c_int32), array(c_int32, 4)]);
+
+// An array parameter takes an array instance or memory, not a JS array (as Python).
+const fill = libc.func("fill", null, [array(c_int32, 4)]);
+fill(array(c_int32, 4)(1, 2, 3, 4));
+fill(Buffer.alloc(16));
+// @ts-expect-error a JS array is not an array argument
+fill([1, 2, 3, 4]);
 
 // Typed signatures.
 const abs = libc.func("abs", c_int32, [c_int32]);
@@ -286,3 +301,44 @@ void CFUNCTYPE(
     [2, "iptr"],
   ],
 );
+
+// Statics of Structure classes (size, alignment, fields).
+class Pt extends Structure {
+  static _fields_ = [
+    ["x", c_int32],
+    ["y", c_int32],
+  ];
+}
+check(expectType<number>()(Pt.size));
+check(expectType<number>()(Pt.alignment));
+check(expectType<string>()(Pt.fields[0].name));
+void Pt.from_buffer(new Int32Array(2));
+
+// Options of struct() / union() / defineUnion().
+void struct({ a: c_int32 }, { pack: 2, layout: "ms", align: 8 });
+void union({ a: c_int32, d: c_double }, { pack: 1 });
+const DS = defineStruct({ x: c_int32, y: c_int32 });
+check(expectType<number>()(DS.size));
+check(expectType<number>()(new DS(1, 2).x));
+void DS.from_address(0x1000n);
+const DU = defineUnion({ i: c_int32, d: c_double }, { align: 8 });
+check(expectType<number>()(DU.alignment));
+
+// Arrays: element-wise Array methods, Buffer methods on bytes, struct() elements.
+const elems = array(c_int32, 3)(1, 2, 3);
+check(expectType<number[]>()(elems.slice(0, 2)));
+check(expectType<number | undefined>()(elems.at(-1)));
+check(expectType<boolean>()(elems.includes(2)));
+check(expectType<string[]>()(elems.map((v) => String(v))));
+check(expectType<number>()(elems.readInt32LE(0)));
+check(expectType<string>()(array(c_char, 4)().slice(0, 2)));
+void array(struct({ x: c_int32 }), 3);
+// @ts-expect-error a CType number is not an element type
+void array(5, 3);
+// @ts-expect-error bit fields need a C integer type, not a structure definition
+void bitfield(struct({ x: c_int32 }), 3);
+
+// readValue / writeValue / sizeof on typed arrays and addresses.
+void readValue(new Uint8Array(4), c_int32);
+void writeValue(0x1000n, c_int32, 1);
+check(expectType<number>()(sizeof(new Float64Array(2))));
