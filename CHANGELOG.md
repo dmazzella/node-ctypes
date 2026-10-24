@@ -36,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **npm publication path**: explicitly prefix the downloaded tarball path with
+  `./` so npm publishes the local package instead of interpreting the path as
+  a GitHub repository shorthand and attempting an SSH connection.
 - **Windows build diagnostics**: use compile-time guards for disabled floating-point
   direct invokers. Keep the required inline-buffer alignment and scope MSVC padding
   diagnostics to the affected class; waive upstream libffi's intentional unsigned

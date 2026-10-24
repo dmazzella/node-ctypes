@@ -283,6 +283,6 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       - name: Publish to npm
-        run: npm publish "package/${{ needs.package.outputs.filename }}" --tag "${{ needs.package.outputs.npm_tag }}" --access public --provenance
+        run: npm publish "./package/${{ needs.package.outputs.filename }}" --tag "${{ needs.package.outputs.npm_tag }}" --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
