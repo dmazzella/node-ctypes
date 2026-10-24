@@ -20,9 +20,9 @@
     "node-ctypes": "file:.."
   },
   "devDependencies": {
-    "koffi": "^3.3.3"
+    "koffi": "^3.3.4"
   },
   "allowScripts": {
-    "koffi@3.3.3": true
+    "koffi@3.3.4": true
   }
 }
