@@ -51,7 +51,34 @@ enum class CType : int32_t {
 [[nodiscard]] CType CTypeFromJS(const Napi::Value& value);
 
 // Mappa CType -> ffi_type*
-[[nodiscard]] ffi_type* CTypeToFFI(CType type);
+[[nodiscard]] inline ffi_type* CTypeToFFI(CType type) {
+  switch (type) {
+    case CType::CTYPES_VOID: return &ffi_type_void;
+    case CType::CTYPES_INT8: return &ffi_type_sint8;
+    case CType::CTYPES_UINT8: return &ffi_type_uint8;
+    case CType::CTYPES_INT16: return &ffi_type_sint16;
+    case CType::CTYPES_UINT16: return &ffi_type_uint16;
+    case CType::CTYPES_INT32: return &ffi_type_sint32;
+    case CType::CTYPES_UINT32: return &ffi_type_uint32;
+    case CType::CTYPES_INT64: return &ffi_type_sint64;
+    case CType::CTYPES_UINT64: return &ffi_type_uint64;
+    case CType::CTYPES_FLOAT: return &ffi_type_float;
+    case CType::CTYPES_DOUBLE: return &ffi_type_double;
+    case CType::CTYPES_POINTER:
+    case CType::CTYPES_STRING:
+    case CType::CTYPES_WSTRING: return &ffi_type_pointer;
+    case CType::CTYPES_CHAR: return std::is_signed_v<char> ? &ffi_type_sint8 : &ffi_type_uint8;
+    case CType::CTYPES_WCHAR:
+      if constexpr (sizeof(wchar_t) == 2) return std::is_signed_v<wchar_t> ? &ffi_type_sint16 : &ffi_type_uint16;
+      else return std::is_signed_v<wchar_t> ? &ffi_type_sint32 : &ffi_type_uint32;
+    case CType::CTYPES_BOOL: return &ffi_type_uint8;
+    case CType::CTYPES_SIZE_T: return sizeof(size_t) == 8 ? &ffi_type_uint64 : &ffi_type_uint32;
+    case CType::CTYPES_SSIZE_T: return sizeof(ssize_t) == 8 ? &ffi_type_sint64 : &ffi_type_sint32;
+    case CType::CTYPES_LONG: return sizeof(long) == 8 ? &ffi_type_sint64 : &ffi_type_sint32;
+    case CType::CTYPES_ULONG: return sizeof(unsigned long) == 8 ? &ffi_type_uint64 : &ffi_type_uint32;
+    default: return &ffi_type_void;
+  }
+}
 
 // Dimensione di un tipo primitivo (0 per void e per struct/union/array, la cui
 // dimensione è quella di StructInfo / ArrayInfo).
@@ -94,6 +121,102 @@ enum class CType : int32_t {
   }
 }
 
+// I ritorni interi stretti di libffi occupano uno slot ffi_arg completo.
+template <typename T>
+  requires std::is_trivially_copyable_v<T>
+inline void StoreReturnValue(void* destination, T value) noexcept {
+  if constexpr (std::is_integral_v<T> && sizeof(T) < sizeof(ffi_arg)) {
+    const ffi_arg widened = std::is_signed_v<T>
+      ? static_cast<ffi_arg>(static_cast<ffi_sarg>(value))
+      : static_cast<ffi_arg>(value);
+    std::memcpy(destination, &widened, sizeof(widened));
+  } else {
+    std::memcpy(destination, &value, sizeof(value));
+  }
+}
+
+[[nodiscard]] constexpr bool IsIntegralReturn(CType type) noexcept {
+  switch (type) {
+    case CType::CTYPES_INT8:
+    case CType::CTYPES_UINT8:
+    case CType::CTYPES_INT16:
+    case CType::CTYPES_UINT16:
+    case CType::CTYPES_INT32:
+    case CType::CTYPES_UINT32:
+    case CType::CTYPES_INT64:
+    case CType::CTYPES_UINT64:
+    case CType::CTYPES_CHAR:
+    case CType::CTYPES_WCHAR:
+    case CType::CTYPES_BOOL:
+    case CType::CTYPES_SIZE_T:
+    case CType::CTYPES_SSIZE_T:
+    case CType::CTYPES_LONG:
+    case CType::CTYPES_ULONG:
+      return true;
+    default:
+      return false;
+  }
+}
+
+[[nodiscard]] constexpr size_t ReturnStorageSize(CType type) noexcept {
+  const size_t size = CTypeSize(type);
+  return IsIntegralReturn(type) ? std::max(size, sizeof(ffi_arg)) : size;
+}
+
+inline void ZeroReturnValue(CType type, void* destination) noexcept {
+  if (const size_t size = ReturnStorageSize(type); size != 0) std::memset(destination, 0, size);
+}
+
+inline void StoreCallbackValue(CType type, const void* source, void* destination) noexcept {
+  if (CTypeSize(type) >= sizeof(ffi_arg) || !IsIntegralReturn(type)) {
+    std::memcpy(destination, source, CTypeSize(type));
+    return;
+  }
+  switch (type) {
+    case CType::CTYPES_INT8: StoreReturnValue(destination, LoadAs<int8_t>(source)); break;
+    case CType::CTYPES_UINT8: StoreReturnValue(destination, LoadAs<uint8_t>(source)); break;
+    case CType::CTYPES_INT16: StoreReturnValue(destination, LoadAs<int16_t>(source)); break;
+    case CType::CTYPES_UINT16: StoreReturnValue(destination, LoadAs<uint16_t>(source)); break;
+    case CType::CTYPES_INT32: StoreReturnValue(destination, LoadAs<int32_t>(source)); break;
+    case CType::CTYPES_UINT32: StoreReturnValue(destination, LoadAs<uint32_t>(source)); break;
+    case CType::CTYPES_CHAR: StoreReturnValue(destination, LoadAs<char>(source)); break;
+    case CType::CTYPES_WCHAR: StoreReturnValue(destination, LoadAs<wchar_t>(source)); break;
+    case CType::CTYPES_BOOL: StoreReturnValue(destination, LoadAs<uint8_t>(source)); break;
+    case CType::CTYPES_LONG: StoreReturnValue(destination, LoadAs<long>(source)); break;
+    case CType::CTYPES_ULONG: StoreReturnValue(destination, LoadAs<unsigned long>(source)); break;
+    case CType::CTYPES_SIZE_T: StoreReturnValue(destination, LoadAs<size_t>(source)); break;
+    case CType::CTYPES_SSIZE_T: StoreReturnValue(destination, LoadAs<ssize_t>(source)); break;
+    default: break;
+  }
+}
+
+[[nodiscard]] constexpr bool IsSimpleArgumentType(CType type) noexcept {
+  switch (type) {
+    case CType::CTYPES_INT8:
+    case CType::CTYPES_UINT8:
+    case CType::CTYPES_INT16:
+    case CType::CTYPES_UINT16:
+    case CType::CTYPES_INT32:
+    case CType::CTYPES_UINT32:
+    case CType::CTYPES_INT64:
+    case CType::CTYPES_UINT64:
+    case CType::CTYPES_FLOAT:
+    case CType::CTYPES_DOUBLE:
+    case CType::CTYPES_POINTER:
+    case CType::CTYPES_STRING:
+    case CType::CTYPES_WCHAR:
+    case CType::CTYPES_BOOL:
+    case CType::CTYPES_SIZE_T:
+    case CType::CTYPES_SSIZE_T:
+    case CType::CTYPES_LONG:
+    case CType::CTYPES_ULONG:
+    case CType::CTYPES_CHAR:
+      return true;
+    default:
+      return false;
+  }
+}
+
 // Converte un valore JS in bytes C
 // Ritorna il numero di bytes scritti, o -1 per errore
 // NOTA: Solo per tipi primitivi. STRUCT/UNION/ARRAY usano StructInfo/ArrayInfo
@@ -111,6 +234,9 @@ enum class CType : int32_t {
 // bit del tipo). Un number non intero o non finito è un float, che Python
 // rifiuta per i tipi interi: TypeError.
 [[nodiscard]] uint64_t IntegerBitsFromDouble(const Napi::Value& value, double d);
+
+// Number, boolean o BigInt nel range int64/uint64; nessuna coercizione di oggetti.
+[[nodiscard]] double RealFromJS(const Napi::Value& value);
 
 // Python c_char: stringa di 1 carattere (codice 0..255), Buffer/Uint8Array di
 // 1 byte, intero 0..255 o boolean. Altrimenti TypeError con i messaggi di Python.

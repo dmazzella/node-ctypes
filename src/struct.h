@@ -25,6 +25,8 @@ class StructType : public Napi::ObjectWrap<StructType> {
   std::shared_ptr<StructInfo> GetStructInfo() const { return struct_info_; }
 
  private:
+  void EnsureMutable(Napi::Env env) const;
+  Napi::Value ReadBuffer(const Napi::Buffer<uint8_t>& buffer);
   std::shared_ptr<StructInfo> struct_info_;
   bool is_union_;
 };

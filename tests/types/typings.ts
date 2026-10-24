@@ -8,6 +8,7 @@ import {
   Union,
   POINTER,
   pointer,
+  cast,
   array,
   ARRAY,
   struct,
@@ -22,6 +23,12 @@ import {
   create_unicode_buffer,
   c_buffer,
   CFUNCTYPE,
+  threadSafeCallback,
+  StructType,
+  ArrayType,
+  memmove,
+  memset,
+  byref,
   ArgumentError,
   LibraryLoader,
   cdll,
@@ -112,10 +119,45 @@ cmp.release();
 
 // Callbacks and `using`.
 const cb = libc.callback(() => 0, c_int32, [c_void_p, c_void_p]);
-check(expectType<bigint>()(cb.getPointer()));
+check(expectType<bigint>()(cb.pointer));
 check(expectType<string | null>()(cb.getLastError()));
 cb.setErrorHandler((message: string) => void message);
+check(expectType<bigint>()(cb.getPointer()));
 cb.release();
+const pointerCallback = callback((value) => {
+  check(expectType<PointerInstance<typeof c_int32> | null>()(value));
+  return value === null ? 0 : value[0];
+}, c_int32, [POINTER(c_int32)]);
+pointerCallback.release();
+const pointerThreadCallback = threadSafeCallback((value) => value === null ? 0 : value[0], c_int32, [POINTER(c_int32)]);
+check(expectType<bigint>()(pointerThreadCallback._callback.getPointer()));
+pointerThreadCallback.release();
+const callbackFactory = CFUNCTYPE(c_int32, POINTER(c_int32));
+const factoryCallback = callbackFactory((value) => value === null ? 0 : value[0]);
+factoryCallback.release();
+const typedPrototype = callbackFactory(1n);
+check(expectType<number>()(typedPrototype(null)));
+check(expectType<Promise<number>>()(typedPrototype.callAsync(null)));
+// @ts-expect-error typed prototype arguments are not strings
+typedPrototype("bad");
+// @ts-expect-error scalar callbacks cannot return strings
+callback(() => "bad", c_int32, []);
+// @ts-expect-error aggregate returns are unsupported by callbacks
+callback(() => new Point(), Point, []);
+// @ts-expect-error unsupported aggregate callback through a factory
+CFUNCTYPE(Point)(() => new Point());
+abs({ _as_parameter_: { _as_parameter_: -7 } });
+check(expectType<bigint>()(memmove(Buffer.alloc(4), Buffer.alloc(4), 4)));
+check(expectType<bigint>()(memset(Buffer.alloc(4), 0, 4)));
+check(expectType<Buffer>()(byref(new c_int32())));
+const offsetReference = byref(new c_int32(), 4);
+void offsetReference;
+check(expectType<PointerInstance<typeof c_int32>>()(cast(offsetReference, POINTER(c_int32))));
+const nativeType = new StructType({ union: false, alignment: 4 }).addField("value", CType.INT32);
+check(expectType<Buffer>()(nativeType.create({ value: 1 })._buffer));
+new ArrayType(nativeType, 2);
+// @ts-expect-error native descriptors accept options, not the ignored boolean legacy declaration
+new StructType(true);
 {
   using lib = new CDLL(null);
   void lib;
@@ -283,6 +325,31 @@ check(expectType<bigint | null>()(new MSG().hWnd));
 const getRect = libc.func("GetClientRect", wintypes.BOOL, [HWND, LPRECT]);
 getRect(null, rect);
 check(expectType<bigint>()(new DWORD(1).value));
+check(expectType<boolean>()(new wintypes.VARIANT_BOOL(false).value));
+const variantEcho = libc.func("variant_echo", wintypes.VARIANT_BOOL, [wintypes.VARIANT_BOOL] as const);
+check(expectType<boolean>()(variantEcho(false)));
+check(expectType<Promise<boolean>>()(variantEcho.callAsync(true)));
+class ScalarResult extends c_int32 {
+  label() { return "result"; }
+}
+check(expectType<ScalarResult>()(ScalarResult.from_buffer(Buffer.alloc(4))));
+const scalarResult = libc.func("scalar_result", ScalarResult, [c_int32] as const);
+check(expectType<ScalarResult>()(scalarResult(7)));
+check(expectType<Promise<ScalarResult>>()(scalarResult.callAsync(7)));
+class CheckedScalar extends c_int32 {
+  static _check_retval_(value: CheckedScalar) { return value.value + 100; }
+}
+const checkedScalar = libc.func("checked_scalar", CheckedScalar, [c_int32] as const);
+check(expectType<number>()(checkedScalar(7)));
+const scalarFields = struct({ value: ScalarResult });
+check(expectType<ScalarResult>()(scalarFields.get(scalarFields.create(), "value")));
+check(expectType<ScalarResult>()(array(ScalarResult, 2)()[0]));
+check(expectType<ScalarResult>()(POINTER(ScalarResult).fromAddress(1n).contents));
+const scalarInout = CFUNCTYPE(c_int32, POINTER(ScalarResult)).bind(libc, "scalar_inout", [{ dir: "inout", name: "value" }]);
+void scalarInout;
+// @ts-expect-error invalid direction
+const invalidDirection: import("../../lib/index.js").ParamFlag = { dir: "both", name: "value" };
+void invalidDirection;
 check(expectType<number>()(wintypes.RGB(1, 2, 3)));
 class Derived extends wintypes.POINT {}
 void new Derived(1, 2).x;
@@ -290,6 +357,22 @@ void new Derived(1, 2).x;
 // prototype((name, dll), paramflags)
 const strlenProto = CFUNCTYPE(c_int64, c_char_p)(["strlen", libc]);
 strlenProto("x");
+check(expectType<Promise<bigint>>()(strlenProto.callAsync("x")));
+check(expectType<ErrcheckCallback | null>()(strlenProto.errcheck));
+check(expectType<bigint>()(strlenProto.address));
+// @ts-expect-error errcheck must be callable or null
+strlenProto.errcheck = 123;
+const outputProto = CFUNCTYPE(c_int, c_int, POINTER(c_int)).bind(libc, "output", [[1, "value"], [2, "out"]]);
+check(expectType<Promise<any>>()(outputProto.callAsync(1)));
+check(expectType<ErrcheckCallback | null>()(outputProto.errcheck));
+raw.setErrcheck((result, func, args) => {
+  check(expectType<typeof raw>()(func));
+  void func.call(-1);
+  void args;
+  // @ts-expect-error the native function handle is not directly callable
+  func(-1);
+  return result;
+});
 void CFUNCTYPE(
   c_double,
   c_double,

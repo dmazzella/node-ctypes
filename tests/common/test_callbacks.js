@@ -49,15 +49,17 @@ describe("Callbacks", function () {
         qsort = libc.func("_qsort", ctypes.c_void, [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_void_p]);
       }
 
-      qsort(ctypes.byref(arr), 5, ctypes.sizeof(ctypes.c_int32), compare.pointer);
+      try {
+        qsort(ctypes.byref(arr), 5, ctypes.sizeof(ctypes.c_int32), compare);
 
-      // Python: [arr[i] for i in range(5)]
-      const sorted = [];
-      for (let i = 0; i < 5; i++) {
-        sorted.push(arr[i]);
-      }
+        // Python: [arr[i] for i in range(5)]
+        const sorted = [];
+        for (let i = 0; i < 5; i++) {
+          sorted.push(arr[i]);
+        }
 
-      assert.deepStrictEqual(sorted, [1, 2, 5, 8, 9]);
+        assert.deepStrictEqual(sorted, [1, 2, 5, 8, 9]);
+      } finally { compare.release(); }
     });
 
     it("should sort array in reverse order", function () {

@@ -7,6 +7,181 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-10-24
+
+### Added
+
+- **Release validation gates**: strict project C++20 compiler checks, Node 26
+  functional-parity controls reusing the artifacts and focused Python 3.15
+  references are wired into CI.
+  The assembler requires every supported binary and includes release docs;
+  publish waits for runtime gates, checks the exact version tag and sends
+  prereleases to `next`.
+- **External performance comparisons**: `npm run bench:koffi` and
+  `npm run bench:ffi` compare the same C operations against Koffi and node:ffi.
+  Tables show per-case medians, dispersion and time ratios from at least nine
+  250 ms samples per library, with matching result representations. Koffi
+  additionally covers aggregates, variadic calls and controlled async work.
+  Every run generates a standalone responsive HTML report with bar charts,
+  operation counts, measured times and environment/source metadata; optional
+  JSON output includes all samples.
+  The separate self-benchmark command has been removed.
+- **Result protocols**: static `_check_retval_` runs on the restype representation
+  before `errcheck` for library functions and prototype callers. OUT conversion
+  uses `__ctypes_from_outparam__`; INOUT (`dir: "inout"` / flag 3) uses and
+  returns the supplied instance without invoking the OUT hook.
+- **Asynchronous output bindings**: `CFUNCTYPE` / `WINFUNCTYPE` bindings with
+  `paramflags` expose `callAsync()`, `funcName`, `address` and `_ffi`, with
+  the same output instances and `errcheck` return-args behavior as sync calls.
+
+### Fixed
+
+- **Canonical test timeout**: test scripts use `--test-timeout=5000` before
+  the file selector; the old trailing `--timeout` was not a valid runner
+  option. `test:js` allows runtime controls to reuse the native artifacts.
+- **Direct-call types**: native fast calls use exact scalar C++ signatures rather
+  than treating register-class compatibility as function-type compatibility.
+  Unsupported combinations and opaque pointer/string types use the existing
+  cached libffi path. The signature set stays bounded and invokers retain
+  internal linkage.
+- **Callback return ABI and resources**: both callback handlers sign/zero-extend
+  narrow integral results to a complete `ffi_arg`, including zero/error paths.
+  Closure allocation uses a dedicated RAII deleter; partial thread-safe callback
+  construction does not release an absent TSFN. `wchar_t`, `size_t` and `ssize_t`
+  FFI descriptors now reflect native signedness and integer width.
+- **Native callback types**: declarations include the existing `getPointer()`
+  method, which validates that the callback has not been released.
+- **Typed pointer arguments**: incompatible ctypes values are rejected before
+  C entry, while compatible scalar/structure subclasses, arrays, explicit casts
+  and documented raw-memory extensions remain supported. Recursive
+  `_as_parameter_` chains retain intermediate owners and report cycles/depth
+  limits, including after `from_param`.
+- **Function pointer round-trips**: FFI callables can be stored back in pointer
+  fields/arrays, passed to native functions and returned by pointer callbacks;
+  bare JS functions still require explicit callback creation.
+- **Scalar buffer factories and byref**: size/offset checks precede instance
+  creation, derived copies bypass application constructors, and typed views
+  are accepted. `byref(value, offset)` now applies signed byte offsets while
+  preserving the original owner and pointee type.
+- **OleDLL defaults and packing**: implicit restypes use HRESULT; explicit
+  overrides remain effective. MS layouts accept `_pack_` zero and non-powers
+  of two, reject explicit pack with GCC layout, and reject non-ABI alignments
+  for by-value calls instead of preparing an invalid FFI description.
+- **Scalar subclass representation**: C results and callback arguments preserve
+  their bytes in derived scalar instances without calling application constructors
+  or writers, including floating-point payload bits. Fields, arrays, pointer
+  indexing and typed memory reads expose live derived instances. Builtin scalar
+  fast paths retain ordinary JS values.
+- **Result checking consistency**: explicit HRESULT validation applies to CDLL,
+  WinDLL and prototype callers as well as OleDLL, before `errcheck` and outputs.
+  Non-callable hooks and exceptions surface as errors/rejections.
+- **Stable ABI descriptors**: captured native struct/union layouts and array
+  elements are finalized recursively. FFI types retained by CIFs and call plans
+  cannot be invalidated by later `addField()` calls. Open builders and size/
+  alignment queries remain supported; finalized children do not prematurely
+  finalize their outer builder. Native values use finalized layouts, reject
+  short read buffers, and direct by-value recursion is rejected.
+- **Independent function results**: returned functional `struct()` / `union()`
+  values now own their bytes before JavaScript conversion. Array views, nested
+  unions and union getters no longer alias the native function's reused result
+  buffer, including during reentrant conversion or `errcheck`. Class results
+  retain their single JS snapshot. Sync and async callers, library attributes,
+  prototypes and output bindings keep their existing public result shapes.
+  Explicit `toObject(buffer)` views and borrowed native result buffers are
+  unchanged; pointer targets are not deep-copied.
+- **Primitive conversions**: negative unsigned arguments and integers outside
+  the signed 64-bit range wrap without adding `2**64` in floating point or
+  casting an out-of-range floating value to an integer. Fast, generic, async
+  and native slot conversions agree, including boolean and BigInt inputs.
+- **Wide-character calls**: `c_wchar` uses the validated wchar converter in
+  the simple path, not pointer/string marshalling. Simple argument types are
+  explicitly enumerated; unsupported variadic types fall back before use.
+- **Endian arrays**: primitive arrays in big-endian structures and unions
+  use the correct byte order, including multidimensional, float and wchar
+  arrays, serialization and mirrored native memory. Shared native/LE array
+  types are unchanged; nested structure elements keep their own byte order.
+- **Boolean values**: bool bitfields normalize before masking, return booleans
+  and preserve adjacent fields according to C. False scalar instances remain
+  false for `c_bool` and `VARIANT_BOOL`; VARIANT_BOOL arguments, fields,
+  results and callbacks use the same boolean / `-1` representation.
+- **Scalar validation**: constructors, value setters, arrays and bitfields
+  no longer coerce numeric strings, arbitrary objects or null to numbers.
+  Constructors still default to zero for omitted/undefined values, and
+  documented 64-bit numeric pointer/null arguments remain supported.
+  Incompatible scalar instances are rejected in declared numeric arguments
+  and fields. Floating-point BigInt conversions have the same range checks
+  in JS and native code; long and ssize_t bitfields are signed.
+- **Array type retention**: array types are weakly interned by element type
+  and length, with finalized entries removed from the cache. Builtin element
+  types no longer retain every array length ever requested. Live instances,
+  signatures and containing types preserve type identity and validity.
+  Internal byte-array wrappers used for native layouts follow the same
+  policy; live native layouts retain their underlying metadata.
+- **Errcheck lifetime and snapshots**: self-referencing hooks no longer keep
+  abandoned functions, libraries and callbacks alive. Each invocation captures
+  its hook before adapters or getters run, including raw native handles and
+  asynchronous jobs; replacing, clearing or adding a hook affects later calls.
+  Public prototype hooks receive the public callable, not a native handle.
+  Invalid hook assignments preserve the previous valid hook.
+- **Output binding isolation**: `paramflags` bindings no longer inherit hooks
+  from an unrelated cached function. Adapter temporaries and active-call
+  protection extend through `errcheck` and output processing, synchronously
+  and asynchronously, while explicit HRESULT validation still runs first.
+- **Pointer views and typed copies**: pointers read from fields, arrays and
+  double indirections retain their known owners. Borrowed views, pointer-slot
+  buffers and address-backed aliases share the appropriate ownership, even
+  if the original pointer is repointed. Typed structure/union/array copies
+  preserve references across overlapping and self-copies; overwriting
+  pointer storage releases the replaced references. Raw memory copies do
+  not infer or transfer ownership.
+- **Exported global lifetime**: `in_dll()` views and their dependent buffers,
+  pointers and typed copies keep the native module loaded independently of
+  the library wrapper. `close()` immediately closes the logical handle,
+  rejects subsequent bound calls and symbol lookups, and defers physical
+  unloading until the dependent memory is no longer needed. This also
+  makes closing a current-process handle logically effective.
+- **Argument conversion lifetime**: objects and temporaries unwrapped by
+  `from_param` / `_as_parameter_` remain alive while later arguments are
+  converted and through result conversion and `errcheck`, including
+  `callAsync()`. The same behavior applies to library attributes and
+  `CFUNCTYPE` / `WINFUNCTYPE` callers, without allocating ownership frames
+  for ordinary numeric calls.
+- **Native asynchronous arguments**: copied structures and arrays,
+  values produced by getters, inferred C-data arguments, and buffers passed
+  as integer addresses are retained until the worker finishes. Library
+  closure is also rejected while native getters materialize the arguments;
+  worker setup and queue failures release their resources.
+
+### Changed
+
+- **Prototype identity**: `CFUNCTYPE` / `WINFUNCTYPE` reuse live prototypes by
+  complete type identity and calling convention through weak-value interning.
+  Live callers/callbacks/output bindings retain their prototype. Public
+  metadata is shared but does not mutate the captured native signature or
+  cache key. New caller bindings capture fresh adapters/retval hooks and
+  retain independent `errcheck` state.
+- **Comparison summaries**: Koffi / `node:ffi` scripts no longer
+  combine unrelated workloads into an average ratio or winner count.
+- **Memory operation results**: `memmove()` / `memset()` return the destination
+  address as BigInt instead of undefined. JS-memory clipping is preserved;
+  address caching excludes resizable/growable stores and detects detachment.
+- **API declarations**: callback arguments include typed pointers and scalar
+  instances; unsupported callback return types remain rejected. Prototypes
+  retain argument/return types and async metadata, and native descriptor/
+  callback declarations now match their runtime members.
+- **Derived scalar return types** now produce instances, as Python ctypes does.
+  TypeScript infers those instances and `_check_retval_` return types without
+  widening builtin values; INOUT directions are included in `ParamFlag`.
+- **Native descriptor mutation**: `StructType.addField()` now throws after
+  the layout is acquired by a field, array, prepared signature or native
+  value. Construct a new descriptor to change its layout. This includes
+  aggregate array elements of length zero and descriptors used by callbacks.
+- **TypeScript function pointers**: prototype callers and output bindings
+  expose the full `FFIFunction` interface. Low-level hooks use
+  `NativeErrcheckCallback`, whose `func` argument is a native handle rather
+  than a directly callable function. Corrected the output-binding example
+  to use the actual `GetWindowThreadProcessId` signature.
+
 ## [2.3.0] - 2026-10-23
 
 ### Fixed
@@ -707,7 +882,8 @@ It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-
 
 Initial releases.
 
-[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.3.0...HEAD
+[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.4.0...HEAD
+[2.4.0]: https://github.com/dmazzella/node-ctypes/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/dmazzella/node-ctypes/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/dmazzella/node-ctypes/compare/v2.1.1...v2.2.0
 [2.1.1]: https://github.com/dmazzella/node-ctypes/compare/v2.1.0...v2.1.1

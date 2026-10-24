@@ -13,93 +13,25 @@ CType CTypeFromJS(const Napi::Value& value) {
   return *type;
 }
 
-ffi_type* CTypeToFFI(CType type) {
-  switch (type) {
-    case CType::CTYPES_VOID:
-      return &ffi_type_void;
-    case CType::CTYPES_INT8:
-      return &ffi_type_sint8;
-    case CType::CTYPES_UINT8:
-      return &ffi_type_uint8;
-    case CType::CTYPES_INT16:
-      return &ffi_type_sint16;
-    case CType::CTYPES_UINT16:
-      return &ffi_type_uint16;
-    case CType::CTYPES_INT32:
-      return &ffi_type_sint32;
-    case CType::CTYPES_UINT32:
-      return &ffi_type_uint32;
-    case CType::CTYPES_INT64:
-      return &ffi_type_sint64;
-    case CType::CTYPES_UINT64:
-      return &ffi_type_uint64;
-    case CType::CTYPES_FLOAT:
-      return &ffi_type_float;
-    case CType::CTYPES_DOUBLE:
-      return &ffi_type_double;
-    case CType::CTYPES_POINTER:
-      return &ffi_type_pointer;
-    case CType::CTYPES_STRING:
-      return &ffi_type_pointer;
-    case CType::CTYPES_WSTRING:
-      return &ffi_type_pointer;
-    case CType::CTYPES_CHAR:
-      return std::is_signed_v<char> ? &ffi_type_sint8 : &ffi_type_uint8;
-    case CType::CTYPES_WCHAR:
-      // wchar_t è 16-bit su Windows, 32-bit su Unix
-#ifdef _WIN32
-      return &ffi_type_uint16;
-#else
-      return &ffi_type_uint32;
-#endif
-    case CType::CTYPES_BOOL:
-      return &ffi_type_uint8;
-    case CType::CTYPES_SIZE_T:
-      return &ffi_type_pointer;  // size_t è tipicamente pointer-sized
-    case CType::CTYPES_SSIZE_T:
-      return &ffi_type_pointer;
-    case CType::CTYPES_LONG:
-      // long è 32-bit su Windows (LLP64), 64-bit su Unix 64-bit (LP64)
-#ifdef _WIN32
-      return &ffi_type_sint32;
-#else
-      return sizeof(long) == 8 ? &ffi_type_sint64 : &ffi_type_sint32;
-#endif
-    case CType::CTYPES_ULONG:
-#ifdef _WIN32
-      return &ffi_type_uint32;
-#else
-      return sizeof(unsigned long) == 8 ? &ffi_type_uint64 : &ffi_type_uint32;
-#endif
-    default:
-      return &ffi_type_void;
-  }
-}
-
 // ============================================================================
 // JSToC - Converte valore JS in bytes C
 // ============================================================================
 
 namespace {
 
-// Evita ToNumber() (che invoca napi_coerce_to_number — attraversamento V8
-// completo senza short-circuit) quando il valore è già un Number: la
-// conversione diretta salta la coercion path.
-inline Napi::Number AsNumberFast(const Napi::Value& v) {
-  return v.IsNumber() ? v.As<Napi::Number>() : v.ToNumber();
-}
-
-// Bit di un valore per un tipo intero: BigInt troncato, number intero
-// (mascherato), null/undefined 0, gli altri valori via ToNumber.
+// Bit di un valore intero: BigInt troncato, number intero mascherato o boolean.
 uint64_t IntegerBits(const Napi::Value& value) {
   if (value.IsBigInt()) {
     bool lossless;
     return value.As<Napi::BigInt>().Uint64Value(&lossless);
   }
-  if (value.IsNull() || value.IsUndefined()) {
-    return 0;
+  if (value.IsBoolean()) {
+    return value.As<Napi::Boolean>().Value() ? 1 : 0;
   }
-  const double d = AsNumberFast(value).DoubleValue();
+  if (!value.IsNumber()) {
+    throw Napi::TypeError::New(value.Env(), std::format("'{}' object cannot be interpreted as an integer", JSTypeName(value)));
+  }
+  const double d = value.As<Napi::Number>().DoubleValue();
   if (d >= -9223372036854775808.0 && d < 9223372036854775808.0) {
     if (const auto v = static_cast<int64_t>(d); static_cast<double>(v) == d) {
       return static_cast<uint64_t>(v);
@@ -115,11 +47,9 @@ uint64_t IntegerBitsFromDouble(const Napi::Value& value, double d) {
     throw Napi::TypeError::New(value.Env(), "'float' object cannot be interpreted as an integer");
   }
   constexpr double kTwo64 = 18446744073709551616.0;
-  double low = std::fmod(d, kTwo64);  // esatto
-  if (low < 0) {
-    low += kTwo64;
-  }
-  return static_cast<uint64_t>(low);
+  // Sommare 2^64 ai negativi piccoli arrotonderebbe al limite non convertibile.
+  const uint64_t magnitude = static_cast<uint64_t>(std::fmod(std::abs(d), kTwo64));
+  return d < 0 ? uint64_t{0} - magnitude : magnitude;
 }
 
 std::string JSTypeName(const Napi::Value& value) {
@@ -154,6 +84,25 @@ std::string JSTypeName(const Napi::Value& value) {
     }
   }
   return "object";
+}
+
+double RealFromJS(const Napi::Value& value) {
+  switch (value.Type()) {
+    case napi_number:
+      return value.As<Napi::Number>().DoubleValue();
+    case napi_boolean:
+      return value.As<Napi::Boolean>().Value() ? 1.0 : 0.0;
+    case napi_bigint: {
+      bool lossless;
+      const int64_t signed_value = value.As<Napi::BigInt>().Int64Value(&lossless);
+      if (lossless) return static_cast<double>(signed_value);
+      const uint64_t unsigned_value = value.As<Napi::BigInt>().Uint64Value(&lossless);
+      if (lossless) return static_cast<double>(unsigned_value);
+      throw Napi::RangeError::New(value.Env(), "BigInt out of range for a floating point argument");
+    }
+    default:
+      throw Napi::TypeError::New(value.Env(), std::format("must be real number, not {}", JSTypeName(value)));
+  }
 }
 
 namespace {
@@ -360,12 +309,12 @@ int JSToC(Napi::Value value, CType type, std::span<uint8_t> out) {
     }
 
     case CType::CTYPES_FLOAT: {
-      float val = static_cast<float>(AsNumberFast(value).FloatValue());
+      float val = static_cast<float>(RealFromJS(value));
       return StoreInto(out, val);
     }
 
     case CType::CTYPES_DOUBLE: {
-      double val = AsNumberFast(value).DoubleValue();
+      double val = RealFromJS(value);
       return StoreInto(out, val);
     }
 
@@ -382,8 +331,18 @@ int JSToC(Napi::Value value, CType type, std::span<uint8_t> out) {
         bool lossless;
         uint64_t addr = value.As<Napi::BigInt>().Uint64Value(&lossless);
         ptr = reinterpret_cast<void*>(addr);
+      } else if (value.IsBoolean()) {
+        ptr = reinterpret_cast<void*>(static_cast<uintptr_t>(value.As<Napi::Boolean>().Value()));
       } else if (value.IsNumber()) {
-        ptr = reinterpret_cast<void*>(static_cast<uintptr_t>(AsNumberFast(value).Int64Value()));
+        ptr = reinterpret_cast<void*>(static_cast<uintptr_t>(IntegerBitsFromDouble(value, value.As<Napi::Number>().DoubleValue())));
+      } else if (value.IsTypedArray()) {
+        const auto view = value.As<Napi::TypedArray>();
+        ptr = static_cast<uint8_t*>(view.ArrayBuffer().Data()) + view.ByteOffset();
+      } else if (value.IsDataView()) {
+        const auto view = value.As<Napi::DataView>();
+        ptr = static_cast<uint8_t*>(view.ArrayBuffer().Data()) + view.ByteOffset();
+      } else {
+        throw Napi::TypeError::New(value.Env(), std::format("'{}' object cannot be interpreted as ctypes.c_void_p", JSTypeName(value)));
       }
 
       return StoreInto(out, ptr);

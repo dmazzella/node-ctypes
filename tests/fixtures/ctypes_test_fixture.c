@@ -8,14 +8,76 @@
  */
 
 #include <errno.h>
+#include <stdbool.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <wchar.h>
 
 #ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #define FIXTURE_API __declspec(dllexport)
 #else
 #define FIXTURE_API __attribute__((visibility("default")))
+#endif
+
+FIXTURE_API int32_t fixture_global_value = 42;
+FIXTURE_API int32_t* fixture_global_pointer = &fixture_global_value;
+struct FixtureGlobalRecord {
+  int32_t value;
+  int32_t* pointer;
+};
+FIXTURE_API struct FixtureGlobalRecord fixture_global_record = {7, &fixture_global_value};
+FIXTURE_API void fixture_reset_global_pointer(void) {
+  fixture_global_record.pointer = &fixture_global_value;
+}
+FIXTURE_API void fixture_clear_global_pointer(void) {
+  fixture_global_record.pointer = NULL;
+}
+static int32_t fixture_increment(int32_t value) { return value + 1; }
+struct FixtureFunctionRecord {
+  int32_t (*function)(int32_t);
+};
+FIXTURE_API struct FixtureFunctionRecord fixture_global_function = {fixture_increment};
+
+#ifdef _WIN32
+static wchar_t fixture_unload_path[4096];
+FIXTURE_API int32_t fixture_set_unload_marker(const char* path) {
+  return MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, fixture_unload_path, 4096) > 0;
+}
+BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID reserved) {
+  (void)module;
+  (void)reserved;
+  if (reason == DLL_PROCESS_DETACH && fixture_unload_path[0]) {
+    HANDLE file = CreateFileW(fixture_unload_path, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file != INVALID_HANDLE_VALUE) {
+      DWORD written;
+      WriteFile(file, "unloaded", 8, &written, NULL);
+      CloseHandle(file);
+    }
+  }
+  return TRUE;
+}
+#else
+static char fixture_unload_path[4096];
+FIXTURE_API int32_t fixture_set_unload_marker(const char* path) {
+  const size_t size = strlen(path);
+  if (size >= sizeof(fixture_unload_path)) return 0;
+  memcpy(fixture_unload_path, path, size + 1);
+  return 1;
+}
+__attribute__((destructor)) static void fixture_on_unload(void) {
+  if (fixture_unload_path[0]) {
+    FILE* file = fopen(fixture_unload_path, "w");
+    if (file) {
+      fputs("unloaded", file);
+      fclose(file);
+    }
+  }
+}
 #endif
 
 #if defined(_MSC_VER) && !defined(__clang__)
@@ -28,6 +90,120 @@
 
 FIXTURE_API uintptr_t fixture_address(const void* pointer) {
   return (uintptr_t)pointer;
+}
+
+FIXTURE_API size_t fixture_echo_size_t(size_t value) {
+  return value;
+}
+
+FIXTURE_API int32_t fixture_benchmark_zero(void) {
+  return 7;
+}
+
+FIXTURE_API size_t fixture_string_length(const char* value) {
+  return strlen(value);
+}
+
+FIXTURE_API size_t fixture_wstring_length(const wchar_t* value) {
+  return wcslen(value);
+}
+
+#define FIXTURE_SCALAR(name, type) \
+  FIXTURE_API type fixture_scalar_##name(type value) { return value; } \
+  FIXTURE_API type fixture_scalar_##name##_tail(type value, const char* tail) { (void)tail; return value; } \
+  FIXTURE_API type fixture_callback_##name(type (*callback)(type), type value) { return callback(value); }
+
+FIXTURE_SCALAR(i8, int8_t)
+FIXTURE_SCALAR(u8, uint8_t)
+FIXTURE_SCALAR(i16, int16_t)
+FIXTURE_SCALAR(u16, uint16_t)
+FIXTURE_SCALAR(i32, int32_t)
+FIXTURE_SCALAR(u32, uint32_t)
+FIXTURE_SCALAR(i64, int64_t)
+FIXTURE_SCALAR(u64, uint64_t)
+FIXTURE_SCALAR(size, size_t)
+FIXTURE_SCALAR(ssize, intptr_t)
+FIXTURE_SCALAR(long, long)
+FIXTURE_SCALAR(ulong, unsigned long)
+FIXTURE_SCALAR(float, float)
+FIXTURE_SCALAR(double, double)
+FIXTURE_SCALAR(char, char)
+FIXTURE_SCALAR(wchar, wchar_t)
+FIXTURE_SCALAR(bool, bool)
+
+#undef FIXTURE_SCALAR
+
+FIXTURE_API double fixture_exact_mixed(int32_t a, double b, float c, int32_t d) {
+  return a + 2 * b + 3 * c + d;
+}
+
+FIXTURE_API uint64_t fixture_exact_u64_four(uint64_t a, uint64_t b, uint64_t c, uint64_t d) {
+  return a ^ b ^ c ^ d;
+}
+
+FIXTURE_API int32_t fixture_exact_fallback(int16_t a, int32_t b, uint64_t c) {
+  return a + b + (int32_t)c;
+}
+
+struct FixtureBoolBits {
+  bool first : 1;
+  bool second : 1;
+};
+
+FIXTURE_API uint8_t fixture_bool_bits(int32_t first, int32_t second) {
+  struct FixtureBoolBits value = {0};
+  value.first = first;
+  value.second = second;
+  uint8_t bytes = 0;
+  memcpy(&bytes, &value, sizeof(bytes));
+  return bytes;
+}
+
+FIXTURE_API int16_t fixture_variant_callback(int16_t (*callback)(int16_t), int16_t value) {
+  return callback(value);
+}
+
+FIXTURE_API int32_t fixture_scalar_callback(int32_t (*callback)(int32_t), int32_t value) {
+  return callback(value);
+}
+
+FIXTURE_API int32_t fixture_owner_check(const void* pointer, int32_t (*check)(void)) {
+  (void)pointer;
+  return check();
+}
+
+FIXTURE_API double fixture_nan_payload(void) {
+  const uint64_t bits = UINT64_C(0x7ff8000000001234);
+  double value;
+  memcpy(&value, &bits, sizeof(value));
+  return value;
+}
+
+FIXTURE_API uint32_t fixture_variadic_wchar(int32_t unused, ...) {
+  (void)unused;
+  va_list arguments;
+  va_start(arguments, unused);
+  const wchar_t* text = va_arg(arguments, const wchar_t*);
+  wchar_t first;
+  memcpy(&first, text, sizeof(first));
+  va_end(arguments);
+  return (uint32_t)first;
+}
+
+struct FixturePointerValue {
+  const void* value;
+};
+
+FIXTURE_API uintptr_t fixture_pointer_value(struct FixturePointerValue value) {
+  return (uintptr_t)value.value;
+}
+
+struct FixturePointerArrayValue {
+  const void* values[1];
+};
+
+FIXTURE_API uintptr_t fixture_pointer_array_value(struct FixturePointerArrayValue value) {
+  return (uintptr_t)value.values[0];
 }
 
 FIXTURE_API int32_t fixture_sum_int4(const int32_t values[4]) {
@@ -107,6 +283,34 @@ struct FixturePoint {
   int32_t y;
 };
 
+FIXTURE_API struct FixturePoint fixture_point_make(int32_t x, int32_t y) {
+  struct FixturePoint value = {x, y};
+  return value;
+}
+
+FIXTURE_API int32_t fixture_point_sum(struct FixturePoint value) {
+  return value.x + value.y;
+}
+
+FIXTURE_API int32_t fixture_point_callback(int32_t (*callback)(struct FixturePoint), int32_t x, int32_t y) {
+  struct FixturePoint value = {x, y};
+  return callback(value);
+}
+
+FIXTURE_API int32_t fixture_point_sum_extra(struct FixturePoint value, int32_t count, ...) {
+  int32_t result = value.x + value.y;
+  va_list arguments;
+  va_start(arguments, count);
+  for (int32_t i = 0; i < count; i++) result += va_arg(arguments, int32_t);
+  va_end(arguments);
+  return result;
+}
+
+FIXTURE_API struct FixturePoint fixture_point_make_tail(int32_t x, int32_t y, const char* tail) {
+  (void)tail;
+  return fixture_point_make(x, y);
+}
+
 struct FixturePolyline {
   int32_t count;
   struct FixturePoint points[2];
@@ -116,10 +320,43 @@ FIXTURE_API int32_t fixture_polyline_last_y(struct FixturePolyline value) {
   return value.points[value.count - 1].y;
 }
 
+FIXTURE_API struct FixturePolyline fixture_polyline_make(int32_t seed) {
+  struct FixturePolyline value = {2, {{seed, seed + 1}, {seed + 2, seed + 3}}};
+  return value;
+}
+
+struct FixtureReturnBlock {
+  int32_t values[96];
+};
+
+FIXTURE_API struct FixtureReturnBlock fixture_return_block_make(int32_t seed) {
+  struct FixtureReturnBlock value;
+  for (int i = 0; i < 96; i++) value.values[i] = seed + i;
+  return value;
+}
+
+union FixtureReturnArray {
+  int64_t scalar;
+  int32_t values[2];
+};
+
+FIXTURE_API union FixtureReturnArray fixture_return_union_make(int32_t first, int32_t second) {
+  union FixtureReturnArray value;
+  value.values[0] = first;
+  value.values[1] = second;
+  return value;
+}
+
 /* Output parameter (paramflags). */
 FIXTURE_API int32_t fixture_divmod(int32_t a, int32_t b, int32_t* remainder) {
   *remainder = a % b;
   return a / b;
+}
+
+FIXTURE_API int32_t fixture_divmod_pair(int32_t a, int32_t b, int32_t* quotient, int32_t* remainder) {
+  *quotient = a / b;
+  *remainder = a % b;
+  return 0;
 }
 
 /* Reentrancy: the callback runs while the arguments are still in use. */

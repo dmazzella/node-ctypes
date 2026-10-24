@@ -51,6 +51,10 @@ std::unique_ptr<Napi::FunctionReference> PersistentClass(Napi::Env env) {
 }
 
 CTypesAddon::CTypesAddon(Napi::Env env, Napi::Object exports) {
+  Napi::Object owners = env.Global().Get("WeakMap").As<Napi::Function>().New({});
+  errcheck_owners = Napi::Persistent(owners);
+  errcheck_owner_set = Napi::Persistent(owners.Get("set").As<Napi::Function>());
+  errcheck_owner_delete = Napi::Persistent(owners.Get("delete").As<Napi::Function>());
   if (const napi_node_version* node = Napi::VersionManagement::GetNodeVersion(env)) {
     napi_fast::buffer_info_checks_type = node->major > 20 || (node->major == 20 && node->minor >= 12);
   }
@@ -475,16 +479,6 @@ Napi::Value CTypesAddon::ReadWString(const Napi::CallbackInfo& info) {
   return WideToJS(env, std::wstring_view(aligned.data(), len));
 }
 
-Napi::Value CTypesAddon::AddressOf(const Napi::CallbackInfo& info) {
-  Napi::Env env = info.Env();
-  if (info.Length() < 1 || !info[0].IsBuffer()) {
-    Napi::TypeError::New(env, "addressOf requires a Buffer argument").ThrowAsJavaScriptException();
-    return env.Undefined();
-  }
-  void* ptr = info[0].As<Napi::Buffer<uint8_t>>().Data();
-  return Napi::BigInt::New(env, reinterpret_cast<uint64_t>(ptr));
-}
-
 // Memoria di un argomento di memmove: Buffer/TypedArray/ArrayBuffer (con
 // controllo dei limiti) oppure un indirizzo BigInt/number non nullo.
 static uint8_t* MemoryArgument(Napi::Env env, const Napi::Value& value, size_t size, const char* name) {
@@ -524,6 +518,15 @@ static uint8_t* MemoryArgument(Napi::Env env, const Napi::Value& value, size_t s
   return reinterpret_cast<uint8_t*>(address);
 }
 
+Napi::Value CTypesAddon::AddressOf(const Napi::CallbackInfo& info) {
+  const Napi::Env env = info.Env();
+  if (info.Length() < 1 || !(info[0].IsBuffer() || info[0].IsTypedArray() || info[0].IsDataView() || info[0].IsArrayBuffer())) {
+    throw Napi::TypeError::New(env, "addressOf requires a Buffer, typed view or ArrayBuffer");
+  }
+  const auto address = reinterpret_cast<uintptr_t>(MemoryArgument(env, info[0], 0, "addressOf"));
+  return Napi::BigInt::New(env, static_cast<uint64_t>(address));
+}
+
 // memmove(dst, src, size): copia tra Buffer e indirizzi senza creare Buffer
 // esterni, l'unico modo di leggere/scrivere memoria nativa dove sono vietati.
 Napi::Value CTypesAddon::Memmove(const Napi::CallbackInfo& info) {
@@ -532,14 +535,16 @@ Napi::Value CTypesAddon::Memmove(const Napi::CallbackInfo& info) {
     Napi::TypeError::New(env, "memmove(dst, src, size) requires a numeric size").ThrowAsJavaScriptException();
     return env.Undefined();
   }
-  int64_t size_raw = info[2].As<Napi::Number>().Int64Value();
-  if (size_raw < 0) {
-    Napi::RangeError::New(env, "memmove: size must be non-negative").ThrowAsJavaScriptException();
-    return env.Undefined();
+  const double size_raw = info[2].As<Napi::Number>().DoubleValue();
+  if (!std::isfinite(size_raw) || size_raw < 0 || std::floor(size_raw) != size_raw ||
+      size_raw > 9007199254740991.0 || size_raw > static_cast<double>(SIZE_MAX)) {
+    throw Napi::RangeError::New(env, "memmove: size must be a non-negative safe integer");
   }
   size_t size = static_cast<size_t>(size_raw);
   if (size == 0) {
-    return env.Undefined();
+    if (info[0].IsNull() || (info[0].IsBigInt() && info[0].As<Napi::BigInt>().WordCount() == 0) ||
+        (info[0].IsNumber() && info[0].As<Napi::Number>().DoubleValue() == 0)) return Napi::BigInt::New(env, uint64_t{0});
+    return Napi::BigInt::New(env, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(MemoryArgument(env, info[0], 0, "dst"))));
   }
   uint8_t* dst = MemoryArgument(env, info[0], size, "dst");
   if (dst == nullptr) {
@@ -550,7 +555,7 @@ Napi::Value CTypesAddon::Memmove(const Napi::CallbackInfo& info) {
     return env.Undefined();
   }
   memmove(dst, src, size);
-  return env.Undefined();
+  return Napi::BigInt::New(env, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(dst)));
 }
 
 // readMemory / writeMemory(buf, offset, length, address): copia `length` byte

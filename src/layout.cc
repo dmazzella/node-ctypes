@@ -10,6 +10,22 @@ StructInfo::StructInfo(bool is_union) : is_union_(is_union), size_(0), alignment
 
 StructInfo::~StructInfo() = default;
 
+void StructInfo::EnsureMutable() const {
+  if (finalized_) {
+    throw std::logic_error(kFinalizedError);
+  }
+}
+
+void StructInfo::Finalize() {
+  if (finalized_) return;
+  CalculateLayout();
+  finalized_ = true;
+  for (const auto& field : fields_) {
+    if (field.struct_type) field.struct_type->Finalize();
+    if (field.array_type) field.array_type->Finalize();
+  }
+}
+
 size_t StructInfo::GetTypeAlignment(CType type, std::shared_ptr<StructInfo> nested, std::shared_ptr<ArrayInfo> array) {
   if (array) {
     return array->GetAlignment();
@@ -52,6 +68,11 @@ size_t StructInfo::GetTypeAlignment(CType type, std::shared_ptr<StructInfo> nest
 }
 
 void StructInfo::AddField(const std::string& name, CType type, std::shared_ptr<StructInfo> nested, bool is_anonymous) {
+  EnsureMutable();
+  if (nested.get() == this) {
+    throw std::invalid_argument("A structure cannot contain itself by value");
+  }
+  if (nested) nested->Finalize();
   FieldInfo field;
   field.name = name;
   field.type = type;
@@ -69,6 +90,8 @@ void StructInfo::AddField(const std::string& name, CType type, std::shared_ptr<S
 }
 
 void StructInfo::AddArrayField(const std::string& name, std::shared_ptr<ArrayInfo> array_type) {
+  EnsureMutable();
+  array_type->Finalize();
   FieldInfo field;
   field.name = name;
   field.type = CType::CTYPES_ARRAY;
@@ -81,6 +104,7 @@ void StructInfo::AddArrayField(const std::string& name, std::shared_ptr<ArrayInf
 }
 
 void StructInfo::CalculateLayout() {
+  EnsureMutable();
   if (fields_.empty()) {
     size_ = 0;
     alignment_ = min_alignment_;
@@ -197,6 +221,7 @@ ffi_type* SlotType(SlotClass slot, size_t slot_size) {
 #endif
 
 ffi_type* StructInfo::GetFFIType() {
+  Finalize();
   if (ffi_type_) {
     return ffi_type_.get();
   }
@@ -249,7 +274,8 @@ ffi_type* StructInfo::GetFFIType() {
   return ffi_type_.get();
 }
 
-bool StructInfo::JSToStruct(Napi::Env env, Napi::Object obj, std::span<uint8_t> buffer) {
+bool StructInfo::JSToStruct(Napi::Env env, Napi::Object obj, std::span<uint8_t> buffer,
+                          std::vector<Napi::ObjectReference>* owners) {
   if (buffer.size() < size_) {
     Napi::TypeError::New(env, "Buffer too small for struct").ThrowAsJavaScriptException();
     return false;
@@ -269,14 +295,15 @@ bool StructInfo::JSToStruct(Napi::Env env, Napi::Object obj, std::span<uint8_t> 
       if (value.IsUndefined()) {
         continue;  // campo opzionale
       }
-      if (!field.array_type->JSToArray(env, value, field_bytes)) {
+      if (owners && value.IsObject()) owners->push_back(Napi::Persistent(value.As<Napi::Object>()));
+      if (!field.array_type->JSToArray(env, value, field_bytes, owners)) {
         return false;
       }
     } else if (field.struct_type) {
       // Nested struct
       if (field.is_anonymous) {
         // Anonymous field: leggi i suoi campi direttamente dall'oggetto
-        if (!field.struct_type->JSToStruct(env, obj, field_bytes)) {
+        if (!field.struct_type->JSToStruct(env, obj, field_bytes, owners)) {
           return false;
         }
       } else {
@@ -288,7 +315,8 @@ bool StructInfo::JSToStruct(Napi::Env env, Napi::Object obj, std::span<uint8_t> 
           Napi::TypeError::New(env, std::format("Field {} must be an object", field.name)).ThrowAsJavaScriptException();
           return false;
         }
-        if (!field.struct_type->JSToStruct(env, value.As<Napi::Object>(), field_bytes)) {
+        if (owners) owners->push_back(Napi::Persistent(value.As<Napi::Object>()));
+        if (!field.struct_type->JSToStruct(env, value.As<Napi::Object>(), field_bytes, owners)) {
           return false;
         }
       }
@@ -298,6 +326,7 @@ bool StructInfo::JSToStruct(Napi::Env env, Napi::Object obj, std::span<uint8_t> 
       if (value.IsUndefined()) {
         continue;  // campo opzionale
       }
+      if (owners && value.IsObject()) owners->push_back(Napi::Persistent(value.As<Napi::Object>()));
       if (JSToC(value, field.type, field_bytes) < 0) {
         return false;
       }
@@ -340,6 +369,7 @@ void StructInfo::WriteFieldsTo(Napi::Env env, const void* buffer, Napi::Object o
 
 ArrayInfo::ArrayInfo(CType element_type, size_t count, std::shared_ptr<StructInfo> element_struct)
   : element_type_(element_type), count_(count), element_struct_(element_struct) {
+  Finalize();
   if (element_struct) {
     element_size_ = element_struct->GetSize();
     alignment_ = element_struct->GetAlignment();
@@ -390,7 +420,12 @@ ArrayInfo::ArrayInfo(CType element_type, size_t count, std::shared_ptr<StructInf
 
 ArrayInfo::~ArrayInfo() = default;
 
+void ArrayInfo::Finalize() {
+  if (element_struct_) element_struct_->Finalize();
+}
+
 ffi_type* ArrayInfo::GetFFIType() {
+  Finalize();
   if (ffi_type_) {
     return ffi_type_.get();
   }
@@ -423,7 +458,8 @@ ffi_type* ArrayInfo::GetFFIType() {
   return ffi_type_.get();
 }
 
-bool ArrayInfo::JSToArray(Napi::Env env, Napi::Value val, std::span<uint8_t> buffer) {
+bool ArrayInfo::JSToArray(Napi::Env env, Napi::Value val, std::span<uint8_t> buffer,
+                        std::vector<Napi::ObjectReference>* owners) {
   if (buffer.size() < size_) {
     Napi::TypeError::New(env, "Buffer too small for array").ThrowAsJavaScriptException();
     return false;
@@ -437,12 +473,13 @@ bool ArrayInfo::JSToArray(Napi::Env env, Napi::Value val, std::span<uint8_t> buf
 
     for (size_t i = 0; i < copy_len; i++) {
       Napi::Value elem = arr.Get(static_cast<uint32_t>(i));
+      if (owners && elem.IsObject()) owners->push_back(Napi::Persistent(elem.As<Napi::Object>()));
       const std::span<uint8_t> elem_bytes = bytes.subspan(i * element_size_, element_size_);
 
       if (element_struct_) {
         // Element è struct
         if (elem.IsObject()) {
-          if (!element_struct_->JSToStruct(env, elem.As<Napi::Object>(), elem_bytes)) {
+          if (!element_struct_->JSToStruct(env, elem.As<Napi::Object>(), elem_bytes, owners)) {
             return false;
           }
         } else if (elem.IsBuffer()) {

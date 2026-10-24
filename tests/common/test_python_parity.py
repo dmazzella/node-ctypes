@@ -74,6 +74,21 @@ class TestPythonParity(unittest.TestCase):
     def test_default_restype_c_int(self):
         self.assertEqual(self.libc.abs(-5), 5)
 
+    def test_none_restype_returns_none(self):
+        srand = self.libc.srand
+        srand.argtypes = [ctypes.c_uint32]
+        srand.restype = None
+        self.assertIsNone(srand(2))
+        prototype = CFUNCTYPE(None, ctypes.c_uint32)
+        self.assertIsNone(prototype(("srand", self.libc))(3))
+
+    def test_prototype_as_parameter(self):
+        class Argument:
+            _as_parameter_ = -9
+
+        prototype = CFUNCTYPE(c_int, c_int)
+        self.assertEqual(prototype(("abs", self.libc))(Argument()), 9)
+
     # c_char / c_wchar
 
     def test_char_values(self):

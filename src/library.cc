@@ -1,5 +1,7 @@
 #include "library.h"
 
+#include <cstdio>
+
 #include "addon.h"
 #include "function.h"
 
@@ -129,6 +131,31 @@ bool CloseSharedLibrary(void* handle) {
 #endif
 }
 
+LibraryHandle::~LibraryHandle() {
+  if (handle_ && owned_ && !CloseSharedLibrary(handle_)) {
+#ifdef _WIN32
+    std::fprintf(stderr, "node-ctypes: deferred FreeLibrary failed (%lu)\n", static_cast<unsigned long>(::GetLastError()));
+#else
+    const char* error = dlerror();
+    std::fprintf(stderr, "node-ctypes: deferred dlclose failed: %s\n", error ? error : "unknown error");
+#endif
+  }
+}
+
+bool LibraryHandle::Close(std::string& error) {
+  if (handle_ && owned_ && !CloseSharedLibrary(handle_)) {
+#ifdef _WIN32
+    error = WindowsError("FreeLibrary", ::GetLastError());
+#else
+    const char* message = dlerror();
+    error = message ? message : "dlclose failed";
+#endif
+    return false;
+  }
+  handle_ = nullptr;
+  return true;
+}
+
 // Library class implementation
 Napi::Function Library::GetClass(Napi::Env env) {
   return DefineClass(env, "Library",
@@ -136,6 +163,7 @@ Napi::Function Library::GetClass(Napi::Env env) {
                        InstanceMethod("func", &Library::GetFunction),
                        InstanceMethod("callback", &Library::GetCallback),
                        InstanceMethod("symbol", &Library::GetSymbol),
+                       InstanceMethod("_symbolView", &Library::GetSymbolView),
                        InstanceMethod("close", &Library::Close),
                        InstanceAccessor("path", &Library::GetPath, nullptr),
                        InstanceAccessor("loaded", &Library::GetIsLoaded, nullptr),
@@ -143,7 +171,8 @@ Napi::Function Library::GetClass(Napi::Env env) {
 }
 
 Library::Library(const Napi::CallbackInfo& info)
-  : Napi::ObjectWrap<Library>(info), handle_(nullptr), is_loaded_(false) {
+  : Napi::ObjectWrap<Library>(info), handle_(nullptr), is_loaded_(false),
+    handle_owner_(std::make_shared<LibraryHandle>()) {
   Napi::Env env = info.Env();
   info.This().As<Napi::Object>().TypeTag(&kTypeTag);
 
@@ -180,8 +209,10 @@ Library::Library(const Napi::CallbackInfo& info)
   // Se path è vuoto, carica l'eseguibile corrente (RTLD_DEFAULT su Unix)
 #ifdef _WIN32
   handle_ = path_.empty() ? static_cast<void*>(GetModuleHandleW(nullptr)) : LoadSharedLibrary(path_, error, mode);
+  handle_owner_->Set(handle_, !path_.empty());
 #else
   handle_ = LoadSharedLibrary(path_, error, mode);
+  handle_owner_->Set(handle_, true);
 #endif
 
   if (!handle_) {
@@ -194,11 +225,7 @@ Library::Library(const Napi::CallbackInfo& info)
   is_loaded_ = true;
 }
 
-Library::~Library() {
-  if (is_loaded_ && handle_ && !path_.empty()) {
-    CloseSharedLibrary(handle_);
-  }
-}
+Library::~Library() = default;
 
 Napi::Value Library::GetFunction(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
@@ -303,13 +330,33 @@ Napi::Value Library::Close(const Napi::CallbackInfo& info) {
     return env.Undefined();
   }
 
-  if (is_loaded_ && handle_ && !path_.empty()) {
-    CloseSharedLibrary(handle_);
+  if (is_loaded_) {
+    if (handle_owner_.use_count() == 1) {
+      std::string error;
+      if (!handle_owner_->Close(error)) {
+        throw Napi::Error::New(env, error);
+      }
+    }
+    handle_owner_.reset();
     handle_ = nullptr;
     is_loaded_ = false;
   }
 
   return env.Undefined();
+}
+
+Napi::Value Library::GetSymbolView(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  Napi::Value address = GetSymbol(info);
+  if (env.IsExceptionPending()) return env.Undefined();
+  auto owner = std::make_unique<std::shared_ptr<LibraryHandle>>(handle_owner_);
+  auto token = Napi::External<std::shared_ptr<LibraryHandle>>::New(
+    env, owner.get(), [](Napi::Env, std::shared_ptr<LibraryHandle>* lease) { delete lease; });
+  owner.release();
+  Napi::Object view = Napi::Object::New(env);
+  view.Set("address", address);
+  view.Set("owner", token);
+  return view;
 }
 
 Napi::Value Library::GetCallback(const Napi::CallbackInfo& info) {
@@ -331,6 +378,10 @@ Napi::Value Library::GetCallback(const Napi::CallbackInfo& info) {
   args.push_back(info[2]);  // jsFunction
   args.push_back(info[0]);  // returnType
   args.push_back(info[1]);  // argTypes
+  if (info.Length() > 3) {
+    args.push_back(Napi::String::New(env, "default"));
+    args.push_back(info[3]);
+  }
 
   // Ottieni il costruttore Callback dall'addon
   CTypesAddon* addon = env.GetInstanceData<CTypesAddon>();

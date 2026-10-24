@@ -9,6 +9,7 @@
 /tests/python
 /tests/.pytest_cache
 /tests/node_modules
+/tests/benchmarks/results/
 /tests/common/__pycache__
 /tests/windows/__pycache__
 /examples/cross-platform/python/__pycache__

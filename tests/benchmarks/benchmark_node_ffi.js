@@ -1,533 +1,104 @@
-// Benchmark: node-ctypes vs node:ffi (Node.js >= 26 built-in FFI)
-// Run: node --experimental-ffi tests/benchmarks/benchmark_node_ffi.js
-//
-// node:ffi is experimental and gated behind the --experimental-ffi flag.
-// Docs: https://nodejs.org/api/ffi.html
+import assert from "node:assert/strict";
+import * as c from "node-ctypes";
+import { fixturePath, runComparison } from "./runner.js";
 
-import * as ctypes from "node-ctypes";
-import os from "node:os";
-
-const isWindows = os.platform() === "win32";
-const platform = os.platform();
-
-// node:ffi is loaded dynamically so we can print a friendly error when the
-// --experimental-ffi flag is missing or the runtime predates Node 26.
-let ffiMod;
+let ffi;
 try {
-  ffiMod = await import("node:ffi");
-} catch (err) {
-  console.error("╔════════════════════════════════════════════════════════════════╗");
-  console.error("║  node:ffi non disponibile.                                     ║");
-  console.error("╚════════════════════════════════════════════════════════════════╝");
-  console.error(`\n  ${err.message}\n`);
-  console.error("  Richiede Node.js >= 26 ed esecuzione con il flag:");
-  console.error("    node --experimental-ffi tests/benchmarks/benchmark_node_ffi.js\n");
-  process.exit(1);
-}
-// Core modules expose named exports on the namespace; fall back to default.
-const ffi = ffiMod.DynamicLibrary ? ffiMod : ffiMod.default;
-
-// Platform-specific library names
-const LIBC = isWindows ? "msvcrt.dll" : platform === "darwin" ? "libc.dylib" : "libc.so.6";
-const SYSTEM_LIB = isWindows ? "kernel32.dll" : null;
-
-// size_t / pointer-sized integer type for node:ffi (64-bit -> u64, else u32).
-const is64bit = ["arm64", "x64", "ppc64", "s390x", "loong64", "riscv64"].includes(process.arch);
-const FFI_SIZE_T = is64bit ? "u64" : "u32";
-const sizeArg = (n) => (is64bit ? BigInt(n) : n);
-
-// Calling a variadic function through a fixed signature is only ABI-safe where
-// variadic and named arguments share the same calling convention. It is NOT
-// safe on arm64 macOS (variadic args are passed on the stack), so we skip it
-// there to avoid corrupting memory or crashing the process.
-const ffiVariadicSafe = !(platform === "darwin" && process.arch === "arm64");
-
-console.log("╔════════════════════════════════════════════════════════════════╗");
-console.log("║         FFI Performance Benchmark: node-ctypes vs node:ffi     ║");
-console.log("╚════════════════════════════════════════════════════════════════╝\n");
-
-const results = [];
-
-const formatter = new Intl.NumberFormat("en-US", {
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 0,
-});
-
-function benchmark(name, ctypesTime, ffiTime, iterations) {
-  if (ffiTime == null) {
-    results.push({ name, skipped: true });
-    console.log(`  Iterations: ${iterations.toLocaleString()}`);
-    console.log(`  node-ctypes: ${ctypesTime.toFixed(2)}ms (${formatter.format((iterations / ctypesTime) * 1000)} ops/sec)`);
-    console.log(`  node:ffi:    N/A (non supportato)\n`);
-    return;
+  ffi = await import("node:ffi");
+} catch (error) {
+  if (error.code === "ERR_UNKNOWN_BUILTIN_MODULE") {
+    throw new Error("node:ffi requires Node 26+ and --experimental-ffi. Run npm run bench:ffi.", { cause: error });
   }
+  throw error;
+}
 
-  const ratio = ctypesTime / ffiTime;
-  const faster = ratio < 1 ? "node-ctypes" : "node:ffi";
-  const diff = ratio < 1 ? (1 / ratio).toFixed(2) : ratio.toFixed(2);
+const file = fixturePath();
+const lib = new c.CDLL(file);
+const other = new ffi.DynamicLibrary(file);
+let callback;
+let otherCallback;
 
-  results.push({
-    name,
-    ctypes: ctypesTime,
-    ffi: ffiTime,
-    ratio,
-    winner: faster,
+try {
+  const cases = [];
+  const add = (name, group, representation, ctypes, other, expected) =>
+    cases.push({ name, group, representation, ctypes, other, expected });
+  const zero = lib.func("fixture_benchmark_zero", c.c_int32, []);
+  const otherZero = other.getFunction("fixture_benchmark_zero", { return: "i32", arguments: [] });
+  add("zero arguments", "Synchronous calls", "number", () => zero(), () => otherZero(), 7);
+  // Separate call sites keep V8 feedback independent for each signature.
+  const i8 = lib.func("fixture_scalar_i8", c.c_int8, [c.c_int8]);
+  const otherI8 = other.getFunction("fixture_scalar_i8", { return: "i8", arguments: ["i8"] });
+  add("echo i8 (number)", "Synchronous calls", "number", () => i8(-7), () => otherI8(-7), -7);
+  const i32 = lib.func("fixture_scalar_i32", c.c_int32, [c.c_int32]);
+  const otherI32 = other.getFunction("fixture_scalar_i32", { return: "i32", arguments: ["i32"] });
+  add("echo i32 (number)", "Synchronous calls", "number", () => i32(-7), () => otherI32(-7), -7);
+  const u32 = lib.func("fixture_scalar_u32", c.c_uint32, [c.c_uint32]);
+  const otherU32 = other.getFunction("fixture_scalar_u32", { return: "u32", arguments: ["u32"] });
+  add("echo u32 (number)", "Synchronous calls", "number", () => u32(0xffffffff), () => otherU32(0xffffffff), 0xffffffff);
+  const i64 = lib.func("fixture_scalar_i64", c.c_int64, [c.c_int64]);
+  const otherI64 = other.getFunction("fixture_scalar_i64", { return: "i64", arguments: ["i64"] });
+  const wide = 2n ** 60n + 7n;
+  add("echo i64 (bigint)", "Synchronous calls", "bigint", () => i64(wide), () => otherI64(wide), wide);
+  const float = lib.func("fixture_scalar_float", c.c_float, [c.c_float]);
+  const otherFloat = other.getFunction("fixture_scalar_float", { return: "f32", arguments: ["f32"] });
+  add("echo float (number)", "Synchronous calls", "number", () => float(1.5), () => otherFloat(1.5), 1.5);
+  const double = lib.func("fixture_scalar_double", c.c_double, [c.c_double]);
+  const otherDouble = other.getFunction("fixture_scalar_double", { return: "f64", arguments: ["f64"] });
+  add("echo double (number)", "Synchronous calls", "number", () => double(1.5), () => otherDouble(1.5), 1.5);
+  const mixed = lib.func("fixture_exact_mixed", c.c_double, [c.c_int32, c.c_double, c.c_float, c.c_int32]);
+  const otherMixed = other.getFunction("fixture_exact_mixed", { return: "f64", arguments: ["i32", "f64", "f32", "i32"] });
+  add("mixed arguments (i32,f64,f32,i32)", "Synchronous calls", "number",
+    () => mixed(-7, 1.5, 2.25, 8), () => otherMixed(-7, 1.5, 2.25, 8), 10.75);
+
+  const sizeType = c.sizeof(c.c_size_t) === 8 ? "u64" : "u32";
+  const length = lib.func("fixture_string_length", c.c_size_t, [c.c_char_p]);
+  const otherLength = other.getFunction("fixture_string_length", { return: sizeType, arguments: ["string"] });
+  for (const size of [16, 4096]) {
+    const text = "x".repeat(size);
+    add(`string length ${size} B -> number`, "Strings and buffers", "number",
+      () => Number(length(text)), () => Number(otherLength(text)), size);
+  }
+  const buffer = Buffer.from(new Int32Array([1, 2, 3, 4]).buffer);
+  const sum = lib.func("fixture_sum_int4", c.c_int32, [c.c_void_p]);
+  const otherSum = other.getFunction("fixture_sum_int4", { return: "i32", arguments: ["buffer"] });
+  add("buffer argument (4 x i32)", "Strings and buffers", "number", () => sum(buffer), () => otherSum(buffer), 10);
+
+  class Fields extends c.Structure {
+    static _fields_ = [["x", c.c_int32], ["y", c.c_int32]];
+  }
+  const fields = new Fields(10, 20);
+  const otherFields = Buffer.alloc(8);
+  otherFields.writeInt32LE(10, 0);
+  otherFields.writeInt32LE(20, 4);
+  const pointer = ffi.getRawPointer(otherFields);
+  add("read two i32 fields", "Memory access", "number",
+    () => fields.x + fields.y, () => ffi.getInt32(pointer, 0) + ffi.getInt32(pointer, 4), 30);
+
+  callback = c.callback((value) => value + 1, c.c_int32, [c.c_int32]);
+  otherCallback = other.registerCallback({ return: "i32", arguments: ["i32"] }, (value) => value + 1);
+  const invoke = lib.func("fixture_scalar_callback", c.c_int32, [c.c_void_p, c.c_int32]);
+  const otherInvoke = other.getFunction("fixture_scalar_callback", { return: "i32", arguments: ["pointer", "i32"] });
+  add("C -> JS callback (i32)", "Callbacks", "number",
+    () => invoke(callback, 7), () => otherInvoke(otherCallback, 7), 8);
+
+  await runComparison("node:ffi", cases, {
+    externalBuffers: c.EXTERNAL_BUFFERS,
+    notes: [
+      "Both libraries call the same C fixture with matching native signatures.",
+      "String lengths are normalized to Number; BigInt-to-Number conversion is included for both libraries.",
+      "Wide i64 values return BigInt in both APIs. Callback registration is outside the timed loop.",
+    ],
+    unsupported: [
+      "aggregate values, variadic signatures and async calls: no equivalent documented node:ffi API.",
+      "Variadic functions are not emulated with fixed signatures.",
+    ],
   });
-
-  console.log(`  Iterations: ${iterations.toLocaleString()}`);
-  console.log(`  node-ctypes: ${ctypesTime.toFixed(2)}ms (${formatter.format((iterations / ctypesTime) * 1000)} ops/sec)`);
-  console.log(`  node:ffi:    ${ffiTime.toFixed(2)}ms (${formatter.format((iterations / ffiTime) * 1000)} ops/sec)`);
-  console.log(`  Winner: ${faster} (${diff}x faster)\n`);
+  // Read the owner after timing so the raw pointer stays valid throughout.
+  assert.equal(otherFields.readInt32LE(0), 10);
+  assert.equal(otherFields.readInt32LE(4), 20);
+} finally {
+  callback?.release();
+  if (otherCallback !== undefined) other.unregisterCallback(otherCallback);
+  other.close();
+  lib.close();
 }
-
-function benchmark_internal(name, time1, time2, label1, label2, iterations) {
-  const ratio = time1 / time2;
-  const faster = ratio < 1 ? label1 : label2;
-  const diff = ratio < 1 ? (1 / ratio).toFixed(2) : ratio.toFixed(2);
-
-  console.log(`  Iterations: ${iterations.toLocaleString()}`);
-  console.log(`  ${label1}: ${time1.toFixed(2)}ms (${formatter.format((iterations / time1) * 1000)} ops/sec)`);
-  console.log(`  ${label2}: ${time2.toFixed(2)}ms (${formatter.format((iterations / time2) * 1000)} ops/sec)`);
-  console.log(`  Winner: ${faster} (${diff}x faster)\n`);
-}
-
-// ============================================================================
-// Setup
-// ============================================================================
-
-const ctypes_libc = new ctypes.CDLL(LIBC);
-const ctypes_system = SYSTEM_LIB ? new ctypes.CDLL(SYSTEM_LIB) : null;
-
-const ffi_libc = new ffi.DynamicLibrary(LIBC);
-const ffi_system = SYSTEM_LIB ? new ffi.DynamicLibrary(SYSTEM_LIB) : null;
-
-// ============================================================================
-// Benchmark 1: Simple function calls (abs)
-// ============================================================================
-
-console.log("┌─────────────────────────────────────────────────────────────────┐");
-console.log("│ Benchmark 1: Simple int32 function - abs(-42)                   │");
-console.log("└─────────────────────────────────────────────────────────────────┘");
-
-{
-  const ctypes_abs = ctypes_libc.func("abs", ctypes.c_int32, [ctypes.c_int32]);
-  const ffi_abs = ffi_libc.getFunction("abs", { return: "i32", arguments: ["i32"] });
-
-  const iterations = 1_000_000;
-
-  // Warmup
-  for (let i = 0; i < 10000; i++) {
-    ctypes_abs(-42);
-    ffi_abs(-42);
-  }
-
-  let start = performance.now();
-  for (let i = 0; i < iterations; i++) {
-    ctypes_abs(-42);
-  }
-  const ctypes_time = performance.now() - start;
-
-  start = performance.now();
-  for (let i = 0; i < iterations; i++) {
-    ffi_abs(-42);
-  }
-  const ffi_time = performance.now() - start;
-
-  benchmark("abs(int32)", ctypes_time, ffi_time, iterations);
-}
-
-// ============================================================================
-// Benchmark 2: String functions (strlen)
-// ============================================================================
-
-console.log("┌─────────────────────────────────────────────────────────────────┐");
-console.log("│ Benchmark 2: String parameter - strlen(str)                     │");
-console.log("└─────────────────────────────────────────────────────────────────┘");
-
-{
-  const ctypes_strlen = ctypes_libc.func("strlen", ctypes.c_size_t, [ctypes.c_char_p]);
-  const ffi_strlen = ffi_libc.getFunction("strlen", { return: FFI_SIZE_T, arguments: ["string"] });
-
-  const testString = "Hello, World! This is a test string for benchmarking.";
-  const iterations = 500_000;
-
-  // Warmup
-  for (let i = 0; i < 1000; i++) {
-    ctypes_strlen(testString);
-    ffi_strlen(testString);
-  }
-
-  let start = performance.now();
-  for (let i = 0; i < iterations; i++) {
-    ctypes_strlen(testString);
-  }
-  const ctypes_time = performance.now() - start;
-
-  start = performance.now();
-  for (let i = 0; i < iterations; i++) {
-    ffi_strlen(testString);
-  }
-  const ffi_time = performance.now() - start;
-
-  benchmark("strlen(string)", ctypes_time, ffi_time, iterations);
-}
-
-// ============================================================================
-// Benchmark 3: Floating point (sqrt)
-// ============================================================================
-
-console.log("┌─────────────────────────────────────────────────────────────────┐");
-console.log("│ Benchmark 3: Floating point - sqrt(double)                      │");
-console.log("└─────────────────────────────────────────────────────────────────┘");
-
-{
-  const ctypes_sqrt = ctypes_libc.func("sqrt", ctypes.c_double, [ctypes.c_double]);
-  const ffi_sqrt = ffi_libc.getFunction("sqrt", { return: "f64", arguments: ["f64"] });
-
-  const iterations = 500_000;
-
-  // Warmup
-  for (let i = 0; i < 1000; i++) {
-    ctypes_sqrt(144.0);
-    ffi_sqrt(144.0);
-  }
-
-  let start = performance.now();
-  for (let i = 0; i < iterations; i++) {
-    ctypes_sqrt(144.0);
-  }
-  const ctypes_time = performance.now() - start;
-
-  start = performance.now();
-  for (let i = 0; i < iterations; i++) {
-    ffi_sqrt(144.0);
-  }
-  const ffi_time = performance.now() - start;
-
-  benchmark("sqrt(double)", ctypes_time, ffi_time, iterations);
-}
-
-// ============================================================================
-// Benchmark 4: No-argument function (GetTickCount/time)
-// ============================================================================
-
-console.log("┌─────────────────────────────────────────────────────────────────┐");
-if (isWindows) {
-  console.log("│ Benchmark 4: No arguments - GetTickCount()                      │");
-} else {
-  console.log("│ Benchmark 4: No arguments - time(NULL)                          │");
-}
-console.log("└─────────────────────────────────────────────────────────────────┘");
-
-if (isWindows) {
-  const ctypes_GetTickCount = ctypes_system.func("GetTickCount", ctypes.c_uint32, []);
-  const ffi_GetTickCount = ffi_system.getFunction("GetTickCount", { return: "u32", arguments: [] });
-
-  const iterations = 1_000_000;
-
-  // Warmup
-  for (let i = 0; i < 1000; i++) {
-    ctypes_GetTickCount();
-    ffi_GetTickCount();
-  }
-
-  let start = performance.now();
-  for (let i = 0; i < iterations; i++) {
-    ctypes_GetTickCount();
-  }
-  const ctypes_time = performance.now() - start;
-
-  start = performance.now();
-  for (let i = 0; i < iterations; i++) {
-    ffi_GetTickCount();
-  }
-  const ffi_time = performance.now() - start;
-
-  benchmark("GetTickCount()", ctypes_time, ffi_time, iterations);
-} else {
-  const ctypes_time_fn = ctypes_libc.func("time", ctypes.c_int64, [ctypes.c_void_p]);
-  const ffi_time_fn = ffi_libc.getFunction("time", { return: "i64", arguments: ["pointer"] });
-
-  const iterations = 1_000_000;
-
-  // Warmup
-  for (let i = 0; i < 1000; i++) {
-    ctypes_time_fn(null);
-    ffi_time_fn(null);
-  }
-
-  let start = performance.now();
-  for (let i = 0; i < iterations; i++) {
-    ctypes_time_fn(null);
-  }
-  const ctypes_elapsed = performance.now() - start;
-
-  start = performance.now();
-  for (let i = 0; i < iterations; i++) {
-    ffi_time_fn(null);
-  }
-  const ffi_elapsed = performance.now() - start;
-
-  benchmark("time(NULL)", ctypes_elapsed, ffi_elapsed, iterations);
-}
-
-// ============================================================================
-// Benchmark 5: Multiple arguments
-// ============================================================================
-
-console.log("┌─────────────────────────────────────────────────────────────────┐");
-console.log("│ Benchmark 5: Multiple arguments - memset(ptr, val, size)        │");
-console.log("└─────────────────────────────────────────────────────────────────┘");
-
-{
-  const ctypes_memset = ctypes_libc.func("memset", ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_int32, ctypes.c_size_t]);
-  const ffi_memset = ffi_libc.getFunction("memset", { return: "pointer", arguments: ["buffer", "i32", FFI_SIZE_T] });
-
-  const ctypes_buf = ctypes.create_string_buffer(1024);
-  const ffi_buf = Buffer.alloc(1024);
-  const size = sizeArg(1024);
-
-  const iterations = 500_000;
-
-  // Warmup
-  for (let i = 0; i < 1000; i++) {
-    ctypes_memset(ctypes_buf, 0, 1024);
-    ffi_memset(ffi_buf, 0, size);
-  }
-
-  let start = performance.now();
-  for (let i = 0; i < iterations; i++) {
-    ctypes_memset(ctypes_buf, 0x41, 1024);
-  }
-  const ctypes_time = performance.now() - start;
-
-  start = performance.now();
-  for (let i = 0; i < iterations; i++) {
-    ffi_memset(ffi_buf, 0x41, size);
-  }
-  const ffi_time = performance.now() - start;
-
-  benchmark("memset(ptr,int,size)", ctypes_time, ffi_time, iterations);
-}
-
-// ============================================================================
-// Benchmark 6: Variadic function (sprintf)
-// ============================================================================
-
-console.log("┌─────────────────────────────────────────────────────────────────┐");
-console.log("│ Benchmark 6: Variadic function - sprintf(buf, fmt, ...)         │");
-console.log("└─────────────────────────────────────────────────────────────────┘");
-
-{
-  // node-ctypes: variadic args auto-detected
-  const ctypes_sprintf = ctypes_libc.func("sprintf", ctypes.c_int32, [ctypes.c_void_p, ctypes.c_char_p]);
-
-  const ctypes_buf = ctypes.create_string_buffer(256);
-  const iterations = 200_000;
-
-  // Warmup (node-ctypes)
-  for (let i = 0; i < 1000; i++) {
-    ctypes_sprintf(ctypes_buf, "Number: %d, String: %s", 42, "test");
-  }
-
-  let start = performance.now();
-  for (let i = 0; i < iterations; i++) {
-    // Auto-variadic: same function handles different arg counts/types
-    ctypes_sprintf(ctypes_buf, "Number: %d, String: %s", i, "test");
-  }
-  const ctypes_time = performance.now() - start;
-
-  // node:ffi has no variadic support: emulate with a fixed signature where the
-  // ABI allows it, and verify correctness before timing.
-  let ffi_time = null;
-  if (ffiVariadicSafe) {
-    try {
-      const ffi_sprintf = ffi_libc.getFunction("sprintf", {
-        return: "i32",
-        arguments: ["buffer", "string", "i32", "string"],
-      });
-
-      const ffi_buf = Buffer.alloc(256);
-      ffi_sprintf(ffi_buf, "Number: %d, String: %s", 42, "test");
-      const produced = ffi_buf.toString("utf8", 0, ffi_buf.indexOf(0));
-      if (produced !== "Number: 42, String: test") {
-        throw new Error(`risultato variadico errato: "${produced}"`);
-      }
-
-      // Warmup
-      for (let i = 0; i < 1000; i++) {
-        ffi_sprintf(ffi_buf, "Number: %d, String: %s", i, "test");
-      }
-
-      start = performance.now();
-      for (let i = 0; i < iterations; i++) {
-        ffi_sprintf(ffi_buf, "Number: %d, String: %s", i, "test");
-      }
-      ffi_time = performance.now() - start;
-    } catch {
-      ffi_time = null; // variadic not supported on this ABI
-    }
-  }
-
-  benchmark("sprintf(variadic)", ctypes_time, ffi_time, iterations);
-}
-
-// ============================================================================
-// Benchmark 7: Raw memory read (int32 fields)
-// ============================================================================
-
-console.log("┌─────────────────────────────────────────────────────────────────┐");
-console.log("│ Benchmark 7: Raw memory read - 2x int32                         │");
-console.log("└─────────────────────────────────────────────────────────────────┘");
-
-{
-  // node:ffi has no struct type; the equivalent low-level operation is reading
-  // primitive values from native memory via its getInt32 helper.
-  const buf = Buffer.alloc(8);
-  buf.writeInt32LE(10, 0);
-  buf.writeInt32LE(20, 4);
-
-  const ptr = ffi.getRawPointer(buf);
-  const ffi_getInt32 = ffi.getInt32;
-  const readValue = ctypes.readValue;
-  const c_int32 = ctypes.c_int32;
-
-  const iterations = 500_000;
-
-  // Warmup
-  for (let i = 0; i < 1000; i++) {
-    readValue(buf, c_int32, 0);
-    ffi_getInt32(ptr, 0);
-  }
-
-  let start = performance.now();
-  for (let i = 0; i < iterations; i++) {
-    const x = readValue(buf, c_int32, 0);
-    const y = readValue(buf, c_int32, 4);
-  }
-  const ctypes_time = performance.now() - start;
-
-  start = performance.now();
-  for (let i = 0; i < iterations; i++) {
-    const x = ffi_getInt32(ptr, 0);
-    const y = ffi_getInt32(ptr, 4);
-  }
-  const ffi_time = performance.now() - start;
-
-  benchmark("memory read (2x int32)", ctypes_time, ffi_time, iterations);
-
-  // Keep buf referenced so its backing store stays valid for `ptr`.
-  void buf;
-}
-
-// ============================================================================
-// Benchmark 8: Memory allocation
-// ============================================================================
-
-console.log("┌─────────────────────────────────────────────────────────────────┐");
-console.log("│ Benchmark 8: Buffer allocation (64 bytes)                       │");
-console.log("└─────────────────────────────────────────────────────────────────┘");
-
-{
-  const iterations = 200_000;
-
-  // Warmup
-  for (let i = 0; i < 1000; i++) {
-    ctypes.create_string_buffer(64);
-    Buffer.alloc(64);
-  }
-
-  let start = performance.now();
-  for (let i = 0; i < iterations; i++) {
-    const buf = ctypes.create_string_buffer(64);
-  }
-  const ctypes_time = performance.now() - start;
-
-  start = performance.now();
-  for (let i = 0; i < iterations; i++) {
-    const buf = Buffer.alloc(64);
-  }
-  const native_time = performance.now() - start;
-
-  benchmark_internal("Buffer allocation (64 bytes)", ctypes_time, native_time, "node-ctypes", "Buffer.alloc", iterations);
-  console.log(`  Overhead: ${((ctypes_time / native_time - 1) * 100).toFixed(1)}% vs native\n`);
-}
-
-// ============================================================================
-// Benchmark 9: Raw vs Wrapped call
-// ============================================================================
-
-console.log("┌─────────────────────────────────────────────────────────────────┐");
-console.log("│ Benchmark 9: Raw Library.func vs CDLL wrapper                   │");
-console.log("└─────────────────────────────────────────────────────────────────┘");
-
-{
-  const rawLib = new ctypes.Library(LIBC);
-  const rawAbs = rawLib.func("abs", ctypes.CType.INT32, [ctypes.CType.INT32]);
-
-  const wrappedLib = new ctypes.CDLL(LIBC);
-  const wrappedAbs = wrappedLib.func("abs", ctypes.c_int32, [ctypes.c_int32]);
-
-  const iterations = 1_000_000;
-
-  // Warmup
-  for (let i = 0; i < 1000; i++) {
-    rawAbs.call(-42);
-    wrappedAbs(-42);
-  }
-
-  let start = performance.now();
-  for (let i = 0; i < iterations; i++) {
-    rawAbs.call(-42);
-  }
-  const raw_time = performance.now() - start;
-
-  start = performance.now();
-  for (let i = 0; i < iterations; i++) {
-    wrappedAbs(-42);
-  }
-  const wrapped_time = performance.now() - start;
-
-  benchmark_internal("Raw Library.func vs CDLL wrapper", raw_time, wrapped_time, "Raw .call()", "CDLL wrapper", iterations);
-  console.log(`  Wrapper overhead: ${((wrapped_time / raw_time - 1) * 100).toFixed(1)}%\n`);
-
-  rawLib.close();
-  wrappedLib.close();
-}
-
-// ============================================================================
-// Summary
-// ============================================================================
-
-console.log("╔════════════════════════════════════════════════════════════════╗");
-console.log("║                          SUMMARY                               ║");
-console.log("╠════════════════════════════════════════════════════════════════╣");
-
-let ctypesWins = 0;
-let ffiWins = 0;
-
-for (const r of results) {
-  if (r.skipped) {
-    console.log(`║ - ${r.name.padEnd(25)} ${"N/A".padStart(24)}           ║`);
-    continue;
-  }
-  const status = r.ratio < 1 ? "✓" : "✗";
-  const diff = r.ratio < 1 ? (1 / r.ratio).toFixed(2) + "x faster" : r.ratio.toFixed(2) + "x slower";
-  console.log(`║ ${status} ${r.name.padEnd(25)} ${diff.padStart(24)} vs ffi    ║`);
-  if (r.ratio < 1) ctypesWins++;
-  else ffiWins++;
-}
-
-console.log("╠════════════════════════════════════════════════════════════════╣");
-
-const compared = results.filter((r) => !r.skipped);
-const avgRatio = compared.reduce((sum, r) => sum + r.ratio, 0) / (compared.length || 1);
-console.log(`║ Average ratio: ${avgRatio.toFixed(2)}x ${avgRatio < 1 ? "(node-ctypes faster)" : "(node:ffi faster)"}`.padEnd(65) + "║");
-console.log(`║ Wins: node-ctypes ${ctypesWins}, node:ffi ${ffiWins}`.padEnd(65) + "║");
-console.log("╚════════════════════════════════════════════════════════════════╝");
-
-// Cleanup
-ctypes_libc.close();
-if (ctypes_system) ctypes_system.close();
-ffi_libc.close();
-if (ffi_system) ffi_system.close();

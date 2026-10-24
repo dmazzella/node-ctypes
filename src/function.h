@@ -93,6 +93,21 @@ struct SavedErrorState {
   uint32_t last_error = 0;
 };
 
+struct FunctionArguments {
+  const Napi::CallbackInfo& callback;
+  const size_t first;
+  const size_t argc;
+  const Napi::Env env;
+
+  explicit FunctionArguments(const Napi::CallbackInfo& info, size_t first_arg = 0)
+    : callback(info), first(first_arg), argc(info.Length() - first_arg), env(info.Env()) {}
+
+  Napi::Env Env() const { return env; }
+  size_t Length() const { return argc; }
+  Napi::Value operator[](size_t index) const { return callback[index + first]; }
+  bool HasResultHandler() const noexcept { return first != 0; }
+};
+
 // Wrapper per una funzione C chiamabile da JavaScript
 class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
  public:
@@ -103,6 +118,9 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
 
   Napi::Value Call(const Napi::CallbackInfo& info);
   Napi::Value CallAsync(const Napi::CallbackInfo& info);
+  Napi::Value CallChecked(const Napi::CallbackInfo& info);
+  Napi::Value CallAsyncChecked(const Napi::CallbackInfo& info);
+  Napi::Value MakeCheckedCall(const Napi::CallbackInfo& info);
 
   // ==========================================================================
   // CallContext — mutable state shared tra le fasi di Call().
@@ -117,7 +135,7 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
   // ==========================================================================
   struct CallContext {
     Napi::Env env;
-    const Napi::CallbackInfo& info;
+    const FunctionArguments& info;
     size_t argc = 0;
     size_t expected_argc = 0;
     ffi_cif* active_cif = nullptr;
@@ -137,6 +155,7 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
     char* inline_strings = nullptr;
     size_t inline_string_offset = 0;
     ReturnValue* return_value = nullptr;
+    const Napi::Function* errcheck = nullptr;
   };
 
   // Lega la funzione alla libreria da cui proviene: la libreria resta caricata
@@ -155,7 +174,8 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
                                                  CType type,
                                                  const std::shared_ptr<StructInfo>& struct_info,
                                                  const std::shared_ptr<ArrayInfo>& array_info,
-                                                 bool struct_as_buffer);
+                                                 bool struct_as_buffer,
+                                                 bool scalar_as_buffer = false);
   [[nodiscard]] static inline bool MarshalPrimitive(const Napi::Value& val, CType type, uint8_t* slot);
   [[nodiscard]] static bool MarshalStructArg(Napi::Env env,
                                              const Napi::Value& val,
@@ -164,7 +184,8 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
                                              uint8_t* slot,
                                              void** arg_value_ptr,
                                              std::vector<std::vector<uint8_t>>& large_buffers,
-                                             std::vector<size_t>* large_indices);
+                                             std::vector<size_t>* large_indices,
+                                             std::vector<Napi::ObjectReference>* owners = nullptr);
   [[nodiscard]] static bool MarshalArrayArg(Napi::Env env,
                                             const Napi::Value& val,
                                             size_t arg_index,
@@ -172,7 +193,8 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
                                             uint8_t* slot,
                                             void** arg_value_ptr,
                                             std::vector<std::vector<uint8_t>>& large_buffers,
-                                            std::vector<size_t>* large_indices);
+                                            std::vector<size_t>* large_indices,
+                                            std::vector<Napi::ObjectReference>* owners = nullptr);
 
  private:
   bool PrepareFFI(Napi::Env env);
@@ -180,6 +202,7 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
   // Entry point of the per-instance `call` function: the FFIFunction* is the
   // function's N-API data, so the hot path skips the napi_unwrap of InstanceMethod.
   static Napi::Value FastCall(const Napi::CallbackInfo& info);
+  static Napi::Value FastCheckedCall(const Napi::CallbackInfo& info);
   void InstallFastCall(Napi::Env env);
   void SetupDirectCall();
 
@@ -190,7 +213,17 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
   bool simple_call_ = false;
   // Percorso veloce delle firme semplici; false (senza effetti) se un
   // argomento richiede Call(): stringa lunga o chiamata rientrante.
-  [[nodiscard]] bool SimpleCall(const Napi::CallbackInfo& info, Napi::Value& result);
+  template <typename Args, bool HasErrcheck = true>
+    requires(std::same_as<Args, Napi::CallbackInfo> || std::same_as<Args, FunctionArguments>)
+  [[nodiscard]] bool SimpleCall(const Args& info, Napi::Value& result, const Napi::Function* errcheck);
+  template <typename Args, bool HasErrcheck = true>
+    requires(std::same_as<Args, Napi::CallbackInfo> || std::same_as<Args, FunctionArguments>)
+  Napi::Value InvokeCall(const Args& info, const Napi::Function* errcheck);
+  Napi::Value CallArguments(const FunctionArguments& info, const Napi::Function* errcheck);
+  Napi::Value CallAsyncArguments(const FunctionArguments& info, const Napi::Function* errcheck);
+  [[nodiscard]] Napi::Function SnapshotErrcheck() const {
+    return errcheck_callback_.IsEmpty() ? Napi::Function() : errcheck_callback_.Value();
+  }
 
   // Per-section helpers for Call(). `always_inline` marcato sulla definition
   // (vedi function.cc) — vengono chiamati esattamente una volta dal
@@ -207,7 +240,7 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
   // e flag is_variadic. In caso di errore, throws JS exception e
   // ritorna false (caller deve restituire env.Undefined()).
   [[nodiscard]] bool ValidateAndResolveArgc(Napi::Env env,
-                                            const Napi::CallbackInfo& info,
+                                            const FunctionArguments& info,
                                             size_t& out_argc,
                                             bool& out_is_variadic) const;
 
@@ -242,14 +275,15 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
                std::vector<ffi_type*>&& owned_ffi_types,
                std::vector<std::vector<uint8_t>>&& large_arg_buffers,
                std::vector<size_t>&& large_arg_indices,
-               Napi::FunctionReference* errcheck_ref);
+               const Napi::Function* errcheck,
+               bool result_handler);
     ~CallWorker();
 
     void Execute() override;
     void OnOK() override;
     void OnError(const Napi::Error& error) override;
     Napi::Promise GetPromise() { return deferred_.Promise(); }
-    void KeepArguments(const Napi::CallbackInfo& info);
+    void KeepArguments(const FunctionArguments& info);
 
    private:
     void FixupPointers();
@@ -274,12 +308,14 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
     std::vector<uint8_t> return_buffer_;                   // for struct/array returns > sizeof(ReturnValue)
     void* return_ptr_;                                     // &return_value_ or return_buffer_.data()
     Napi::Promise::Deferred deferred_;
-    Napi::FunctionReference* errcheck_ref_;
+    Napi::FunctionReference errcheck_ref_;
+    bool result_handler_;
     Napi::ObjectReference args_ref_;  // JS arguments, for errcheck(result, func, args)
     // use_last_error / use_errno: snapshot on the worker thread, right after ffi_call
     bool capture_last_error_;
     bool capture_errno_;
     bool struct_as_buffer_;
+    bool scalar_as_buffer_;
     uint32_t last_error_ = 0;
     int last_errno_ = 0;
     // Valori privati (get_last_error() / get_errno()) al momento della chiamata.
@@ -304,10 +340,6 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
   // Direct-call fast path (see direct_call.h); nullptr when the signature is
   // not eligible and the call goes through libffi.
   direct::Invoker direct_invoker_ = nullptr;
-  std::array<direct::Widen, direct::kMaxDirectArgs> direct_arg_widen_{};
-  uint8_t direct_arg_widen_count_ = 0;
-  uint8_t direct_ret_widen_size_ = 0;  // 0 = return needs no widening
-  bool direct_ret_signed_ = false;
 
   // Tipi
   CType return_type_;
@@ -351,10 +383,11 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
   // ============================================================
   // Error checking callback (Python ctypes errcheck)
   // ============================================================
-  Napi::FunctionReference errcheck_callback_;
+  Napi::FunctionReference errcheck_callback_;  // weak; the environment's JS WeakMap owns the callback
 
   // Helper per applicare errcheck callback
-  Napi::Value ApplyErrcheck(Napi::Env env, Napi::Value result, const Napi::CallbackInfo& info);
+  Napi::Value ApplyErrcheck(Napi::Env env, Napi::Value result, const FunctionArguments& info,
+                            const Napi::Function& errcheck);
 
   // ============================================================
   // Cattura last-error / errno (parity Python use_last_error / use_errno).
@@ -366,6 +399,7 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
   // Struct restituite come Buffer dei loro byte (opzione `struct_buffer`):
   // il wrapper JS ne fa un'istanza della classe, come Python.
   bool struct_as_buffer_ = false;
+  bool scalar_as_buffer_ = false;
   // Con struct_as_buffer_: Buffer in cui una chiamata sincrona restituisce i
   // byte della struct, riusato a ogni chiamata (il chiamante JS li copia
   // subito nell'istanza). Buffer::Copy allocava con malloc e cambiava il

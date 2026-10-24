@@ -33,6 +33,7 @@ struct TypeSpec {
   CType type = CType::CTYPES_VOID;
   std::shared_ptr<StructInfo> struct_info{};
   std::shared_ptr<ArrayInfo> array_info{};
+  bool scalar_buffer = false;
 };
 
 // TypeSpec di un valore JS; TypeError se non è un tipo.

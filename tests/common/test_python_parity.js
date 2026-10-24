@@ -57,6 +57,22 @@ describe("Python ctypes parity", function () {
     it("functions without restype return c_int", function () {
       assert.strictEqual(libc.abs(-5), 5);
     });
+
+    it("null restype returns undefined, as Python restype=None returns None", function () {
+      assert.strictEqual(libc.func("srand", null, [ctypes.c_uint32])(1), undefined);
+      const srand = libc.srand;
+      srand.argtypes = [ctypes.c_uint32];
+      srand.restype = null;
+      assert.strictEqual(srand(2), undefined);
+      const Srand = CFUNCTYPE(null, ctypes.c_uint32);
+      assert.strictEqual(Srand(["srand", libc])(3), undefined);
+    });
+
+    it("CFUNCTYPE callers honor the _as_parameter_ protocol", function () {
+      const Abs = CFUNCTYPE(c_int, c_int);
+      const abs = Abs(["abs", libc]);
+      assert.strictEqual(abs({ _as_parameter_: -9 }), 9);
+    });
   });
 
   describe("c_char / c_wchar", function () {

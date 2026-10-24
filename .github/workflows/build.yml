@@ -1,6 +1,7 @@
 name: Build
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     tags: ['v*']
@@ -25,6 +26,16 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+
+      - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          import { releaseTag } from './.github/scripts/package.mjs';
+          const manifest = JSON.parse(readFileSync('package.json', 'utf8'));
+          releaseTag(manifest.version, process.env.GITHUB_REF);
+          NODE
 
       - name: Check TypeScript declarations
         run: npm run test:types
@@ -74,6 +85,10 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
+
+      - name: Check native artifact target
+        if: ${{ !matrix.container }}
+        run: node -e "require('node:assert/strict').equal(process.platform+'-'+process.arch,'${{ matrix.artifact }}');"
 
       - name: Install dependencies
         if: ${{ !matrix.container }}
@@ -140,9 +155,19 @@ jobs:
           name: ctypes-${{ matrix.artifact }}
           path: build/Release/ctypes.node
 
+      - name: Upload test fixture
+        uses: actions/upload-artifact@v6
+        with:
+          name: fixture-${{ matrix.artifact }}
+          path: build/fixture/ctypes_test_fixture.*
+          if-no-files-found: error
+
   package:
     needs: [build, types]
     runs-on: ubuntu-latest
+    outputs:
+      filename: ${{ steps.pack.outputs.filename }}
+      npm_tag: ${{ steps.pack.outputs.npm_tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -152,33 +177,95 @@ jobs:
         with:
           path: artifacts
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
       - name: Assemble multi-platform package
+        run: node .github/scripts/package.mjs artifacts package
+
+      - name: Pack the distribution
+        id: pack
         run: |
-          mkdir -p package/lib
-          mkdir -p package/build/Release
-          
-          # Copy platform-specific binaries
-          for dir in artifacts/ctypes-*; do
-            if [ -d "$dir" ]; then
-              platform=$(basename "$dir" | sed 's/ctypes-//')
-              cp "$dir/ctypes.node" "package/build/Release/ctypes-${platform}.node"
-            fi
-          done
-          
-          # Copy source files
-          cp -r lib/* package/lib/
-          cp package.json README.md LICENSE package/
+          npm pack ./package --json > pack.json
+          node --input-type=module <<'NODE'
+          import { appendFileSync, readFileSync } from 'node:fs';
+          const [packed] = JSON.parse(readFileSync('pack.json', 'utf8'));
+          const manifest = JSON.parse(readFileSync('package/package.json', 'utf8'));
+          const prerelease = manifest.version.split('+')[0].includes('-');
+          appendFileSync(process.env.GITHUB_OUTPUT, `filename=${packed.filename}\nnpm_tag=${prerelease ? 'next' : 'latest'}\n`);
+          NODE
 
       - name: Upload packaged artifact
         uses: actions/upload-artifact@v6
         with:
           name: node-ctypes
-          path: package/
+          path: ${{ steps.pack.outputs.filename }}
+          if-no-files-found: error
+
+  runtime:
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: win32-x64
+          - os: macos-latest
+            artifact: darwin-arm64
+          - os: ubuntu-24.04
+            artifact: linux-x64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js control
+        uses: actions/setup-node@v6
+        with:
+          node-version: 26
+
+      - name: Download Node 24 addon for source-suite control
+        uses: actions/download-artifact@v7
+        with:
+          name: ctypes-${{ matrix.artifact }}
+          path: build/Release
+
+      - name: Download compiled fixture
+        uses: actions/download-artifact@v7
+        with:
+          name: fixture-${{ matrix.artifact }}
+          path: build/fixture
+
+      - name: Install test dependencies
+        run: |
+          npm install
+          npm --prefix tests install
+
+      - name: Run full source suite on Node 26 without rebuilding the addon
+        run: npm --prefix tests run test:js
+
+      - name: Run full Node 26 source suite without external buffers
+        env:
+          NODE_CTYPES_NO_EXTERNAL_BUFFERS: "1"
+        run: npm --prefix tests run test:js
+
+      - name: Setup Python 3.15 reference control
+        if: matrix.artifact == 'linux-x64'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.15"
+
+      - name: Run focused Python 3.15 reference tests
+        if: matrix.artifact == 'linux-x64'
+        working-directory: tests/common
+        run: python -B -m unittest test_primitive_conversions test_result_lifetime test_scalar_protocols test_descriptor_finalization test_callbacks
 
   publish:
-    needs: package
+    needs: [package, runtime]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: read
       id-token: write
@@ -196,8 +283,6 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Publish to npm
-        run: |
-          cd package
-          npm publish --access public --provenance
+        run: npm publish "package/${{ needs.package.outputs.filename }}" --tag "${{ needs.package.outputs.npm_tag }}" --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

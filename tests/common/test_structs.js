@@ -273,7 +273,7 @@ describe("Structs and Unions", function () {
     it("should reject invalid _pack_ values", function () {
       assert.throws(() => {
         class Bad extends ctypes.Structure {
-          static _pack_ = 3;
+          static _pack_ = -1;
           static _fields_ = [["a", ctypes.c_uint8]];
         }
         Bad._buildStruct();

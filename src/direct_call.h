@@ -1,206 +1,167 @@
 #pragma once
 
-// Direct-call fast path: for simple fixed signatures the target is invoked
-// through a C function pointer of a matching register class, so the compiler
-// emits the platform calling convention and libffi's per-call classification
-// (ffi_call_int / ffi_call_SYSV) is skipped.
-//
-// Eligibility (see FFIFunction::PrepareFFI):
-//   - 64-bit little-endian target, default ABI, non-variadic call;
-//   - at most kMaxDirectArgs arguments, so every argument travels in a
-//     register on Win64 (4 slots), SysV x86-64, AAPCS64 and Apple arm64;
-//   - integer/pointer/string, double or float arguments (no float/double
-//     arguments on x86-64, see kFloatArgsAllowed);
-//   - void, integer/pointer/string, double or float return.
-// Integer arguments narrower than 64 bits are sign/zero-extended in their slot
-// before the call, and narrow integer returns are extended afterwards, matching
-// what libffi does with ffi_arg.
-
-#include "shared.h"
+// Exact scalar signatures only. Pointer pointees/qualifiers are not represented
+// by CType, so their register-class compatibility is not enough for a C++ call.
 #include "types.h"
 
 namespace ctypes::direct {
+namespace {
 
 inline constexpr size_t kMaxDirectArgs = 4;
-
-// On x86-64 libffi also makes a variadic function declared with all its
-// arguments (e.g. printf with argtypes [c_char_p, c_double]) work: on Win64 it
-// loads every argument into both the integer and the xmm registers, on SysV it
-// always sets %al to the number of vector registers used. A typed direct call
-// does neither, so float/double arguments keep going through libffi there.
-// On arm64 libffi places them exactly like the direct call (Windows ARM64 uses
-// integer registers only for ffi_prep_cif_var), so there is nothing to keep.
 #if defined(__x86_64__) || defined(_M_X64)
 inline constexpr bool kFloatArgsAllowed = false;
 #else
 inline constexpr bool kFloatArgsAllowed = true;
 #endif
 
-// Register classes.
-enum class ArgClass : uint8_t { Int = 0, Double = 1, Float = 2 };
-enum class RetClass : uint8_t { Void = 0, Int = 1, Double = 2, Float = 3 };
+extern "C" {
+using CFunctionType = int32_t(int32_t);
+}
+inline constexpr bool kCFunctionTypesCompatible = std::same_as<CFunctionType, int32_t(int32_t)>;
 inline constexpr size_t kArgClassCount = kFloatArgsAllowed ? 3 : 1;
-
 using Invoker = void (*)(void* fn, void** args, void* ret);
 
-// Internal linkage: keeps the invoker instantiations out of the exported
-// symbol table (this header is only included by function.cc).
-namespace {
-
-template <int C>
-using ArgOf = std::conditional_t<C == 0, int64_t, std::conditional_t<C == 1, double, float>>;
-
-template <int R>
-using RetOf =
-  std::conditional_t<R == 0, void, std::conditional_t<R == 1, int64_t, std::conditional_t<R == 2, double, float>>>;
-
-// Tipi che viaggiano in un registro: le classi ArgClass / RetClass.
 template <typename T>
-concept RegisterValue = std::same_as<T, int64_t> || std::same_as<T, double> || std::same_as<T, float>;
+concept Scalar = std::integral<T> || std::same_as<T, float> || std::same_as<T, double>;
 
 template <typename R>
-concept RegisterResult = std::is_void_v<R> || RegisterValue<R>;
+concept ScalarResult = std::is_void_v<R> || Scalar<R>;
 
-template <RegisterResult R, RegisterValue... A, size_t... Is>
-inline void InvokeImpl(void* fn, [[maybe_unused]] void** args, [[maybe_unused]] void* ret, std::index_sequence<Is...>) {
+template <ScalarResult R, Scalar... A, size_t... Is>
+inline void InvokeImpl(void* fn, [[maybe_unused]] void** args, [[maybe_unused]] void* ret,
+                       std::index_sequence<Is...>) {
   using Fn = R (*)(A...);
   if constexpr (std::is_void_v<R>) {
     reinterpret_cast<Fn>(fn)(LoadAs<A>(args[Is])...);
   } else {
-    R r = reinterpret_cast<Fn>(fn)(LoadAs<A>(args[Is])...);
-    std::memcpy(ret, &r, sizeof(R));
+    StoreReturnValue(ret, reinterpret_cast<Fn>(fn)(LoadAs<A>(args[Is])...));
   }
 }
 
-template <RegisterResult R, RegisterValue... A>
+template <ScalarResult R, Scalar... A>
 void Invoke(void* fn, void** args, void* ret) {
   InvokeImpl<R, A...>(fn, args, ret, std::index_sequence_for<A...>{});
 }
 
-// Code encodes the argument classes in base kArgClassCount, first argument
-// in the least significant digit.
-template <size_t Code, size_t N, typename R, typename... Acc>
-constexpr Invoker Build() {
-  if constexpr (N == 0) {
-    return &Invoke<R, Acc...>;
-  } else {
-    return Build<Code / kArgClassCount, N - 1, R, Acc..., ArgOf<static_cast<int>(Code % kArgClassCount)>>();
+template <typename Factory>
+constexpr Invoker VisitScalar(CType type, Factory make) {
+  switch (type) {
+    case CType::CTYPES_INT8: return make.template operator()<int8_t>();
+    case CType::CTYPES_UINT8: return make.template operator()<uint8_t>();
+    case CType::CTYPES_INT16: return make.template operator()<int16_t>();
+    case CType::CTYPES_UINT16: return make.template operator()<uint16_t>();
+    case CType::CTYPES_INT32: return make.template operator()<int32_t>();
+    case CType::CTYPES_UINT32: return make.template operator()<uint32_t>();
+    case CType::CTYPES_INT64: return make.template operator()<int64_t>();
+    case CType::CTYPES_UINT64: return make.template operator()<uint64_t>();
+    case CType::CTYPES_FLOAT: return make.template operator()<float>();
+    case CType::CTYPES_DOUBLE: return make.template operator()<double>();
+    case CType::CTYPES_CHAR: return make.template operator()<char>();
+    case CType::CTYPES_WCHAR: return make.template operator()<wchar_t>();
+    case CType::CTYPES_BOOL: return make.template operator()<bool>();
+    case CType::CTYPES_SIZE_T: return make.template operator()<size_t>();
+    case CType::CTYPES_SSIZE_T: return make.template operator()<ssize_t>();
+    case CType::CTYPES_LONG: return make.template operator()<long>();
+    case CType::CTYPES_ULONG: return make.template operator()<unsigned long>();
+    default: return nullptr;
   }
 }
 
-constexpr size_t Pow(size_t base, size_t exp) {
-  return exp == 0 ? 1 : base * Pow(base, exp - 1);
+template <typename T>
+[[nodiscard]] constexpr bool Matches(CType type) {
+  bool matches = false;
+  VisitScalar(type, [&matches]<typename U>() -> Invoker {
+    matches = std::same_as<T, U>;
+    return nullptr;
+  });
+  return matches;
 }
 
-template <int R, size_t N, size_t... Codes>
-constexpr std::array<Invoker, sizeof...(Codes)> MakeRow(std::index_sequence<Codes...>) {
-  return {Build<Codes, N, RetOf<R>>()...};
+template <size_t Code>
+using CoreArg = std::conditional_t<Code == 0, int32_t, std::conditional_t<Code == 1, double, float>>;
+
+template <size_t Code, size_t N, typename R, typename... Acc>
+constexpr Invoker BuildCore() {
+  if constexpr (N == 0) return &Invoke<R, Acc...>;
+  else return BuildCore<Code / kArgClassCount, N - 1, R, Acc..., CoreArg<Code % kArgClassCount>>();
 }
 
-template <int R, size_t N>
+constexpr size_t Pow(size_t base, size_t exponent) {
+  return exponent == 0 ? 1 : base * Pow(base, exponent - 1);
+}
+
+template <typename R, size_t N, size_t... Codes>
+constexpr auto MakeRow(std::index_sequence<Codes...>) {
+  return std::array<Invoker, sizeof...(Codes)>{BuildCore<Codes, N, R>()...};
+}
+
+template <typename R, size_t N>
 inline constexpr auto kRow = MakeRow<R, N>(std::make_index_sequence<Pow(kArgClassCount, N)>{});
 
-}  // namespace
+template <typename R>
+Invoker SelectCore(size_t count, size_t code) {
+  switch (count) {
+    case 2: return kRow<R, 2>[code];
+    case 3: return kRow<R, 3>[code];
+    case 4: return kRow<R, 4>[code];
+    default: return nullptr;
+  }
+}
 
-template <int R>
-inline Invoker SelectForRet(size_t n, size_t code) {
-  static_assert(kMaxDirectArgs == 4, "update the arity switch");
-  switch (n) {
-    case 0:
-      return kRow<R, 0>[code];
-    case 1:
-      return kRow<R, 1>[code];
-    case 2:
-      return kRow<R, 2>[code];
-    case 3:
-      return kRow<R, 3>[code];
-    case 4:
-      return kRow<R, 4>[code];
-    default:
+template <typename T, size_t>
+using Repeated = T;
+
+template <typename R, typename A, size_t... Is>
+constexpr Invoker Repeat(std::index_sequence<Is...>) {
+  return &Invoke<R, Repeated<A, Is>...>;
+}
+
+template <typename R, typename A>
+Invoker SelectHomogeneous(size_t count) {
+  switch (count) {
+    case 2: return Repeat<R, A>(std::make_index_sequence<2>{});
+    case 3: return Repeat<R, A>(std::make_index_sequence<3>{});
+    case 4: return Repeat<R, A>(std::make_index_sequence<4>{});
+    default: return nullptr;
+  }
+}
+
+template <ScalarResult R>
+Invoker SelectForResult(std::span<const CType> args) {
+  if (args.empty()) return &Invoke<R>;
+  if (args.size() == 1) {
+    return VisitScalar(args[0], []<Scalar A>() -> Invoker {
+      if constexpr (!kFloatArgsAllowed && std::is_floating_point_v<A>) return nullptr;
+      else return &Invoke<R, A>;
+    });
+  }
+  if constexpr (std::is_void_v<R> || std::same_as<R, int32_t> || std::same_as<R, double> || std::same_as<R, float>) {
+    size_t code = 0, weight = 1;
+    bool core = true;
+    for (const auto type : args) {
+      if (Matches<int32_t>(type)) {}
+      else if (kFloatArgsAllowed && Matches<double>(type)) code += weight;
+      else if (kFloatArgsAllowed && Matches<float>(type)) code += 2 * weight;
+      else { core = false; break; }
+      weight *= kArgClassCount;
+    }
+    if (core) return SelectCore<R>(args.size(), code);
+  }
+  return VisitScalar(args[0], [args]<Scalar A>() -> Invoker {
+    if constexpr ((!kFloatArgsAllowed && std::is_floating_point_v<A>) || (!std::is_void_v<R> && !std::same_as<R, A>)) {
       return nullptr;
-  }
+    } else {
+      if (!std::ranges::all_of(args, [](CType type) { return Matches<A>(type); })) return nullptr;
+      return SelectHomogeneous<R, A>(args.size());
+    }
+  });
 }
 
-[[nodiscard]] inline Invoker Select(RetClass ret, size_t n, size_t code) {
-  switch (ret) {
-    case RetClass::Void:
-      return SelectForRet<0>(n, code);
-    case RetClass::Int:
-      return SelectForRet<1>(n, code);
-    case RetClass::Double:
-      return SelectForRet<2>(n, code);
-    case RetClass::Float:
-      return SelectForRet<3>(n, code);
-  }
-  return nullptr;
+[[nodiscard]] inline Invoker Select(CType result, std::span<const CType> args) {
+  if (!kCFunctionTypesCompatible || args.size() > kMaxDirectArgs) return nullptr;
+  if (result == CType::CTYPES_VOID) return SelectForResult<void>(args);
+  return VisitScalar(result, [args]<Scalar R>() { return SelectForResult<R>(args); });
 }
 
-// Integer CTypes that travel in a general purpose register.
-[[nodiscard]] constexpr bool IsIntClass(CType t) noexcept {
-  switch (t) {
-    case CType::CTYPES_INT8:
-    case CType::CTYPES_UINT8:
-    case CType::CTYPES_INT16:
-    case CType::CTYPES_UINT16:
-    case CType::CTYPES_INT32:
-    case CType::CTYPES_UINT32:
-    case CType::CTYPES_INT64:
-    case CType::CTYPES_UINT64:
-    case CType::CTYPES_POINTER:
-    case CType::CTYPES_STRING:
-    case CType::CTYPES_WSTRING:
-    case CType::CTYPES_WCHAR:
-    case CType::CTYPES_CHAR:
-    case CType::CTYPES_BOOL:
-    case CType::CTYPES_SIZE_T:
-    case CType::CTYPES_SSIZE_T:
-    case CType::CTYPES_LONG:
-    case CType::CTYPES_ULONG:
-      return true;
-    default:
-      return false;
-  }
-}
-
-[[nodiscard]] constexpr bool IsSignedInt(CType t) noexcept {
-  switch (t) {
-    case CType::CTYPES_INT8:
-    case CType::CTYPES_INT16:
-    case CType::CTYPES_INT32:
-    case CType::CTYPES_LONG:
-      return true;
-    case CType::CTYPES_WCHAR:
-      return std::is_signed_v<wchar_t>;
-    case CType::CTYPES_CHAR:
-      return std::is_signed_v<char>;
-    default:
-      return false;
-  }
-}
-
-// Integer value of `size` bytes at p, extended in place to 64 bits.
-struct Widen {
-  uint8_t index;
-  uint8_t size;
-  bool is_signed;
-};
-
-inline void WidenInPlace(void* p, uint8_t size, bool is_signed) {
-  int64_t v;
-  switch (size) {
-    case 1:
-      v = is_signed ? static_cast<int64_t>(LoadAs<int8_t>(p)) : static_cast<int64_t>(LoadAs<uint8_t>(p));
-      break;
-    case 2:
-      v = is_signed ? static_cast<int64_t>(LoadAs<int16_t>(p)) : static_cast<int64_t>(LoadAs<uint16_t>(p));
-      break;
-    case 4:
-      v = is_signed ? static_cast<int64_t>(LoadAs<int32_t>(p)) : static_cast<int64_t>(LoadAs<uint32_t>(p));
-      break;
-    default:
-      return;
-  }
-  std::memcpy(p, &v, sizeof(v));
-}
-
+}  // namespace
 }  // namespace ctypes::direct

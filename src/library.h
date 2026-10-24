@@ -4,6 +4,20 @@
 
 namespace ctypes {
 
+class LibraryHandle {
+ public:
+  LibraryHandle() = default;
+  LibraryHandle(const LibraryHandle&) = delete;
+  LibraryHandle& operator=(const LibraryHandle&) = delete;
+  ~LibraryHandle();
+  void Set(void* handle, bool owned) noexcept { handle_ = handle; owned_ = owned; }
+  bool Close(std::string& error);
+
+ private:
+  void* handle_ = nullptr;
+  bool owned_ = false;
+};
+
 // Wrapper per librerie dinamiche (dlopen/LoadLibrary)
 class Library : public Napi::ObjectWrap<Library> {
  public:
@@ -30,6 +44,7 @@ class Library : public Napi::ObjectWrap<Library> {
 
   // Ottiene un puntatore a simbolo (variabile globale)
   Napi::Value GetSymbol(const Napi::CallbackInfo& info);
+  Napi::Value GetSymbolView(const Napi::CallbackInfo& info);
 
   // Chiude la libreria
   Napi::Value Close(const Napi::CallbackInfo& info);
@@ -43,6 +58,7 @@ class Library : public Napi::ObjectWrap<Library> {
   std::string path_;
   bool is_loaded_;
   uint32_t active_calls_ = 0;
+  std::shared_ptr<LibraryHandle> handle_owner_;
 };
 
 // Helper per caricare una libreria (wrapper di livello inferiore)

@@ -23,6 +23,10 @@ class CTypesAddon : public Napi::Addon<CTypesAddon> {
 
   // Classe JS ArgumentError (Python ctypes.ArgumentError), registrata da lib/index.js.
   Napi::FunctionReference argument_error_ctor;
+  // JS ephemerons let a hook reference its own handle without rooting a cycle.
+  Napi::ObjectReference errcheck_owners;
+  Napi::FunctionReference errcheck_owner_set;
+  Napi::FunctionReference errcheck_owner_delete;
 
   CTypesAddon(Napi::Env env, Napi::Object exports);
   ~CTypesAddon();

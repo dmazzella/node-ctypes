@@ -15,7 +15,7 @@ const LIBC = platform === "win32" ? "msvcrt.dll" : platform === "darwin" ? "libc
 // On Linux the math functions (sqrt, ...) are in libm, elsewhere in the C library.
 const LIBM = platform === "linux" ? "libm.so.6" : LIBC;
 
-describe("Call fast paths", function () {
+describe("Call conversions (Python ctypes parity)", function () {
   let libc;
   let libm;
 
@@ -171,20 +171,4 @@ describe("Call fast paths", function () {
     });
   });
 
-  describe("per-instance call function", function () {
-    it("is not enumerable and works when called as a method", function () {
-      const raw = new ctypes.Library(LIBC).func("abs", ctypes.CType.INT32, [ctypes.CType.INT32]);
-      assert.deepStrictEqual(Object.keys(raw), []);
-      assert.strictEqual(raw.call(-9), 9);
-    });
-
-    it("a detached call keeps the native function alive", { skip: typeof globalThis.gc !== "function" }, async function () {
-      const call = new ctypes.Library(LIBC).func("abs", ctypes.CType.INT32, [ctypes.CType.INT32]).call;
-      for (let k = 0; k < 5; k++) {
-        globalThis.gc();
-        await new Promise((r) => setTimeout(r, 1));
-      }
-      assert.strictEqual(call(-7), 7);
-    });
-  });
 });

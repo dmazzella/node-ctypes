@@ -9,16 +9,19 @@
  */
 
 import assert from "node:assert";
-import { describe, it } from "node:test";
+import { before, after, describe, it } from "node:test";
 import v8 from "node:v8";
 import vm from "node:vm";
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import path from "node:path";
 import * as ctypes from "node-ctypes";
 
 const { CDLL, WinDLL, CFUNCTYPE, addressof, byref, callback, threadSafeCallback, readValue, c_int32, c_uint8, c_uint32, c_size_t, c_void_p, c_char_p } = ctypes;
 
 const platform = process.platform;
 const LIBC = platform === "win32" ? "msvcrt.dll" : platform === "darwin" ? "libc.dylib" : "libc.so.6";
+const FIXTURE = path.join(import.meta.dirname, "..", "..", "build", "fixture", `ctypes_test_fixture${platform === "win32" ? ".dll" : platform === "darwin" ? ".dylib" : ".so"}`);
 
 v8.setFlagsFromString("--expose-gc");
 const gc = vm.runInNewContext("gc");
@@ -239,7 +242,376 @@ describe("threadSafeCallback collected without release()", function () {
       timeout: 10000,
       encoding: "utf8",
     });
+
     assert.strictEqual(child.error, undefined, "the process did not exit (the thread-safe function kept it alive)");
     assert.strictEqual(child.status, 0, child.stderr);
+  });
+});
+
+describe("converted argument ownership", { skip: !existsSync(FIXTURE) && "native fixture not built" }, function () {
+      let lib;
+      before(() => { lib = new CDLL(FIXTURE); });
+      after(() => lib.close());
+
+      for (const binding of ["func", "attribute", "prototype"]) {
+        it(`${binding} retains conversion temporaries before native entry and releases them afterwards`, async function () {
+          let owner = Buffer.alloc(4096, 65);
+          const weak = new WeakRef(owner);
+          await new Promise((resolve) => setImmediate(resolve));
+          class Temporary extends c_void_p {
+            static from_param() {
+              const buffer = owner;
+              owner = null;
+              return ctypes.cast(new c_void_p(buffer), ctypes.POINTER(c_uint8));
+            }
+          }
+          class Collect extends c_void_p {
+            static from_param() {
+              const nested = lib.func("fixture_address", c_size_t, [c_void_p]);
+              nested(new c_void_p(Buffer.alloc(32)));
+              for (let i = 0; i < 10; i++) gc();
+              // Failure stops conversion before C could read the pointer.
+              assert.ok(weak.deref(), "the first converted argument lost its owner");
+              return null;
+            }
+          }
+          let fn;
+          if (binding === "func") fn = lib.func("fixture_first_char_after", c_int32, [Temporary, Collect]);
+          else if (binding === "prototype") fn = CFUNCTYPE(c_int32, Temporary, Collect)(["fixture_first_char_after", lib]);
+          else {
+            fn = lib.fixture_first_char_after;
+            fn.argtypes = [Temporary, Collect];
+            fn.restype = c_int32;
+          }
+          assert.strictEqual(fn(0, null), 65);
+          await collectGarbage();
+          assert.strictEqual(weak.deref(), undefined, "completed conversions must not leak their owners");
+        });
+      }
+
+      it("releases conversion temporaries when a later converter throws", async function () {
+        let weak;
+        class Temporary extends c_void_p {
+          static from_param() {
+            const owner = Buffer.alloc(4096);
+            weak = new WeakRef(owner);
+            return ctypes.cast(new c_void_p(owner), ctypes.POINTER(c_uint8));
+          }
+        }
+        class Fail extends c_void_p {
+          static from_param() { throw new RangeError("conversion stopped"); }
+        }
+        const fn = lib.func("fixture_first_char_after", c_int32, [Temporary, Fail]);
+        assert.throws(() => fn(0, null), /conversion stopped/);
+        await collectGarbage();
+        assert.strictEqual(weak.deref(), undefined);
+      });
+
+      it("prevents close() while native getters materialize async arguments", async function () {
+        const isolated = new CDLL(FIXTURE);
+        const type = new ctypes.StructType();
+        type.addField("value", ctypes.CType.POINTER);
+        const fn = isolated._lib.func("fixture_pointer_value", ctypes.CType.SIZE_T, [type]);
+        const owner = Buffer.alloc(32);
+        try {
+          const result = await fn.callAsync({ get value() {
+            assert.throws(() => isolated.close(), /calls to its functions are in progress/);
+            return owner;
+          } });
+          assert.strictEqual(result, addressof(owner));
+        } finally {
+          isolated.close();
+        }
+      });
+
+      it("keeps owners until a converted result has passed errcheck", async function () {
+        let owner = Buffer.alloc(4096);
+        const weak = new WeakRef(owner);
+        await new Promise((resolve) => setImmediate(resolve));
+        class Temporary extends c_void_p {
+          static from_param() {
+            const buffer = owner; owner = null;
+            return ctypes.cast(new c_void_p(buffer), ctypes.POINTER(c_uint8));
+          }
+        }
+        const fn = lib.func("fixture_address", ctypes.POINTER(c_uint8), [Temporary]);
+        fn.errcheck = (result) => {
+          for (let i = 0; i < 10; i++) gc();
+          assert.ok(weak.deref(), "owner was released before JS errcheck");
+          return result.address;
+        };
+        try { assert.strictEqual(typeof fn(0), "bigint"); }
+        finally { fn.errcheck = null; }
+        await collectGarbage();
+        assert.strictEqual(weak.deref(), undefined);
+      });
+
+      it("retains queued async arguments, including native by-value and numeric-pointer extensions", { timeout: 12000 }, function () {
+        const script = `
+          import assert from "node:assert/strict";
+          import * as c from "node-ctypes";
+          const lib = new c.CDLL(${JSON.stringify(FIXTURE)});
+          const system = process.platform === "win32" ? new c.WinDLL("kernel32.dll") : new c.CDLL(${JSON.stringify(LIBC)});
+          const sleep = process.platform === "win32"
+            ? system.func("Sleep", null, [c.c_uint32])
+            : system.func("usleep", c.c_int32, [c.c_uint32]);
+          let gateDone = false;
+          const gate = sleep.callAsync(process.platform === "win32" ? 2000 : 2000000).then(() => { gateDone = true; });
+          const Ptr = c.POINTER(c.c_uint8);
+          const address = lib.func("fixture_address", c.c_size_t, [Ptr]);
+          const proto = c.CFUNCTYPE(c.c_size_t, Ptr)(["fixture_address", lib]);
+          const cases = [];
+          function queue(name, fn) {
+            const owner = Buffer.alloc(4096);
+            const pointer = c.cast(new c.c_void_p(owner), Ptr);
+            cases.push({ name, weak: new WeakRef(owner), promise: fn(pointer) });
+          }
+          queue("CDLL pointer", pointer => address.callAsync(pointer));
+          queue("prototype pointer", pointer => proto.callAsync(pointer));
+          let convertedWeak;
+          class Converted extends c.c_void_p {
+            static from_param() {
+              const owner = Buffer.alloc(4096);
+              convertedWeak = new WeakRef(owner);
+              return c.cast(new c.c_void_p(owner), Ptr);
+            }
+          }
+          const converted = lib.func("fixture_address", c.c_size_t, [Converted]);
+          const convertedPromise = converted.callAsync(0);
+          cases.push({ name: "from_param result", weak: convertedWeak, promise: convertedPromise });
+          const numeric = lib._lib.func("fixture_echo_size_t", c.CType.SIZE_T, [c.CType.SIZE_T]);
+          function queueNumeric(kind) {
+            const owner = kind === "Buffer" ? Buffer.alloc(4096) : new ArrayBuffer(4096);
+            cases.push({ name: kind + " as integer address", weak: new WeakRef(owner), promise: numeric.callAsync(owner) });
+          }
+          queueNumeric("Buffer");
+          queueNumeric("ArrayBuffer");
+          const inferred = lib._lib.func("fixture_echo_size_t", c.CType.SIZE_T, []);
+          function queueInferred() {
+            const owner = Buffer.alloc(4096);
+            const value = new c.c_size_t(c.addressof(owner));
+            value.owner = owner;
+            cases.push({ name: "inferred scalar owner", weak: new WeakRef(owner), promise: inferred.callAsync(value) });
+          }
+          queueInferred();
+          const PointerValue = new c.StructType();
+          PointerValue.addField("value", c.CType.POINTER);
+          const byValue = lib._lib.func("fixture_pointer_value", c.CType.SIZE_T, [PointerValue]);
+          function queueStruct() {
+            const owner = Buffer.alloc(4096);
+            cases.push({ name: "native object by value", weak: new WeakRef(owner), promise: byValue.callAsync({ value: owner }) });
+          }
+          queueStruct();
+          let fieldWeak;
+          const fieldPromise = byValue.callAsync({ get value() {
+            const owner = Buffer.alloc(4096); fieldWeak = new WeakRef(owner); return owner;
+          } });
+          cases.push({ name: "materialized field", weak: fieldWeak, promise: fieldPromise });
+          let bufferWeak;
+          const bufferPromise = byValue.callAsync({ get _buffer() {
+            const owner = Buffer.alloc(4096); bufferWeak = new WeakRef(owner);
+            return new c.c_void_p(owner)._buffer;
+          } });
+          cases.push({ name: "materialized struct buffer", weak: bufferWeak, promise: bufferPromise });
+          const PointerArray = new c.StructType();
+          PointerArray.addField("values", new c.ArrayType(c.CType.POINTER, 1));
+          const arrayValue = lib._lib.func("fixture_pointer_array_value", c.CType.SIZE_T, [PointerArray]);
+          let elementWeak;
+          const elements = [];
+          Object.defineProperty(elements, "0", { get() {
+            const owner = Buffer.alloc(4096); elementWeak = new WeakRef(owner); return owner;
+          } });
+          const elementPromise = arrayValue.callAsync({ values: elements });
+          cases.push({ name: "materialized array element", weak: elementWeak, promise: elementPromise });
+          const checked = lib.func("fixture_address", Ptr, [Converted]);
+          checked.errcheck = () => {
+            for (let i = 0; i < 10; i++) globalThis.gc();
+            assert.ok(convertedWeak.deref(), "owner was released before async JS errcheck");
+            throw new Error("expected result check failure");
+          };
+          const rejected = checked.callAsync(0).then(
+            () => assert.fail("errcheck must reject"),
+            error => assert.match(error.message, /expected result check failure/),
+          );
+          cases.push({ name: "async result check failure", weak: convertedWeak, promise: rejected });
+          for (let i = 0; i < 8; i++) { await new Promise(setImmediate); globalThis.gc(); }
+          assert.equal(gateDone, false, "the worker gate must still be pending");
+          for (const item of cases) assert.ok(item.weak.deref(), item.name + " was collected while queued");
+          await Promise.all([gate, ...cases.map(item => item.promise)]);
+          checked.errcheck = null;
+          for (let i = 0; i < 10; i++) { await new Promise(setImmediate); globalThis.gc(); }
+          for (const item of cases) assert.equal(item.weak.deref(), undefined, item.name + " leaked after completion");
+          lib.close(); system.close();
+        `;
+        const child = spawnSync(process.execPath, ["--expose-gc", "--input-type=module", "-e", script], {
+          cwd: import.meta.dirname,
+          env: { ...process.env, UV_THREADPOOL_SIZE: "1" },
+          timeout: 10000,
+          encoding: "utf8",
+        });
+        assert.strictEqual(child.error, undefined);
+        assert.strictEqual(child.status, 0, child.stderr);
+      });
+    });
+
+describe("owners of pointer views", function () {
+  const Ptr = ctypes.POINTER(c_int32);
+  class Record extends ctypes.Structure { static _fields_ = [["p", Ptr]]; }
+  class Value extends ctypes.Union { static _fields_ = [["p", Ptr]]; }
+  const Functional = ctypes.struct({ p: Ptr });
+
+  it("a derived pointer snapshots a mutable c_void_p owner's memory", async function () {
+    function create() {
+      const target = new c_int32(48);
+      const owner = new c_void_p(target._buffer);
+      const p = ctypes.cast(owner, Ptr);
+      const derived = Ptr.fromAddress(p.address, p);
+      owner.value = null;
+      return { derived, weak: new WeakRef(target._buffer) };
+    }
+    let { derived, weak } = create();
+    await collectGarbage();
+    assert.ok(weak.deref(), "reassigning the owner must not free an existing derived pointer's memory");
+    assert.strictEqual(derived[0], 48);
+    derived = null;
+    await collectGarbage();
+    assert.strictEqual(weak.deref(), undefined);
+  });
+
+  it("overwriting union pointer storage releases the old owner", async function () {
+    class Overlay extends ctypes.Union {
+      static _fields_ = [["p", Ptr], ["bits", ctypes.c_uint64]];
+    }
+    function create() {
+      const target = new c_int32(42);
+      const overlay = new Overlay();
+      overlay.p = ctypes.pointer(target);
+      return { overlay, weak: new WeakRef(target._buffer) };
+    }
+    const { overlay, weak } = create();
+    await collectGarbage();
+    assert.ok(weak.deref());
+    overlay.bits = 0n;
+    await collectGarbage();
+    assert.strictEqual(weak.deref(), undefined);
+  });
+
+  it("assignments through address-backed aliases update the owner's references", async function () {
+    function assign() {
+      const holder = new Record();
+      const alias = ctypes.cast(new c_void_p(holder._buffer), ctypes.POINTER(Record));
+      const target = new c_int32(61);
+      alias.contents.p = ctypes.pointer(target);
+      return { holder, weak: new WeakRef(target._buffer) };
+    }
+    const { holder, weak } = assign();
+    await collectGarbage();
+    assert.ok(weak.deref(), "the alias's references must live with the original memory");
+    assert.strictEqual(holder.p[0], 61);
+    holder.p = null;
+    await collectGarbage();
+    assert.strictEqual(weak.deref(), undefined);
+  });
+
+  it("address-backed pointer slots keep assigned objects until overwritten", async function () {
+    function assign() {
+      const slots = ctypes.array(Ptr, 1)();
+      const p = ctypes.cast(new c_void_p(slots._buffer), ctypes.POINTER(Ptr));
+      const target = new c_int32(73);
+      p[0] = ctypes.pointer(target);
+      return { slots, weak: new WeakRef(target._buffer) };
+    }
+    const { slots, weak } = assign();
+    await collectGarbage();
+    assert.ok(weak.deref(), "the temporary pointer must not own the only reference");
+    assert.strictEqual(slots[0][0], 73);
+    slots[0] = null;
+    await collectGarbage();
+    assert.strictEqual(weak.deref(), undefined);
+  });
+
+  it("assigning a pointer snapshots its current pointee", async function () {
+    function escape() {
+      const target = new c_int32(42);
+      const p = ctypes.pointer(target);
+      const holder = new Record();
+      holder.p = p;
+      p.contents = new c_int32(7);
+      return { holder, weak: new WeakRef(target._buffer) };
+    }
+    let { holder, weak } = escape();
+    await collectGarbage();
+    assert.ok(weak.deref(), "repointing the source must not free memory stored in the field");
+    assert.strictEqual(holder.p[0], 42);
+    holder.p = null;
+    await collectGarbage();
+    assert.strictEqual(weak.deref(), undefined);
+    holder = null;
+  });
+
+  const escapedPointer = (kind) => {
+    const target = new c_int32(42);
+    const weak = new WeakRef(target._buffer);
+    const p = ctypes.pointer(target);
+    let holder, result;
+    if (kind === "array") {
+      holder = ctypes.array(Ptr, 1)(p);
+      result = holder[0];
+      holder[0] = null;
+    } else if (kind === "double pointer") {
+      holder = ctypes.POINTER(Ptr).fromBuffer(byref(p));
+      result = holder[0];
+    } else {
+      holder = kind === "union" ? new Value() : kind === "functional" ? Functional.create() : new Record();
+      holder.p = p;
+      result = holder.p;
+      holder.p = null;
+    }
+    return { result, weak };
+  };
+
+  for (const kind of ["structure", "union", "functional", "array", "double pointer"]) {
+    it(`${kind} keeps the owner snapshot when the source field changes or disappears`, async function () {
+      let { result, weak } = escapedPointer(kind);
+      await collectGarbage();
+      assert.ok(weak.deref(), "the pointer's known owner was collected");
+      assert.strictEqual(result[0], 42);
+      result = null;
+      await collectGarbage();
+      assert.strictEqual(weak.deref(), undefined, "the escaped pointer retained its owner after collection");
+    });
+  }
+
+  for (const kind of ["contents", "element", "buffer", "typed array"]) {
+    it(`an address-backed ${kind} keeps its pointer's owner`, async function () {
+      function escape() {
+        const target = new c_int32(37);
+        const weak = new WeakRef(target._buffer);
+        const p = ctypes.cast(new c_void_p(target._buffer), Ptr);
+        const instance = kind === "element" ? ctypes.POINTER(ctypes.array(c_int32, 1)).fromAddress(p.address, p)[0] : p.contents;
+        const result = kind === "buffer" ? instance._buffer.subarray(0) : kind === "typed array" ? new Uint8Array(instance._buffer.buffer) : instance;
+        return { result, weak };
+      }
+      let { result, weak } = escape();
+      await collectGarbage();
+      assert.ok(weak.deref(), "the borrowed view lost its owner");
+      result = null;
+      await collectGarbage();
+      assert.strictEqual(weak.deref(), undefined);
+    });
+  }
+
+  it("copying a pointer slot keeps its pointee after the pointer wrapper is collected", async function () {
+    function escape() {
+      const target = new c_int32(19);
+      const p = ctypes.pointer(target);
+      return { slot: p.toBuffer(), weak: new WeakRef(target._buffer) };
+    }
+    let { slot, weak } = escape();
+    await collectGarbage();
+    assert.ok(weak.deref(), "a pointer-slot buffer must keep the pointee alive");
+    slot = null;
+    await collectGarbage();
+    assert.strictEqual(weak.deref(), undefined);
   });
 });

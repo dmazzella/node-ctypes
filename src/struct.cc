@@ -37,8 +37,9 @@ StructType::StructType(const Napi::CallbackInfo& info) : Napi::ObjectWrap<Struct
     Napi::Value alignment = options.Get("alignment");
     if (alignment.IsNumber()) {
       const int64_t value = alignment.As<Napi::Number>().Int64Value();
-      if (value < 1 || value > 1 << 15) {
-        throw Napi::RangeError::New(info.Env(), "alignment must be between 1 and 32768");
+      if (alignment.As<Napi::Number>().DoubleValue() != static_cast<double>(value) ||
+          value < 1 || value > 1 << 15 || (value & (value - 1)) != 0) {
+        throw Napi::RangeError::New(info.Env(), "alignment must be a power of two between 1 and 32768");
       }
       min_alignment = static_cast<size_t>(value);
     }
@@ -49,8 +50,15 @@ StructType::StructType(const Napi::CallbackInfo& info) : Napi::ObjectWrap<Struct
   struct_info_->SetMemoryClass(memory_class);
 }
 
+void StructType::EnsureMutable(Napi::Env env) const {
+  if (struct_info_->IsFinalized()) {
+    throw Napi::TypeError::New(env, StructInfo::kFinalizedError);
+  }
+}
+
 Napi::Value StructType::AddField(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
+  EnsureMutable(env);
 
   if (info.Length() < 2) {
     Napi::TypeError::New(env, "Expected (name, type)").ThrowAsJavaScriptException();
@@ -70,6 +78,10 @@ Napi::Value StructType::AddField(const Napi::CallbackInfo& info) {
   }
 
   const TypeSpec spec = TypeSpecFromJS(info[1]);
+  EnsureMutable(env);
+  if (spec.struct_info == struct_info_) {
+    throw Napi::TypeError::New(env, "A structure cannot contain itself by value");
+  }
   const std::shared_ptr<ArrayInfo>& array = spec.array_info;
 
   if (array) {
@@ -92,6 +104,7 @@ Napi::Value StructType::GetAlignment(const Napi::CallbackInfo& info) {
 
 Napi::Value StructType::Create(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
+  struct_info_->Finalize();
 
   // Crea buffer interno
   size_t size = struct_info_->GetSize();
@@ -148,6 +161,14 @@ Napi::Value StructType::Create(const Napi::CallbackInfo& info) {
   return obj;
 }
 
+Napi::Value StructType::ReadBuffer(const Napi::Buffer<uint8_t>& buffer) {
+  if (buffer.Length() < struct_info_->GetSize()) {
+    throw Napi::RangeError::New(buffer.Env(), "Buffer too small for struct");
+  }
+  struct_info_->Finalize();
+  return struct_info_->StructToJS(buffer.Env(), buffer.Data());
+}
+
 Napi::Value StructType::Read(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
 
@@ -157,7 +178,7 @@ Napi::Value StructType::Read(const Napi::CallbackInfo& info) {
   }
 
   Napi::Buffer<uint8_t> buffer = info[0].As<Napi::Buffer<uint8_t>>();
-  return struct_info_->StructToJS(env, buffer.Data());
+  return ReadBuffer(buffer);
 }
 
 Napi::Value StructType::ToObject(const Napi::CallbackInfo& info) {
@@ -173,7 +194,7 @@ Napi::Value StructType::ToObject(const Napi::CallbackInfo& info) {
   // Se è un buffer, convertilo direttamente
   if (arg.IsBuffer()) {
     Napi::Buffer<uint8_t> buffer = arg.As<Napi::Buffer<uint8_t>>();
-    return struct_info_->StructToJS(env, buffer.Data());
+    return ReadBuffer(buffer);
   }
 
   // Se è un oggetto con _buffer, estrai il buffer — single Get()
@@ -181,7 +202,7 @@ Napi::Value StructType::ToObject(const Napi::CallbackInfo& info) {
     Napi::Value bufferVal = arg.As<Napi::Object>().Get("_buffer");
     if (bufferVal.IsBuffer()) {
       Napi::Buffer<uint8_t> buffer = bufferVal.As<Napi::Buffer<uint8_t>>();
-      return struct_info_->StructToJS(env, buffer.Data());
+      return ReadBuffer(buffer);
     }
   }
 

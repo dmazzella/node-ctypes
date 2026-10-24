@@ -291,4 +291,80 @@ describe("Objects kept alive by fields", function () {
     assert.strictEqual(keptObject(outer._buffer, offset), keptObject(source._buffer, 0));
     assert.strictEqual(outer.child.text, "copied");
   });
+
+  it("self-assignment preserves nested keepalives", function () {
+    class Child extends Structure { static _fields_ = [["text", c_char_p]]; }
+    class Outer extends Structure { static _fields_ = [["child", Child]]; }
+    const outer = new Outer();
+    outer.child.text = "self";
+    const owner = keptObject(outer._buffer, 0);
+    outer.child = outer.child;
+    assert.strictEqual(keptObject(outer._buffer, 0), owner);
+  });
+
+  it("overlapping typed copies snapshot the owners before clearing the target", function () {
+    class Pair extends Structure {
+      static _fields_ = [["first", c_char_p], ["second", c_char_p]];
+    }
+    const word = sizeof(c_char_p);
+    const buffer = Buffer.alloc(word * 3);
+    const source = Pair.from_buffer(buffer);
+    const destination = Pair.from_buffer(buffer, word);
+    source.first = "first";
+    source.second = "second";
+    const first = keptObject(buffer, 0);
+    const second = keptObject(buffer, word);
+    ctypes.writeValue(destination, Pair, source);
+    assert.strictEqual(keptObject(buffer, word), first);
+    assert.strictEqual(keptObject(buffer, word * 2), second);
+  });
+
+  it("array fields and nested array elements transfer their keepalives", function () {
+    const Strings = ctypes.array(c_char_p, 2);
+    class Record extends Structure { static _fields_ = [["items", Strings]]; }
+    class Value extends Union { static _fields_ = [["items", Strings]]; }
+    const source = Strings("one", "two");
+    const owners = [keptObject(source._buffer, 0), keptObject(source._buffer, sizeof(c_char_p))];
+    for (const target of [new Record(), new Value()]) {
+      target.items = source;
+      assert.strictEqual(keptObject(target._buffer, 0), owners[0]);
+      assert.strictEqual(keptObject(target._buffer, sizeof(c_char_p)), owners[1]);
+    }
+    const nested = ctypes.array(Strings, 2)();
+    nested[1] = source;
+    assert.strictEqual(keptObject(nested._buffer, sizeof(Strings)), owners[0]);
+    assert.strictEqual(keptObject(nested._buffer, sizeof(Strings) + sizeof(c_char_p)), owners[1]);
+  });
+
+  it("functional structure assignments transfer owners rather than copying bytes only", function () {
+    const Child = ctypes.struct({ text: c_char_p });
+    const Parent = ctypes.struct({ child: Child });
+    const source = Child.create({ text: "functional" });
+    const target = Parent.create();
+    target.child = source;
+    assert.strictEqual(keptObject(target._buffer, 0), keptObject(source._buffer, 0));
+  });
+
+  it("typed copies keep known pointer owners but raw memmove does not", function () {
+    class Record extends Structure { static _fields_ = [["text", c_char_p]]; }
+    const source = new Record("known owner");
+    const typed = Record.from_buffer_copy(source);
+    assert.strictEqual(keptObject(typed._buffer, 0), keptObject(source._buffer, 0));
+    const strings = ctypes.array(c_char_p, 1).from_buffer_copy(source);
+    assert.strictEqual(keptObject(strings._buffer, 0), keptObject(source._buffer, 0));
+    const scalar = c_char_p.from_buffer_copy(source._buffer);
+    assert.strictEqual(keptObject(scalar._buffer, 0), keptObject(source._buffer, 0));
+    const raw = Buffer.alloc(sizeof(Record));
+    ctypes.memmove(raw, source, raw.length);
+    assert.strictEqual(keptObject(raw, 0), undefined);
+  });
+
+  it("failed pointer writes leave the previous reference intact", function () {
+    class Record extends Structure { static _fields_ = [["text", c_char_p]]; }
+    const record = new Record("still owned");
+    const owner = keptObject(record._buffer, 0);
+    assert.throws(() => { record.text = -1n; }, RangeError);
+    assert.strictEqual(keptObject(record._buffer, 0), owner);
+    assert.strictEqual(record.text, "still owned");
+  });
 });

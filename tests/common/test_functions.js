@@ -46,6 +46,7 @@ describe("Functions and Callbacks", function () {
     // Python ctypes-like syntax
     it("should call abs() with Python ctypes-like syntax", function () {
       const abs = libc.abs;
+      assert.strictEqual(libc.abs, abs);
       abs.argtypes = [ctypes.c_int32];
       abs.restype = ctypes.c_int32;
 

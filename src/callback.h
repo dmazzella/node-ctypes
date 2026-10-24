@@ -6,6 +6,11 @@
 
 namespace ctypes {
 
+struct ClosureDeleter {
+  void operator()(ffi_closure* closure) const noexcept { ffi_closure_free(closure); }
+};
+using ClosureHandle = std::unique_ptr<ffi_closure, ClosureDeleter>;
+
 // ========================================================================
 // Callback - Solo main thread, veloce, zero overhead
 // ========================================================================
@@ -13,7 +18,7 @@ namespace ctypes {
 struct CallbackData {
   Napi::FunctionReference js_function_ref;
   Napi::FunctionReference error_handler_ref;  // Error handler opzionale
-  ffi_closure* closure = nullptr;
+  ClosureHandle closure;
   void* code_ptr = nullptr;
   ffi_cif cif;
   CType return_type;
@@ -66,7 +71,7 @@ struct ThreadSafeCallbackData {
   Napi::FunctionReference js_function_ref;
   Napi::FunctionReference error_handler_ref;  // Error handler opzionale
   std::thread::id main_thread_id;
-  ffi_closure* closure = nullptr;
+  ClosureHandle closure;
   void* code_ptr = nullptr;
   ffi_cif cif;
   CType return_type;
@@ -90,9 +95,8 @@ using ThreadSafeCallbackFunction =
 
 struct ThreadSafeCallbackState : ThreadSafeCallbackData {
   ThreadSafeCallbackFunction tsfn;
-  // Impostato dal finalizzatore della TSFN (main thread): dopo, `tsfn` non è
-  // più valida e non va rilasciata.
-  bool tsfn_finalized = false;
+  // TSFN assente o finalizzata: non va rilasciata.
+  bool tsfn_finalized = true;
 };
 
 class ThreadSafeCallback : public Napi::ObjectWrap<ThreadSafeCallback> {

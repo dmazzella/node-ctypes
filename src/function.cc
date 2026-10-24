@@ -103,7 +103,7 @@ inline uintptr_t AddressFromBigInt(const Napi::Value& val) {
 }
 
 inline uintptr_t AddressFromNumber(const Napi::Value& val) {
-  return static_cast<uintptr_t>(val.As<Napi::Number>().Int64Value());
+  return static_cast<uintptr_t>(IntegerBitsFromDouble(val, val.As<Napi::Number>().DoubleValue()));
 }
 
 // Tipi convertiti da JSToC (wchar e simili): un -1 significa che il tipo non
@@ -231,24 +231,7 @@ Napi::Error ArgumentErrorFor(Napi::Env env, size_t index, const Napi::Error& cau
 
 // Valori che non sono number (boolean, BigInt, errori): fuori dal percorso caldo.
 CTYPES_NOINLINE double DoubleArgSlow(const Napi::Value& val) {
-  switch (val.Type()) {
-    case napi_boolean:
-      return val.As<Napi::Boolean>().Value() ? 1.0 : 0.0;
-    case napi_bigint: {
-      bool lossless;
-      const int64_t v = val.As<Napi::BigInt>().Int64Value(&lossless);
-      if (lossless) {
-        return static_cast<double>(v);
-      }
-      const uint64_t u = val.As<Napi::BigInt>().Uint64Value(&lossless);
-      if (lossless) {
-        return static_cast<double>(u);
-      }
-      throw Napi::RangeError::New(val.Env(), "BigInt out of range for a floating point argument");
-    }
-    default:
-      ThrowNotNumeric(val, NumericKind::Real);
-  }
+  return RealFromJS(val);
 }
 
 CTYPES_ALWAYS_INLINE double DoubleArg(const Napi::Value& val) {
@@ -298,6 +281,9 @@ Napi::Function FFIFunction::GetClass(Napi::Env env) {
                      {
                        InstanceMethod("call", &FFIFunction::Call),
                        InstanceMethod("callAsync", &FFIFunction::CallAsync),
+                       InstanceMethod("_callWithErrcheck", &FFIFunction::CallChecked),
+                       InstanceMethod("_callAsyncWithErrcheck", &FFIFunction::CallAsyncChecked),
+                       InstanceMethod("_makeCheckedCall", &FFIFunction::MakeCheckedCall),
                        InstanceMethod("setErrcheck", &FFIFunction::SetErrcheck),
                        InstanceMethod("getCapturedLastError", &FFIFunction::GetLastErrorCaptured),
                        InstanceMethod("getCapturedErrno", &FFIFunction::GetErrnoCaptured),
@@ -407,6 +393,10 @@ FFIFunction::FFIFunction(const Napi::CallbackInfo& info)
       capture_errno_ = opts.Get("use_errno").ToBoolean().Value();
     }
     struct_as_buffer_ = opts.Get("struct_buffer").ToBoolean().Value();
+    scalar_as_buffer_ = opts.Get("scalar_buffer").ToBoolean().Value();
+    if (scalar_as_buffer_ && CTypeSize(return_type_) == 0) {
+      throw Napi::TypeError::New(env, "scalar_buffer requires a non-void primitive return type");
+    }
     // CFUNCTYPE((name, dll)): la libreria del simbolo, come Library::GetFunction.
     Napi::Value library = opts.Get("library");
     if (!library.IsUndefined() && !library.IsNull()) {
@@ -435,14 +425,49 @@ void FFIFunction::AttachLibrary(Napi::Object library) {
   library_ref_ = Napi::Persistent(library);
 }
 
-Napi::Value FFIFunction::FastCall(const Napi::CallbackInfo& info) {
-  FFIFunction* self = static_cast<FFIFunction*>(info.Data());
-  if (self->simple_call_ && info.Length() >= self->arg_types_.size()) [[likely]] {
-    if (Napi::Value result; self->SimpleCall(info, result)) [[likely]] {
+template <typename Args, bool HasErrcheck>
+  requires(std::same_as<Args, Napi::CallbackInfo> || std::same_as<Args, FunctionArguments>)
+CTYPES_ALWAYS_INLINE Napi::Value FFIFunction::InvokeCall(const Args& args, const Napi::Function* errcheck) {
+  if (simple_call_ && args.Length() >= arg_types_.size()) [[likely]] {
+    if (Napi::Value result; SimpleCall<Args, HasErrcheck>(args, result, errcheck)) [[likely]] {
       return result;
     }
   }
-  return self->Call(info);
+  return CallArguments(FunctionArguments{args}, errcheck);
+}
+
+Napi::Value FFIFunction::FastCall(const Napi::CallbackInfo& info) {
+  FFIFunction* self = static_cast<FFIFunction*>(info.Data());
+  if (self->errcheck_callback_.IsEmpty()) [[likely]] return self->InvokeCall<Napi::CallbackInfo, false>(info, nullptr);
+  const Napi::Function errcheck = self->SnapshotErrcheck();
+  return self->InvokeCall(info, errcheck.IsEmpty() ? nullptr : &errcheck);
+}
+
+Napi::Value FFIFunction::CallChecked(const Napi::CallbackInfo& info) {
+  if (info.Length() < 1 || !info[0].IsFunction()) {
+    throw Napi::TypeError::New(info.Env(), "a result handler function is required");
+  }
+  const FunctionArguments args{info, 1};
+  const Napi::Function errcheck = info[0].As<Napi::Function>();
+  return InvokeCall(args, &errcheck);
+}
+
+Napi::Value FFIFunction::CallAsyncChecked(const Napi::CallbackInfo& info) {
+  if (info.Length() < 1 || !info[0].IsFunction()) {
+    throw Napi::TypeError::New(info.Env(), "a result handler function is required");
+  }
+  const Napi::Function errcheck = info[0].As<Napi::Function>();
+  return CallAsyncArguments(FunctionArguments{info, 1}, &errcheck);
+}
+
+Napi::Value FFIFunction::FastCheckedCall(const Napi::CallbackInfo& info) {
+  return static_cast<FFIFunction*>(info.Data())->CallChecked(info);
+}
+
+Napi::Value FFIFunction::MakeCheckedCall(const Napi::CallbackInfo& info) {
+  Napi::Function call = Napi::Function::New<&FFIFunction::FastCheckedCall>(info.Env(), "_callWithErrcheck", this);
+  call.DefineProperty(Napi::PropertyDescriptor::Value("_ffiFunction", Value(), napi_default));
+  return call;
 }
 
 // Shadows the prototype `call` (InstanceMethod) with an own-property function
@@ -529,26 +554,13 @@ bool FFIFunction::PrepareFFI(Napi::Env env) {
       ? struct_result_data_ != nullptr && return_struct_info_->GetSize() <= kMaxSimpleStructReturn
       : return_type_ != CType::CTYPES_ARRAY && return_type_ != CType::CTYPES_UNION;
   simple_call_ =
-    arg_types_.size() <= kMaxSimpleArgs && simple_return && std::ranges::all_of(arg_types_, [](CType type) {
-      switch (type) {
-        case CType::CTYPES_STRUCT:
-        case CType::CTYPES_UNION:
-        case CType::CTYPES_ARRAY:
-        case CType::CTYPES_WSTRING:
-          return false;
-        default:
-          return true;
-      }
-    });
+    arg_types_.size() <= kMaxSimpleArgs && simple_return && std::ranges::all_of(arg_types_, IsSimpleArgumentType);
 
   return true;
 }
 
 void FFIFunction::SetupDirectCall() {
   direct_invoker_ = nullptr;
-  direct_arg_widen_count_ = 0;
-  direct_ret_widen_size_ = 0;
-  direct_ret_signed_ = false;
 
   if constexpr (sizeof(void*) != 8 || std::endian::native != std::endian::little) {
     return;
@@ -557,54 +569,7 @@ void FFIFunction::SetupDirectCall() {
     return;
   }
 
-  size_t code = 0;
-  size_t weight = 1;
-  for (size_t i = 0; i < arg_types_.size(); i++) {
-    const CType t = arg_types_[i];
-    direct::ArgClass cls;
-    if ((t == CType::CTYPES_DOUBLE || t == CType::CTYPES_FLOAT) && !direct::kFloatArgsAllowed) {
-      direct_arg_widen_count_ = 0;
-      return;
-    }
-    if (t == CType::CTYPES_DOUBLE) {
-      cls = direct::ArgClass::Double;
-    } else if (t == CType::CTYPES_FLOAT) {
-      cls = direct::ArgClass::Float;
-    } else if (direct::IsIntClass(t)) {
-      cls = direct::ArgClass::Int;
-      const size_t size = CTypeSize(t);
-      if (size < 8) {
-        direct_arg_widen_[direct_arg_widen_count_++] = {static_cast<uint8_t>(i), static_cast<uint8_t>(size),
-                                                        direct::IsSignedInt(t)};
-      }
-    } else {
-      direct_arg_widen_count_ = 0;
-      return;
-    }
-    code += static_cast<size_t>(cls) * weight;
-    weight *= direct::kArgClassCount;
-  }
-
-  direct::RetClass ret;
-  if (return_type_ == CType::CTYPES_VOID) {
-    ret = direct::RetClass::Void;
-  } else if (return_type_ == CType::CTYPES_DOUBLE) {
-    ret = direct::RetClass::Double;
-  } else if (return_type_ == CType::CTYPES_FLOAT) {
-    ret = direct::RetClass::Float;
-  } else if (direct::IsIntClass(return_type_)) {
-    ret = direct::RetClass::Int;
-    const size_t size = CTypeSize(return_type_);
-    if (size < 8) {
-      direct_ret_widen_size_ = static_cast<uint8_t>(size);
-      direct_ret_signed_ = direct::IsSignedInt(return_type_);
-    }
-  } else {
-    direct_arg_widen_count_ = 0;
-    return;
-  }
-
-  direct_invoker_ = direct::Select(ret, arg_types_.size(), code);
+  direct_invoker_ = direct::Select(return_type_, arg_types_);
 }
 
 namespace {
@@ -714,7 +679,11 @@ Napi::Value FFIFunction::ConvertReturn(Napi::Env env,
                                        CType type,
                                        const std::shared_ptr<StructInfo>& struct_info,
                                        const std::shared_ptr<ArrayInfo>& array_info,
-                                       bool struct_as_buffer) {
+                                       bool struct_as_buffer,
+                                       bool scalar_as_buffer) {
+  if (scalar_as_buffer) {
+    return Napi::Buffer<uint8_t>::Copy(env, static_cast<const uint8_t*>(return_data), CTypeSize(type));
+  }
   // Tipi primitivi: i byte del valore restituito (ReturnValue).
   const void* rv = return_data;
 
@@ -892,6 +861,11 @@ CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalPrimitive(const Napi::Value& val, 
       memcpy(slot, &v, sizeof(v));
       return true;
     }
+    case CType::CTYPES_WCHAR: {
+      const wchar_t v = WcharFromJS(val);
+      memcpy(slot, &v, sizeof(v));
+      return true;
+    }
     case CType::CTYPES_INT8: {
       int8_t v = static_cast<int8_t>(Int32Arg(val));
       memcpy(slot, &v, sizeof(v));
@@ -939,7 +913,8 @@ bool FFIFunction::MarshalStructArg(Napi::Env env,
                                    uint8_t* slot,
                                    void** arg_value_ptr,
                                    std::vector<std::vector<uint8_t>>& large_buffers,
-                                   std::vector<size_t>* large_indices) {
+                                   std::vector<size_t>* large_indices,
+                                   std::vector<Napi::ObjectReference>* owners) {
   size_t struct_size = struct_info->GetSize();
 
   // Use overflow buffer if struct > slot size
@@ -970,6 +945,7 @@ bool FFIFunction::MarshalStructArg(Napi::Env env,
     // undefined, che non è un Buffer, quindi il check IsBuffer copre tutto.
     Napi::Value buf_prop = obj.Get("_buffer");
     if (buf_prop.IsBuffer()) {
+      if (owners) owners->push_back(Napi::Persistent(buf_prop.As<Napi::Object>()));
       Napi::Buffer<uint8_t> buf = buf_prop.As<Napi::Buffer<uint8_t>>();
       if (buf.Length() >= struct_size) {
         memcpy(dest, buf.Data(), struct_size);
@@ -979,7 +955,7 @@ bool FFIFunction::MarshalStructArg(Napi::Env env,
         return false;
       }
     } else {
-      if (!struct_info->JSToStruct(env, obj, std::span(dest, dest_size))) {
+      if (!struct_info->JSToStruct(env, obj, std::span(dest, dest_size), owners)) {
         Napi::Error::New(env, std::format("Failed to convert JS object to struct at argument {}", arg_index))
           .ThrowAsJavaScriptException();
         return false;
@@ -1005,7 +981,8 @@ bool FFIFunction::MarshalArrayArg(Napi::Env env,
                                   uint8_t* slot,
                                   void** arg_value_ptr,
                                   std::vector<std::vector<uint8_t>>& large_buffers,
-                                  std::vector<size_t>* large_indices) {
+                                  std::vector<size_t>* large_indices,
+                                  std::vector<Napi::ObjectReference>* owners) {
   size_t array_size = array_info->GetSize();
 
   // Use overflow buffer if array > slot size
@@ -1031,7 +1008,7 @@ bool FFIFunction::MarshalArrayArg(Napi::Env env,
       return false;
     }
   } else {
-    if (!array_info->JSToArray(env, val, std::span(dest, dest_size))) {
+    if (!array_info->JSToArray(env, val, std::span(dest, dest_size), owners)) {
       Napi::Error::New(env, std::format("Failed to convert JS value to array at argument {}", arg_index))
         .ThrowAsJavaScriptException();
       return false;
@@ -1051,7 +1028,7 @@ bool FFIFunction::MarshalArrayArg(Napi::Env env,
 // Convalida argc e determina se la call è variadic.
 // Shared tra Call() (sync) e CallAsync() (async).
 CTYPES_ALWAYS_INLINE bool FFIFunction::ValidateAndResolveArgc(Napi::Env env,
-                                                              const Napi::CallbackInfo& info,
+                                                              const FunctionArguments& info,
                                                               size_t& out_argc,
                                                               bool& out_is_variadic) const {
   if (!cif_prepared_) [[unlikely]] {
@@ -1350,11 +1327,11 @@ CTYPES_ALWAYS_INLINE Napi::Value FFIFunction::FinalizeCall(CallContext& ctx) {
   Napi::Value result = struct_result_data_ != nullptr
                          ? StructResult(ctx.return_ptr)
                          : ConvertReturn(ctx.env, ctx.return_ptr, return_type_, return_struct_info_, return_array_info_,
-                                         struct_as_buffer_);
-  if (errcheck_callback_.IsEmpty()) [[likely]] {
+                                         struct_as_buffer_, scalar_as_buffer_);
+  if (ctx.errcheck == nullptr) [[likely]] {
     return result;
   }
-  return ApplyErrcheck(ctx.env, result, ctx.info);
+  return ApplyErrcheck(ctx.env, result, ctx.info, *ctx.errcheck);
 }
 
 VariadicCifCache* FFIFunction::AcquireVariadicCif(Napi::Env env,
@@ -1416,7 +1393,9 @@ VariadicCifCache* FFIFunction::AcquireVariadicCif(Napi::Env env,
 // CallContext, scratch e cache variadica. Le stringhe corte vanno nel buffer
 // inline dell'istanza, come in Call(); una stringa che non ci sta e le chiamate
 // rientranti passano a Call() prima di qualunque effetto.
-bool FFIFunction::SimpleCall(const Napi::CallbackInfo& info, Napi::Value& result) {
+template <typename Args, bool HasErrcheck>
+  requires(std::same_as<Args, Napi::CallbackInfo> || std::same_as<Args, FunctionArguments>)
+bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::Function* errcheck) {
   // Chiamata rientrante: il buffer inline delle stringhe è della chiamata esterna.
   if (call_depth_ != 0) [[unlikely]] {
     return false;
@@ -1447,6 +1426,7 @@ bool FFIFunction::SimpleCall(const Napi::CallbackInfo& info, Napi::Value& result
       type = extra.type;
       val = extra.value;
       extra_types[i - expected_argc] = type;
+      if (!IsSimpleArgumentType(type)) return false;
     }
     try {
       if (MarshalPrimitive(val, type, slot)) [[likely]] {
@@ -1515,14 +1495,7 @@ bool FFIFunction::SimpleCall(const Napi::CallbackInfo& info, Napi::Value& result
       ffi_call(&cache_entry->cif, FFI_FN(fn_ptr_), return_value, values.data());
     }
   } else if (direct_invoker_) [[likely]] {
-    for (uint8_t k = 0; k < direct_arg_widen_count_; k++) {
-      const direct::Widen& w = direct_arg_widen_[k];
-      direct::WidenInPlace(values[w.index], w.size, w.is_signed);
-    }
     direct_invoker_(fn_ptr_, values.data(), return_value);
-    if (direct_ret_widen_size_) {
-      direct::WidenInPlace(return_value, direct_ret_widen_size_, direct_ret_signed_);
-    }
   } else if (call_plan_) {
     ffi_call_plan_invoke(call_plan_, FFI_FN(fn_ptr_), return_value, values.data());
   } else {
@@ -1530,7 +1503,9 @@ bool FFIFunction::SimpleCall(const Napi::CallbackInfo& info, Napi::Value& result
   }
   CaptureErrorState(saved_errors);
 
-  switch (return_type_) {
+  if (scalar_as_buffer_) {
+    result = ConvertReturn(env, return_value, return_type_, return_struct_info_, return_array_info_, false, true);
+  } else switch (return_type_) {
     case CType::CTYPES_VOID:
       result = env.Undefined();
       break;
@@ -1551,13 +1526,20 @@ bool FFIFunction::SimpleCall(const Napi::CallbackInfo& info, Napi::Value& result
         ConvertReturn(env, return_value, return_type_, return_struct_info_, return_array_info_, struct_as_buffer_);
       break;
   }
-  if (!errcheck_callback_.IsEmpty()) [[unlikely]] {
-    result = ApplyErrcheck(env, result, info);
+  if constexpr (HasErrcheck) {
+    if (errcheck != nullptr) [[unlikely]] {
+      result = ApplyErrcheck(env, result, FunctionArguments{info}, *errcheck);
+    }
   }
   return true;
 }
 
 Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
+  const Napi::Function errcheck = SnapshotErrcheck();
+  return CallArguments(FunctionArguments{info}, errcheck.IsEmpty() ? nullptr : &errcheck);
+}
+
+Napi::Value FFIFunction::CallArguments(const FunctionArguments& info, const Napi::Function* errcheck) {
   Napi::Env env = info.Env();
 
   size_t argc;
@@ -1638,6 +1620,7 @@ Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
   alignas(16) ReturnValue return_value{};
 
   CallContext ctx{env, info};
+  ctx.errcheck = errcheck;
   ctx.argc = argc;
   ctx.expected_argc = expected_argc;
   ctx.active_cif = active_cif;
@@ -1679,16 +1662,9 @@ Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
   // Altrimenti reusable call plan quando disponibile (fast path su x86-64;
   // fallback sicuro a ffi_call altrove e se l'allocazione del plan è fallita).
   if (direct_invoker_ && ctx.active_cif == &cif_) [[likely]] {
-    for (uint8_t k = 0; k < direct_arg_widen_count_; k++) {
-      const direct::Widen& w = direct_arg_widen_[k];
-      direct::WidenInPlace(ctx.arg_values[w.index], w.size, w.is_signed);
-    }
     const SavedErrorState saved_errors = SwapInErrorState();
     direct_invoker_(fn_ptr_, ctx.arg_values, ctx.return_ptr);
     CaptureErrorState(saved_errors);
-    if (direct_ret_widen_size_) {
-      direct::WidenInPlace(ctx.return_ptr, direct_ret_widen_size_, direct_ret_signed_);
-    }
   } else {
     const SavedErrorState saved_errors = SwapInErrorState();
     if (ctx.active_plan) [[likely]] {
@@ -1705,32 +1681,28 @@ Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
 
 Napi::Value FFIFunction::SetErrcheck(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-
-  if (info.Length() < 1) {
-    // Clear errcheck
-    errcheck_callback_.Reset();
-    return env.Undefined();
-  }
-
-  if (!info[0].IsFunction() && !info[0].IsNull()) {
+  const Napi::Value callback = info.Length() == 0 ? env.Null() : info[0];
+  if (!callback.IsFunction() && !callback.IsNull()) {
     Napi::TypeError::New(env, "errcheck must be a function or null").ThrowAsJavaScriptException();
     return env.Undefined();
   }
 
-  if (info[0].IsNull()) {
-    errcheck_callback_.Reset();
+  if (callback.IsNull() && errcheck_callback_.IsEmpty()) return env.Undefined();
+  if (addon_ == nullptr) throw Napi::Error::New(env, "Addon not properly initialized");
+  Napi::FunctionReference next = callback.IsNull() ? Napi::FunctionReference() : Napi::Weak(callback.As<Napi::Function>());
+  if (callback.IsNull()) {
+    addon_->errcheck_owner_delete.Call(addon_->errcheck_owners.Value(), {Value()});
   } else {
-    errcheck_callback_ = Napi::Persistent(info[0].As<Napi::Function>());
+    addon_->errcheck_owner_set.Call(addon_->errcheck_owners.Value(), {Value(), callback});
   }
+  errcheck_callback_ = std::move(next);
 
   return env.Undefined();
 }
 
-Napi::Value FFIFunction::ApplyErrcheck(Napi::Env env, Napi::Value result, const Napi::CallbackInfo& info) {
-  // Se non c'è errcheck, restituisci il risultato direttamente
-  if (errcheck_callback_.IsEmpty()) {
-    return result;
-  }
+Napi::Value FFIFunction::ApplyErrcheck(Napi::Env env, Napi::Value result, const FunctionArguments& info,
+                                      const Napi::Function& errcheck) {
+  if (info.HasResultHandler()) return errcheck.Call(env.Undefined(), {result});
 
   // errcheck(result, this, args). Un'eccezione lanciata da errcheck diventa
   // Napi::Error (NAPI_CPP_EXCEPTIONS) e si propaga al caller JS.
@@ -1738,7 +1710,7 @@ Napi::Value FFIFunction::ApplyErrcheck(Napi::Env env, Napi::Value result, const 
   for (size_t i = 0; i < info.Length(); i++) {
     args_array.Set(static_cast<uint32_t>(i), info[i]);
   }
-  return errcheck_callback_.Value().Call(env.Undefined(), {result, info.This(), args_array});
+  return errcheck.Call(env.Undefined(), {result, Value(), args_array});
 }
 
 Napi::Value FFIFunction::GetName(const Napi::CallbackInfo& info) {
@@ -1755,6 +1727,11 @@ Napi::Value FFIFunction::GetAddress(const Napi::CallbackInfo& info) {
 // ============================================================================
 
 Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
+  const Napi::Function errcheck = SnapshotErrcheck();
+  return CallAsyncArguments(FunctionArguments{info}, errcheck.IsEmpty() ? nullptr : &errcheck);
+}
+
+Napi::Value FFIFunction::CallAsyncArguments(const FunctionArguments& info, const Napi::Function* errcheck) {
   Napi::Env env = info.Env();
 
   size_t argc;
@@ -1762,9 +1739,7 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
   if (!ValidateAndResolveArgc(env, info, argc, is_variadic)) {
     return env.Undefined();
   }
-  if (library_ != nullptr && !library_->IsLoaded()) {
-    throw Napi::Error::New(env, "Library is closed");
-  }
+  const LibraryCallScope library_scope(library_, env);
   const size_t expected_argc = arg_types_.size();
 
   // ---- Validate argc (shared with Call sync, done above) -----------
@@ -1862,6 +1837,12 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
 
     CType type = (i < expected_argc) ? arg_types_[i] : extra_types[i - expected_argc];
     const Napi::Value val = (i < expected_argc) ? info[i] : extra_values[i - expected_argc];
+    if (i >= expected_argc && info[i].IsObject()) {
+      buffer_refs.push_back(Napi::Persistent(info[i].As<Napi::Object>()));
+    }
+    if (val.IsObject()) {
+      buffer_refs.push_back(Napi::Persistent(val.As<Napi::Object>()));
+    }
 
     // Fast path: primitive types (shared implementation)
     try {
@@ -1884,8 +1865,6 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
             ptr = nullptr;
           } else if (val.IsObject()) {
             ptr = ObjectData(val, type);
-            // Pin: impedisci al GC di raccogliere la memoria durante la chiamata
-            buffer_refs.push_back(Napi::Persistent(val.As<Napi::Object>()));
           } else if (val.IsBigInt()) {
             bool lossless;
             ptr = reinterpret_cast<void*>(val.As<Napi::BigInt>().Uint64Value(&lossless));
@@ -1916,7 +1895,6 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
           } else if (val.IsObject()) {
             const char* ptr = static_cast<const char*>(ObjectData(val, type));
             memcpy(slot, &ptr, sizeof(ptr));
-            buffer_refs.push_back(Napi::Persistent(val.As<Napi::Object>()));
           } else if (val.IsBigInt()) {
             // Raw pointer address (parity CTYPES_POINTER)
             bool lossless;
@@ -1959,7 +1937,6 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
           } else if (val.IsObject()) {
             const wchar_t* ptr = static_cast<const wchar_t*>(ObjectData(val, type));
             memcpy(slot, &ptr, sizeof(ptr));
-            buffer_refs.push_back(Napi::Persistent(val.As<Napi::Object>()));
           } else if (val.IsBigInt()) {
             // Raw pointer address (parity CTYPES_POINTER)
             bool lossless;
@@ -1982,7 +1959,7 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
         case CType::CTYPES_STRUCT: {
           if (i < expected_argc && arg_struct_infos_[i]) {
             if (!MarshalStructArg(env, val, i, arg_struct_infos_[i], slot, &async_arg_values[i], large_arg_buffers,
-                                  &large_arg_indices)) {
+                                  &large_arg_indices, &buffer_refs)) {
               return env.Undefined();
             }
           } else {
@@ -1994,7 +1971,7 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
         case CType::CTYPES_ARRAY: {
           if (i < expected_argc && arg_array_infos_[i]) {
             if (!MarshalArrayArg(env, val, i, arg_array_infos_[i], slot, &async_arg_values[i], large_arg_buffers,
-                                 &large_arg_indices)) {
+                                 &large_arg_indices, &buffer_refs)) {
               return env.Undefined();
             }
           } else {
@@ -2016,23 +1993,19 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
   // ---- Create worker, move buffers, return Promise ----------------
   // =====================================================================
 
-  Napi::FunctionReference* errcheck_ptr = nullptr;
-  if (!errcheck_callback_.IsEmpty()) {
-    errcheck_ptr = &errcheck_callback_;
-  }
-
-  auto* worker = new CallWorker(env, this, &cif_, fn_ptr_, return_type_, return_struct_info_, return_array_info_,
+  auto worker = std::make_unique<CallWorker>(env, this, &cif_, fn_ptr_, return_type_, return_struct_info_, return_array_info_,
                                 std::move(async_arg_storage), std::move(async_arg_values),
                                 std::move(async_string_buffer), std::move(string_fixups), std::move(wstring_fixups),
                                 std::move(buffer_refs), std::move(owned_cif), std::move(owned_ffi_types),
-                                std::move(large_arg_buffers), std::move(large_arg_indices), errcheck_ptr);
+                                std::move(large_arg_buffers), std::move(large_arg_indices), errcheck, info.HasResultHandler());
 
-  if (errcheck_ptr) {
+  if (errcheck != nullptr && !info.HasResultHandler()) {
     worker->KeepArguments(info);
   }
 
   Napi::Promise promise = worker->GetPromise();
   worker->Queue();
+  worker.release();
 
   return promise;
 }
@@ -2058,7 +2031,8 @@ FFIFunction::CallWorker::CallWorker(Napi::Env env,
                                     std::vector<ffi_type*>&& owned_ffi_types,
                                     std::vector<std::vector<uint8_t>>&& large_arg_buffers,
                                     std::vector<size_t>&& large_arg_indices,
-                                    Napi::FunctionReference* errcheck_ref)
+                                    const Napi::Function* errcheck,
+                                    bool result_handler)
   : Napi::AsyncWorker(env),
     ffi_function_(parent),
     fn_ptr_(fn_ptr),
@@ -2077,18 +2051,15 @@ FFIFunction::CallWorker::CallWorker(Napi::Env env,
     large_arg_indices_(std::move(large_arg_indices)),
     return_ptr_(nullptr),
     deferred_(Napi::Promise::Deferred::New(env)),
-    errcheck_ref_(errcheck_ref),
+    errcheck_ref_(errcheck == nullptr ? Napi::FunctionReference() : Napi::Persistent(*errcheck)),
+    result_handler_(result_handler),
     capture_last_error_(parent->capture_last_error_),
     capture_errno_(parent->capture_errno_),
-    struct_as_buffer_(parent->struct_as_buffer_) {
-  ffi_function_->Ref();  // Pin the FFIFunction instance
+    struct_as_buffer_(parent->struct_as_buffer_),
+    scalar_as_buffer_(parent->scalar_as_buffer_) {
   if (parent->addon_ != nullptr) {
     last_error_in_ = parent->addon_->captured_last_error;
     errno_in_ = parent->addon_->captured_errno;
-  }
-  // La libreria non può essere chiusa finché la chiamata non è terminata.
-  if (ffi_function_->library_ != nullptr) {
-    ffi_function_->library_->BeginCall();
   }
 
   return_value_ = {};
@@ -2114,6 +2085,10 @@ FFIFunction::CallWorker::CallWorker(Napi::Env env,
 
   // Ricalcola tutti i puntatori dopo il move
   FixupPointers();
+  ffi_function_->Ref();
+  if (ffi_function_->library_ != nullptr) {
+    ffi_function_->library_->BeginCall();
+  }
 }
 
 void FFIFunction::CallWorker::FixupPointers() {
@@ -2147,7 +2122,7 @@ void FFIFunction::CallWorker::FixupPointers() {
   }
 }
 
-void FFIFunction::CallWorker::KeepArguments(const Napi::CallbackInfo& info) {
+void FFIFunction::CallWorker::KeepArguments(const FunctionArguments& info) {
   Napi::Array args = Napi::Array::New(info.Env(), info.Length());
   for (size_t i = 0; i < info.Length(); i++) {
     args.Set(static_cast<uint32_t>(i), info[i]);
@@ -2187,14 +2162,17 @@ void FFIFunction::CallWorker::OnOK() {
   try {
     // Riusa ConvertReturn statico (shared con ConvertReturnValue sync)
     Napi::Value result = FFIFunction::ConvertReturn(env, return_ptr_, return_type_, return_struct_info_,
-                                                    return_array_info_, struct_as_buffer_);
+                                                    return_array_info_, struct_as_buffer_, scalar_as_buffer_);
 
     // Errcheck (se presente)
-    if (errcheck_ref_ && !errcheck_ref_->IsEmpty()) {
+    if (!errcheck_ref_.IsEmpty()) {
       try {
-        Napi::Value args_array = args_ref_.IsEmpty() ? Napi::Array::New(env, 0) : args_ref_.Value();
-        std::vector<napi_value> errcheck_args = {result, ffi_function_->Value(), args_array};
-        result = errcheck_ref_->Call(errcheck_args);
+        if (result_handler_) {
+          result = errcheck_ref_.Call({result});
+        } else {
+          Napi::Value args_array = args_ref_.IsEmpty() ? Napi::Array::New(env, 0) : args_ref_.Value();
+          result = errcheck_ref_.Call({result, ffi_function_->Value(), args_array});
+        }
       } catch (const Napi::Error& e) {
         deferred_.Reject(e.Value());
         return;

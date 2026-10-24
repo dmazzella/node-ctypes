@@ -5,8 +5,9 @@
 [![Build](https://github.com/dmazzella/node-ctypes/actions/workflows/build.yml/badge.svg)](https://github.com/dmazzella/node-ctypes/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Python ctypes for Node.js.** A foreign function interface built on
-[libffi](https://github.com/libffi/libffi) and [N-API](https://nodejs.org/api/n-api.html).
+**Python ctypes for Node.js.** A foreign function interface built with C++20,
+[node-addon-api](https://github.com/nodejs/node-addon-api) and
+[libffi](https://github.com/libffi/libffi).
 If you know Python ctypes, you already know node-ctypes.
 
 ## Support
@@ -29,14 +30,14 @@ Prebuilt binaries ship for Windows, macOS 13.5+ and Linux (glibc 2.28+ or musl /
 Alpine), on x64 and ARM64 — wherever Node 24 runs.
 
 ```javascript
-import { CDLL, Structure, c_int32, c_char_p } from "node-ctypes";
+import { CDLL, Structure, c_int32, c_size_t, c_char_p } from "node-ctypes";
 
 // 1. Load a shared library
 const libc = new CDLL(process.platform === "win32" ? "msvcrt" : null);
 
 // 2. Declare a function signature
-const strlen = libc.func("strlen", c_int32, [c_char_p]);
-console.log(strlen("hello")); // 5
+const strlen = libc.func("strlen", c_size_t, [c_char_p]);
+console.log(strlen("hello")); // 5n
 
 // 3. Declare a struct
 class Point extends Structure {
@@ -52,7 +53,8 @@ console.log(p.x, p.y); // 3 4
 <details>
 <summary>Build from source</summary>
 
-Requires Node.js >= 24, CMake >= 3.15, and a C++ compiler.
+Requires Node.js >= 24, CMake >= 3.15, and a C++20 compiler and standard library.
+Run these commands from a source checkout:
 
 ```bash
 npm install
@@ -83,6 +85,13 @@ abs2(-42); // 42
 
 For Windows `__stdcall` APIs use `WinDLL` instead of `CDLL`. For COM-style
 auto-`HRESULT`-checking use `OleDLL`.
+
+Direct native calls are limited to a bounded set of exact scalar C++
+signatures with up to four arguments, on 64-bit little-endian targets using
+the default ABI. Other signatures use the existing cached libffi plans/CIFs,
+including pointers and strings whose pointee types and qualifiers are not
+encoded in the native type metadata. Float/double arguments continue to use
+libffi on x86-64. This changes the optimization route, not the JavaScript API.
 
 ### Structs, unions, bit fields, arrays
 
@@ -123,11 +132,30 @@ const name = array(c_char, 16)();
 name.value = "node"; // .value / .raw as in Python
 ```
 
+`array(type, n)` reuses the same type while it is alive. Instances, function
+signatures and containing types keep their array types alive; the cache itself
+does not. Unused array types and their length entries can be garbage-collected,
+including arrays of builtin element types.
+
 An array type in `argtypes` is passed by address, as in C and Python
 (`fill.argtypes = [c_int32 * 4]`). As in Python, the argument must be an
 instance of an array with the same element type and length; a Buffer or a
 typed array is also accepted as its memory. Other values raise
 `ArgumentError`.
+
+Builtin numeric scalars accept numbers, booleans and BigInt; integers wrap to
+their C width, but reject non-integral or non-finite numbers. Use BigInt when
+the original integer needs more precision than a JS number can represent.
+No argument, or `undefined` in a constructor, initializes zero. Explicit
+`null`, strings and arbitrary objects are not implicit numeric conversions.
+Assigning a scalar instance to a field or passing it to a declared numeric
+argument requires a compatible type. The documented numeric-pointer argument
+extensions below are unchanged.
+
+`c_bool` and `wintypes.VARIANT_BOOL` use JavaScript truthiness, using `.value`
+for scalar instances rather than treating every instance as true.
+`VARIANT_BOOL` stores true as `-1`, and its results and callback arguments
+are booleans. Boolean bitfields normalize before masking and read as booleans.
 
 Nested structs, anonymous fields (`static _anonymous_ = ["data"]`),
 explicit packing (`static _pack_ = 1`), minimum alignment
@@ -137,10 +165,39 @@ Python. The layout of bit fields follows Python's `_layout_`: `"gcc-sysv"`
 by default, `"ms"` on Windows or with `_pack_`. Bit fields wider than 53
 bits read as BigInt.
 
+`_pack_` follows Python's integer conversion and permits zero and non-powers
+of two (for example `3`) with the MS layout. An explicit `_pack_`, including
+zero, is incompatible with `"gcc-sysv"`. Layouts with non-power-of-two
+alignment can be used for memory serialization but are rejected as native
+by-value signatures: they do not describe a valid C ABI alignment.
+
 Structures and unions passed or returned by value keep this layout, also
 with `_pack_`: as with GCC and clang, a structure with misaligned fields is
 passed in memory on x86-64 System V (Linux, macOS Intel), where Python
 ctypes passes it in registers and the called function reads wrong values.
+
+Each returned structure or union owns a snapshot of its value, including
+results declared with functional `struct()` / `union()` definitions. Array
+views, nested composites and union getters remain valid after later calls,
+reentrant conversion or `errcheck`, and concurrent `callAsync()` jobs.
+Mutating one result does not modify another result's value storage.
+
+This is not a deep copy through pointers: pointer fields can still refer to
+the same external memory. Explicit `definition.toObject(buffer)` keeps its
+existing buffer-view behavior. Synchronous low-level native `struct_buffer`
+results are borrowed, reusable storage; public callables snapshot their
+results before any JavaScript result conversion.
+
+Low-level native `StructType` descriptors are builders only until consumed.
+Adding a descriptor as a field, constructing an `ArrayType` from it (even at
+length zero), preparing a function/callback signature, or creating/reading a
+native value finalizes the captured layout and its dependencies.
+`addField()` then throws instead of changing sizes, offsets or FFI metadata
+already in use. Build a new descriptor for a different layout.
+`getSize()` and `getAlignment()` alone leave an unused builder open; an
+outer builder can still receive fields after it captures a finalized child.
+Direct by-value self-reference is rejected. Pointers do not capture or
+finalize the pointed-to layout.
 
 ### Pointers, buffers, and cast
 
@@ -174,6 +231,21 @@ that cannot be converted (a plain JS function, an object) raise
 `ArgumentError` instead of passing NULL; `c_void_p` also accepts strings
 (as `char *`, Python `bytes`) and any TypedArray/ArrayBuffer.
 
+Declared `POINTER(T)` parameters reject incompatible ctypes instances,
+arrays and pointer types before entering C. Compatible subclasses and arrays
+are accepted, and a matching scalar/structure is passed by reference.
+An explicit `cast()` changes the pointer type. Raw addresses and raw
+Buffer/TypedArray/ArrayBuffer memory remain node-ctypes extensions; use
+`c_void_p` for portable raw-address code.
+
+`byref(value, byteOffset = 0)` preserves the original owner and supports
+signed byte offsets. In-range references remain Buffer views; references
+outside the object's byte range carry an address and owner. As with raw
+addresses, the caller must ensure such memory is valid before dereferencing.
+Function pointers read from fields or obtained from FFI bindings can be
+assigned back to fields/arrays and passed as pointer arguments. Bare JS
+functions still require `callback()` / a prototype-created callback.
+
 ### Callbacks
 
 ```javascript
@@ -199,7 +271,22 @@ qsort(arr, 5, 4, cmp);
 // rely on GC — the callback holds a libffi closure that native code may
 // still reference.
 cmp.release();
+cmp2.release();
 ```
+
+`CFUNCTYPE` and `WINFUNCTYPE` weakly intern live prototypes by the complete
+identity and order of their argument/return types, separately for each calling
+convention. Repeated requests reuse the same live prototype, as in Python,
+without keeping abandoned types alive. Callers, callbacks and output bindings
+retain their prototype while they are live.
+
+Prototype metadata is shared. Changing its public `restype` / `argtypes`
+metadata does not recompile the captured native signature or alter cache keys;
+request a different signature to change the ABI. Each new caller prepares its
+argument-conversion pipeline and captures its result-check hook independently.
+Existing callers retain their result-check snapshot and their own `errcheck`.
+An installed `from_param` converter still resolves the method at call time,
+as before.
 
 Both callbacks and libraries implement `Symbol.dispose`, so they work
 with the `using` declaration for scope-bound cleanup (also on `throw`):
@@ -212,10 +299,17 @@ with the `using` declaration for scope-bound cleanup (also on `throw`):
 } // close() + release() run automatically
 ```
 
-A function keeps its library loaded as long as it is referenced, also when
-the `CDLL` object itself is no longer used. After `close()`, its functions
-throw instead of calling unloaded code; `close()` itself throws while a call
-to one of them is in progress (from a callback, or a pending `callAsync()`).
+A bound function keeps its library loaded as long as it is referenced, also
+when the `CDLL` object itself is no longer used. After `close()`, `loaded` is
+false and its bound functions and symbol lookups throw; `close()` itself
+throws while a call to one of them is in progress (from a callback, or a
+pending `callAsync()`). Repeated `close()` calls are harmless.
+
+Existing `in_dll()` views keep the underlying module loaded even after
+`close()`. Physical unloading is deferred until the last dependent view,
+Buffer, typed array or typed pointer copy is collected; those existing views
+remain usable. Raw addresses obtained with `symbol()` do not carry this
+ownership information.
 
 Set `NODE_CTYPES_DEBUG_CALLBACKS=1` to log a stack trace for every
 callback garbage-collected without `.release()`.
@@ -233,12 +327,18 @@ const onEvent = threadSafeCallback((code) => console.log("event", code), null, [
 startWorker(onEvent); // a native library calling onEvent from its own thread
 ```
 
+Both callback implementations store narrow integer results in a complete
+libffi `ffi_arg`, with the declared signedness; failures zero that complete
+slot. Floating-point results retain their own storage width. The native
+`Callback` / `ThreadSafeCallback` classes also expose `getPointer()`, which
+throws after release.
+
 ### Errors: `errno` and `GetLastError`
 
 `GetLastError()` / `get_errno()` read a **private thread-local slot** —
 exactly like Python's `ctypes.get_last_error()` / `ctypes.get_errno()`.
-The slot is used **only** by FFI calls through libraries opened with
-`use_last_error` or `use_errno`; otherwise it stays at 0. As in Python
+The slot is updated **only** by FFI calls through libraries opened with
+`use_last_error` or `use_errno`; unflagged calls leave it unchanged. As in Python
 those calls swap it with the system value: the function sees the value set
 with `set_errno()` / `set_last_error()`, the value it leaves becomes the
 private one, and the system value is restored after the call.
@@ -252,8 +352,8 @@ GetLastError();              // top-level (Python: ctypes.get_last_error)
 user32.get_last_error();     // per-library alias
 ```
 
-The snapshot is captured atomically in native code immediately after
-`ffi_call`, before any other JS can clobber it. To read the raw system
+The snapshot is captured in native code immediately after the native call,
+whether direct or through libffi, before any other JS can clobber it. To read the raw system
 error instead, call `GetLastError` via FFI like any other function.
 
 ### Windows API
@@ -290,32 +390,105 @@ user32.GetClientRect(hwnd, byref(rect));
 rect.right - rect.left; // LONG (c_long) values are BigInt
 ```
 
+### Error checking (`errcheck`)
+
+Set `fn.errcheck = (result, func, args) => ...` to check or replace a result,
+or set it to `null` to clear it. For `lib.func()`, library attributes and
+`CFUNCTYPE` / `WINFUNCTYPE` callers, `func` is the public callable and `args`
+contains the original, unconverted arguments. Result conversion and any
+`OleDLL` HRESULT check run before the hook.
+
+Each invocation captures its hook before argument adapters or getters run.
+Replacing or clearing it affects later invocations, including reentrant calls,
+not the call already in progress or a pending `callAsync()` job.
+
+Hooks do not prevent otherwise unreachable functions and libraries from being
+garbage-collected, even when they reference the function itself. Active calls
+and workers retain their captured hook through result checking; `close()` is
+still rejected while that checking runs.
+
+The low-level native handle's `setErrcheck()` API instead passes the native
+handle as `func`, invoked with `.call()`, not a directly callable function.
+
+### Scalar subclasses and result hooks
+
+Builtin scalar types return ordinary JS values. A subclass instead produces
+an instance containing the original C bytes, without invoking its constructor,
+public buffer factory or writer. Derived scalar fields, array elements,
+pointer indexing and callback arguments likewise expose typed instances;
+memory views remain live, including in mirror mode.
+
+The result pipeline is:
+`C bytes -> restype representation -> _check_retval_ -> errcheck -> OUT/INOUT`.
+A static `_check_retval_` receives the represented result and can replace it
+or throw. It is captured when the function is bound; reassigning an attribute's
+`restype` rebuilds that binding.
+
+```javascript
+class CheckedInt extends c_int32 {
+  static _check_retval_(value) {
+    return value.value + 100;
+  }
+}
+const checkedAbs = libc.func("abs", CheckedInt, [c_int32]);
+checkedAbs(-7); // 107
+```
+
+Explicit `HRESULT` validation runs before `errcheck` with all loaders and
+prototype callers, not only `OleDLL`. An error in result checking prevents
+both `errcheck` and output conversion.
+`OleDLL` attributes and `func(name)` default to `HRESULT`; other loaders
+default to `c_int`. An explicit restype always overrides the default.
+
 ### Output parameters (`paramflags`)
 
 When at least one `out` param is declared, the call returns **only the
 out-params** (single value, or array if >1) — the `restype` is
-discarded. To also inspect it (e.g. a `BOOL` success flag), attach an
+discarded. To also inspect it (e.g. a thread ID or success flag), attach an
 `errcheck`:
 
 ```javascript
-const proto = WINFUNCTYPE(BOOL, HWND, POINTER(DWORD), POINTER(DWORD));
+const { DWORD, HWND, LPDWORD } = wintypes;
+const proto = WINFUNCTYPE(DWORD, HWND, LPDWORD);
 const fn = proto.bind(user32, "GetWindowThreadProcessId", [
   { dir: "in", name: "hWnd" },
   { dir: "out", name: "pid" },
-  { dir: "out", name: "tid" },
 ]);
 
-const [pid, tid] = fn(hwnd);     // positional
-const [p2, t2] = fn({ hWnd });   // or named-args
+const pid = fn(hwnd);             // positional; thread ID is discarded
+const p2 = fn({ hWnd: hwnd });    // or named-args
 
-fn.errcheck = (result, func, args) => {
-  if (!result) throw new Error("call failed");
-  return args; // args: the arguments, out params as instances (args[1].value)
+fn.errcheck = (threadId, func, args) => {
+  if (!threadId) throw new Error("call failed");
+  return args; // continue returning the PID from the output instance
 };
+const p3 = await fn.callAsync(hwnd);
+
+fn.errcheck = (threadId, func, args) => {
+  if (!threadId) throw new Error("call failed");
+  return { threadId, processId: args[1].value };
+};
+const ids = fn(hwnd); // inspect both the return value and the output parameter
 ```
 
 As in Python, the value returned by `errcheck` is the result of the call,
-unless it is `args` itself: then the out-params are returned.
+unless it is `args` itself: then the out-params are returned. Here `args`
+is the expanded argument list, with out-params as instances.
+
+These bindings have their own hook, independent of any cached `lib.func()`
+binding, and support `callAsync()` with the same output processing and
+per-call hook snapshot. Adapter temporaries stay alive through that processing,
+also when the hook throws.
+
+OUT conversion invokes the output instance's `__ctypes_from_outparam__()`.
+By default a builtin scalar yields its value, while a scalar subclass yields
+the instance. Override the method for custom output conversion.
+
+Use `{ dir: "inout", name: "value" }`, or tuple flag `3`, to pass an existing
+instance and return that exact instance after C modifies it. INOUT does not
+call `__ctypes_from_outparam__`; positional, named and default arguments use
+the same rule. Mixed outputs preserve parameter order. If `errcheck` returns
+anything other than the original `args`, neither OUT nor INOUT unpacking runs.
 
 ### Sharing memory with existing buffers
 
@@ -335,6 +508,24 @@ const bytes = array(c_uint8, 64).from_address(malloc_result);
 const view = new Float32Array(bytes._buffer.buffer, bytes._buffer.byteOffset, 16);
 ```
 
+Typed pointers read from fields or array elements, and views derived from
+them, retain their known memory owners. Typed assignments and
+`from_buffer_copy()` preserve known pointer references, including overlapping
+and self-copies; replacing a pointer releases its previous reference.
+
+Raw copies (`memmove()`, Buffer methods) do not transfer ownership metadata.
+Likewise, `from_address()` given a raw address cannot discover its allocation
+or library: the caller must keep that memory valid. Keeping a known owner
+alive does not take over responsibility for freeing externally allocated
+memory or explicitly releasing callbacks.
+
+`memmove()` and `memset()` return the destination address as BigInt, including
+zero-length operations (`0n` for a NULL destination with count zero).
+Counts must be non-negative safe integers. Copies/fills involving JS memory
+still stop at its end; raw native addresses remain the caller's responsibility.
+Scalar `from_buffer()` / `from_buffer_copy()` validate byte size and offset
+before producing an instance and accept Buffer, typed views and ctypes memory.
+
 ### Electron
 
 Electron does not allow Buffers over memory that V8 did not allocate, so a
@@ -352,8 +543,8 @@ when it loads (`EXTERNAL_BUFFERS` is `false`) and keeps the same API:
   (`arr[i]`, `s.field`) or `memmove()`.
 
 Only the bytes of the accessed field are copied, one native call per read
-or write (about 50 ns); instances on ordinary Buffers (`new Point()`,
-`c_int(5)`) have no extra cost. Set `NODE_CTYPES_NO_EXTERNAL_BUFFERS=1`
+or write; instances on ordinary Buffers (`new Point()`, `c_int(5)`) do not
+need this native-memory synchronization. Set `NODE_CTYPES_NO_EXTERNAL_BUFFERS=1`
 to run in this mode on Node.js.
 
 ### Adapter protocols: `_as_parameter_` and `from_param`
@@ -377,6 +568,22 @@ As in Python, `from_param` receives the argument as passed (also with
 `CFUNCTYPE` prototypes), its result is converted as the declared type, and
 an error it throws becomes `ArgumentError` (`"argument 1: RangeError: ..."`).
 
+Objects passed through argument adapters and the objects produced by their
+conversions stay alive while later arguments are converted and until the
+result and `errcheck` have been processed. With `callAsync()`, those temporary
+owners stay alive until its Promise settles. The native worker also retains
+memory passed by value or as an integer address, including values materialized
+by getters.
+
+`_as_parameter_` chains are resolved recursively, including results of
+`from_param`, with intermediate owners retained. Cycles and chains exceeding
+128 adapter steps raise explicit argument errors, rather than overflowing
+the stack or silently passing an incorrect pointer.
+
+This only covers the call: if C stores a pointer for later use, or returns a
+pointer into an argument's memory, keep the source object referenced for as
+long as that pointer is used. Callbacks still require explicit `.release()`.
+
 ### Big-endian structures
 
 ```javascript
@@ -393,14 +600,21 @@ h.magic = 0x12345678; // stored as 12 34 56 78 on the wire
 `LittleEndianStructure`, `BigEndianUnion`, `LittleEndianUnion` work the
 same way. Byte order is per-class — nested structs keep their own.
 
+Primitive arrays also follow their containing class's byte order, recursively
+for multidimensional arrays, including floats and wide-character arrays.
+Arrays of structures keep the element structure's own byte order. The same
+array type can be shared with native/little-endian containers without being
+modified. Raw Buffer and typed-memory copies still copy bytes, not values
+converted between byte orders.
+
 ### TypeScript
 
-Argument and return types are narrowed when `argTypes` is a literal
-tuple (`as const`) and `returnType` is a CType constant:
+Argument and return types are inferred from declared type classes such as
+`c_int32` and `c_size_t`. A literal tuple (`as const`) preserves argument types:
 
 ```ts
 const libc = new CDLL(null);
-const strlen = libc.func("strlen", c_int64, [c_char_p] as const);
+const strlen = libc.func("strlen", c_size_t, [c_char_p] as const);
 const n: bigint = strlen("hello"); // typed as bigint, not any
 ```
 
@@ -483,9 +697,9 @@ Plus the Win32 types, structures and pointer types of `ctypes.wintypes` under `w
 
 - `sizeof(type)` / `alignment(type)` — in bytes
 - `addressof(obj)` → BigInt
-- `byref(obj)` — lightweight pass-by-reference marker
+- `byref(obj, byteOffset = 0)` — lightweight reference with a signed byte offset
 - `cast(ptr, type)` — reinterpret a pointer as another type
-- `memmove(dst, src, n)` / `memset(dst, val, n)` — buffers, ctypes instances, pointers or addresses
+- `memmove(dst, src, n)` / `memset(dst, val, n)` — buffers, ctypes instances, pointers or addresses; return the destination address as BigInt
 - `readValue(ptr, type, offset?)` / `writeValue(ptr, type, val, offset?)`
 - `create_string_buffer(init, size?)` / `c_buffer` / `create_unicode_buffer(init, size?)` — with `.value` (and `.raw`)
 - `string_at(addr, size?)` / `wstring_at(addr, size?)` — exactly `size` units, or up to the NUL
@@ -530,8 +744,8 @@ pointer arithmetic (also `POINTER(POINTER(T))`), callbacks (`CFUNCTYPE` /
 - **No automatic memory management** for returned pointers.
 - **Both class and functional syntax**: `class extends Structure`
   (Python-like) and `struct({...})` (functional) are both supported.
-- **Only type classes**, not string literals: `c_int32`, never `"int32"`
-  — same as Python.
+- **Use type classes** such as `c_int32`, rather than string names such as
+  `"int32"`, for the Python-compatible, typed API.
 - **`bytes` are JS strings**: `c_char` values, `c_char * n` arrays and
   fields, `c_char_p` and `create_string_buffer().value` use strings (UTF-8)
   where Python uses `bytes`; `.raw` is a `Buffer`.
@@ -543,7 +757,7 @@ pointer arithmetic (also `POINTER(POINTER(T))`), callbacks (`CFUNCTYPE` /
   (Python: Windows only), so the same code runs everywhere.
 - **64-bit and pointer-sized integers** (`c_int64`, `c_uint64`,
   `c_size_t`, `c_ssize_t`) also accept `null` (as 0) and a `Buffer`
-  (as its address) as arguments.
+  or `ArrayBuffer` (as its address) as arguments.
 - **Variadic arguments follow the C promotions**: a `c_float`, `c_int8`,
   `c_char`, … instance passed beyond `argtypes` is passed as `double` /
   `int`, where Python fails (`ffi_prep_cif_var failed`).
@@ -555,9 +769,14 @@ pointer arithmetic (also `POINTER(POINTER(T))`), callbacks (`CFUNCTYPE` /
   array, `ArrayBuffer`) instead of writing past it.
 - **Integer types reject non-integral numbers** (`3.7`, `NaN`) as Python
   rejects floats; JS has no int/float distinction, so `3.0` is accepted.
+- **Floating-point scalars accept BigInt in the range `-2**63` to `2**64-1`**,
+  converted to a JS number; larger BigInts raise a range error. This applies
+  consistently to constructors, fields and function arguments.
 - **Array instances are Buffers whose Array methods work on the elements**
   (`slice`, `map`, `includes`, …, as Python sequences); the Buffer methods
   (`readInt32LE`, `subarray`, …) work on the bytes.
+- **Array index reads follow JavaScript bounds behavior**: out-of-range
+  indices return `undefined`; negative indices do not wrap around as in Python.
 - **Unions by value on x86-64 System V** are passed with the ABI rules;
   Python passes them in the wrong registers (libffi#33).
 - **Structure/Union fields are accessors of the class**, as Python fields
@@ -571,7 +790,9 @@ pointer arithmetic (also `POINTER(POINTER(T))`), callbacks (`CFUNCTYPE` /
   Node `Buffer`, and Buffers aren't resizable in place.
   Work-around: `new MyStruct(myBuffer)` with a pre-sized buffer.
 - **`c_longdouble`** (80/128-bit float, `ffi_type_longdouble`) — rarely
-  used; fall back to `c_double` or raw bytes.
+  used; use a native wrapper that converts to supported types, or access
+  storage through pointers/bytes. Declaring a `long double` ABI value as
+  `c_double` is not a portable substitute.
 
 ### Migrating from 1.x
 
@@ -612,21 +833,123 @@ Each example in `examples/` has its own README; see the [index](examples/README.
 
 ## Tests & docs
 
-`npm test` first builds a small C library (`tests/fixtures/`, into
+From the repository root, `npm --prefix tests test` first builds a small C library (`tests/fixtures/`, into
 `build/fixture/`) used by the tests of structures by value, array parameters
 and reentrant calls; `npm run build:test-fixture` builds it alone. Python
 twins of the tests (`tests/common/*.py`) load the same library.
 
 ```bash
-cd tests && npm install && npm run test    # unit tests (JS + Python parity)
-NODE_CTYPES_NO_EXTERNAL_BUFFERS=1 npm test  # again as in Electron (from tests/)
-npm run test:types                          # type-check lib/index.d.ts (tests/types)
-npm run docs                                # TypeDoc API site in docs/
-npm run docs:serve                          # preview
+npm install
+npm run build
+npm --prefix tests install
+npm --prefix tests test                              # functional/parity tests
+NODE_CTYPES_NO_EXTERNAL_BUFFERS=1 npm --prefix tests test  # mirrored native memory
+npm run test:types                                   # TypeScript declarations
+npm run docs                                         # TypeDoc API site in docs/
+npm run docs:serve                                   # preview
 ```
 
-See [tests/common/](tests/common/) for runnable examples alongside
+See [tests/common/](https://github.com/dmazzella/node-ctypes/tree/main/tests/common) for runnable examples alongside
 parallel Python ctypes implementations.
+
+### Performance comparisons
+
+There are two JavaScript comparisons, both against another FFI library.
+From the repository root, after building node-ctypes:
+
+```bash
+npm --prefix tests install             # includes Koffi
+npm run build:test-fixture             # shared C functions for both libraries
+npm run bench:koffi                    # node-ctypes vs Koffi; Node 24+
+npm run bench:ffi                      # node-ctypes vs node:ffi; Node 26+
+```
+
+`bench:ffi` adds `--experimental-ffi` automatically. Both comparisons
+print a table grouped by workload and automatically generate HTML reports:
+
+- `tests/benchmarks/results/koffi.html`
+- `tests/benchmarks/results/node-ffi.html`
+
+These paths are relative to the repository root, regardless of the working
+directory. Each successful run replaces its previous report; generated results
+are ignored by Git. Open the HTML file directly in a browser: it is responsive
+and self-contained, with native HTML/CSS bar charts and no browser JavaScript,
+external resources or server requirements.
+
+| Column | Meaning |
+| --- | --- |
+| Case | The same operation and inputs for both libraries |
+| node-ctypes / competitor | Median time +/- MAD (dispersion), in ns per operation |
+| Ratio | node-ctypes time divided by competitor time |
+
+A ratio of `0.50x` means node-ctypes took half the time; `2.00x` means it
+took twice the time. Lower times are better. There is no overall score
+combining unrelated calls, memory access and asynchronous scheduling.
+In the charts, **shorter bars are better**. Each workload group shares a linear
+scale starting at zero; different groups use different scales. Bars show
+medians, with +/- MAD whiskers (not confidence intervals). Each library also
+shows its total measured operation count and elapsed time across the samples.
+
+Reports record library/runtime versions, CPU, OS/kernel, buffer mode, start/
+finish timestamps and Git revision/working-tree status. Missing CPU or Git
+metadata produces an explicit warning rather than invented values.
+
+The comparisons cover scalars, mixed arguments, short/long strings, buffer
+arguments, field reads and callbacks. Koffi also covers structures by value,
+variadic calls and async calls with 1/8 calls in flight. Cases without an
+equivalent documented node:ffi API are listed as **not compared**, not
+emulated with a different native signature.
+
+Both sides call the same C fixture and verify results before/after timing.
+String lengths are compared as Numbers, including conversion where the API
+returns BigInt; wide integers are BigInt in both APIs. Structures are plain
+objects. Async times include scheduling and are reported per completed call,
+with the concurrency shown in the case name.
+
+Defaults are nine samples of at least 250 ms per library after warmup,
+alternating library order. Each native signature has a separate call-site to
+avoid mixing V8 optimization feedback between cases.
+Each row is printed when its measurements finish.
+Run comparisons serially, not concurrently. Optional arguments:
+
+```bash
+npm run bench:koffi -- --filter string,callback
+npm run bench:ffi -- --samples 11 --duration 500
+npm run bench:koffi -- --output comparison.json
+```
+
+`--output comparison.json` additionally saves medians, dispersion and all sample
+durations/operation counts as JSON, and writes `comparison.html` next to it
+instead of the default HTML report. Parent directories are created automatically.
+HTML generation runs only after all measurements finish.
+`benchmark_koffi.js` and `benchmark_node_ffi.js` define the actual side-by-side
+comparisons; `runner.js` shares timing, table output and HTML generation without
+extra dependencies or a separate renderer script. There is no separate
+self-benchmark command, and benchmarks are not run by the functional/parity
+test suite.
+
+### Release validation
+
+The workflow retains the eight Node 24 native build targets (Windows/macOS,
+x64/ARM64, and Linux glibc/musl). C++20 conformance is checked with
+`-pedantic-errors` on GCC/Clang and `/permissive-` on MSVC; vendor optimization
+and the node-addon-api integration remain unchanged.
+
+Three runtime-control jobs reuse the built artifacts on Node 26 without
+rebuilding the addon, running the functional parity suite normally and with
+mirrored buffers. A Linux job runs the focused Python 3.15
+reference tests in addition to the Python 3.14 reference coverage.
+
+The package assembler requires all eight nonempty binaries and includes
+declarations, README, changelog and license. It fails on missing/unknown
+artifacts or a stale output directory. Publish depends on the runtime gates,
+requires a pushed tag matching the manifest version exactly, and uses `next`
+for prereleases instead of `latest`. Manual workflow runs never publish.
+These are configured gates, not a substitute for a successful native CI run.
+
+`npm --prefix tests test` builds the fixture and runs the suite;
+`npm --prefix tests run test:js` reuses an already-built fixture/addon.
+Both use the documented `--test-timeout` runner option.
 
 ---
 

@@ -92,9 +92,9 @@ target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_20)
 target_compile_definitions(${PROJECT_NAME} PRIVATE NAPI_VERSION=9 NAPI_CPP_EXCEPTIONS NODE_ADDON_API_CPP_EXCEPTIONS_ALL)
 
 if(MSVC)
-    target_compile_options(${PROJECT_NAME} PRIVATE /W4)
+    target_compile_options(${PROJECT_NAME} PRIVATE /W4 /permissive- /Zc:__cplusplus)
 else()
-    target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra)
+    target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -pedantic-errors)
 endif()
 
 if(NODE_ADDON_API_DIR)
