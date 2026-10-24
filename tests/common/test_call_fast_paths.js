@@ -1,12 +1,7 @@
-/**
- * Test the synchronous call fast paths:
- * - per-instance `call` function (no ObjectWrap unwrap per call)
- * - direct call without libffi for simple signatures (<= 4 int/pointer/float/double args)
- * - heap string buffer pointer fixups
- */
-
 import assert from "node:assert";
+import { existsSync } from "node:fs";
 import os from "node:os";
+import path from "node:path";
 import { describe, it, before, after } from "node:test";
 import * as ctypes from "node-ctypes";
 
@@ -14,55 +9,65 @@ const platform = os.platform();
 const LIBC = platform === "win32" ? "msvcrt.dll" : platform === "darwin" ? "libc.dylib" : "libc.so.6";
 // On Linux the math functions (sqrt, ...) are in libm, elsewhere in the C library.
 const LIBM = platform === "linux" ? "libm.so.6" : LIBC;
+const fixturePath = path.join(import.meta.dirname, "../../build/fixture", `ctypes_test_fixture${platform === "win32" ? ".dll" : platform === "darwin" ? ".dylib" : ".so"}`);
+const fixtureAvailable = existsSync(fixturePath);
 
 describe("Call conversions (Python ctypes parity)", function () {
   let libc;
   let libm;
+  let fixture;
 
   before(function () {
     libc = new ctypes.CDLL(LIBC);
     libm = new ctypes.CDLL(LIBM);
+    if (fixtureAvailable) fixture = new ctypes.CDLL(fixturePath);
   });
 
   after(function () {
     if (libc) libc.close();
     if (libm) libm.close();
+    if (fixture) fixture.close();
   });
 
-  describe("narrow integer arguments are sign/zero-extended", function () {
+  // abs() is int(int); narrow arguments and results need matching C signatures.
+  describe("narrow integer arguments preserve their native signedness", { skip: !fixtureAvailable && "native fixture not built" }, function () {
     it("signed 8/16-bit arguments", function () {
-      assert.strictEqual(libc.func("abs", ctypes.c_int32, [ctypes.c_int8])(-5), 5);
-      assert.strictEqual(libc.func("abs", ctypes.c_int32, [ctypes.c_int16])(-300), 300);
+      const promote8 = fixture.func("fixture_promote_i8", ctypes.c_int32, [ctypes.c_int8]);
+      assert.strictEqual(promote8(-5), -5);
+      assert.strictEqual(promote8(-128), -128);
+      assert.strictEqual(promote8(true), 1);
+      const promote16 = fixture.func("fixture_promote_i16", ctypes.c_int32, [ctypes.c_int16]);
+      assert.strictEqual(promote16(-300), -300);
+      assert.strictEqual(promote16(-32768), -32768);
     });
 
     it("unsigned 8/16-bit arguments", function () {
-      // A sign-extended 250 would be -6 and abs() would return 6.
-      assert.strictEqual(libc.func("abs", ctypes.c_int32, [ctypes.c_uint8])(250), 250);
-      assert.strictEqual(libc.func("abs", ctypes.c_int32, [ctypes.c_uint16])(65535), 65535);
+      assert.strictEqual(fixture.func("fixture_promote_u8", ctypes.c_int32, [ctypes.c_uint8])(250), 250);
+      assert.strictEqual(fixture.func("fixture_promote_u16", ctypes.c_int32, [ctypes.c_uint16])(65535), 65535);
     });
 
     it("bool argument", function () {
-      const abs = libc.func("abs", ctypes.c_int32, [ctypes.c_bool]);
-      assert.strictEqual(abs(true), 1);
-      assert.strictEqual(abs(false), 0);
+      const promote = fixture.func("fixture_promote_bool", ctypes.c_int32, [ctypes.c_bool]);
+      assert.strictEqual(promote(true), 1);
+      assert.strictEqual(promote(false), 0);
     });
   });
 
-  describe("narrow integer returns are truncated to the declared type", function () {
+  describe("narrow integer returns preserve their native representation", { skip: !fixtureAvailable && "native fixture not built" }, function () {
     it("8-bit returns", function () {
-      assert.strictEqual(libc.func("abs", ctypes.c_int8, [ctypes.c_int32])(-200), -56);
-      assert.strictEqual(libc.func("abs", ctypes.c_uint8, [ctypes.c_int32])(-200), 200);
+      assert.strictEqual(fixture.func("fixture_narrow_i8", ctypes.c_int8, [ctypes.c_int32])(200), -56);
+      assert.strictEqual(fixture.func("fixture_narrow_u8", ctypes.c_uint8, [ctypes.c_int32])(200), 200);
     });
 
     it("16-bit returns", function () {
-      assert.strictEqual(libc.func("abs", ctypes.c_int16, [ctypes.c_int32])(-40000), -25536);
-      assert.strictEqual(libc.func("abs", ctypes.c_uint16, [ctypes.c_int32])(-40000), 40000);
+      assert.strictEqual(fixture.func("fixture_narrow_i16", ctypes.c_int16, [ctypes.c_int32])(40000), -25536);
+      assert.strictEqual(fixture.func("fixture_narrow_u16", ctypes.c_uint16, [ctypes.c_int32])(40000), 40000);
     });
 
     it("bool return", function () {
-      const abs = libc.func("abs", ctypes.c_bool, [ctypes.c_int32]);
-      assert.strictEqual(abs(-2), true);
-      assert.strictEqual(abs(0), false);
+      const narrow = fixture.func("fixture_narrow_bool", ctypes.c_bool, [ctypes.c_int32]);
+      assert.strictEqual(narrow(-2), true);
+      assert.strictEqual(narrow(0), false);
     });
   });
 
@@ -131,10 +136,9 @@ describe("Call conversions (Python ctypes parity)", function () {
     });
 
     it("call without strings after a call that failed mid-marshalling", function () {
-      const Pair = ctypes.struct({ a: ctypes.c_int32, b: ctypes.c_int32 });
-      const bad = libc.func("strcmp", ctypes.c_int32, [ctypes.c_char_p, Pair]);
+      const strcmp = libc.func("strcmp", ctypes.c_int32, [ctypes.c_char_p, ctypes.c_char_p]);
       const abs = libc.func("abs", ctypes.c_int32, [ctypes.c_int32]);
-      assert.throws(() => bad("q".repeat(1000), 42));
+      assert.throws(() => strcmp("q".repeat(1000), {}));
       assert.strictEqual(abs(-3), 3);
     });
   });
@@ -155,11 +159,9 @@ describe("Call conversions (Python ctypes parity)", function () {
     it("booleans count as 0/1", function () {
       const abs = libc.func("abs", ctypes.c_int32, [ctypes.c_int32]);
       const sqrt = libm.func("sqrt", ctypes.c_double, [ctypes.c_double]);
-      const abs8 = libc.func("abs", ctypes.c_int32, [ctypes.c_int8]);
       assert.strictEqual(abs(true), 1);
       assert.strictEqual(abs(false), 0);
       assert.strictEqual(sqrt(true), 1);
-      assert.strictEqual(abs8(true), 1);
     });
 
     it("BigInt values are truncated to the argument size", function () {
@@ -170,5 +172,4 @@ describe("Call conversions (Python ctypes parity)", function () {
       assert.strictEqual(sqrt(16n), 4);
     });
   });
-
 });

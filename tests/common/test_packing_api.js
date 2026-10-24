@@ -9,7 +9,10 @@ describe("packing API compatibility", function () {
         class Record extends Base {
           static _layout_ = "ms";
           static _pack_ = pack;
-          static _fields_ = [["a", c.c_uint8], ["b", c.c_uint32]];
+          static _fields_ = [
+            ["a", c.c_uint8],
+            ["b", c.c_uint32],
+          ];
         }
         const value = pack == null ? 0 : Math.trunc(Number(pack));
         const alignment = value ? Math.min(value, 4) : 4;
@@ -42,7 +45,10 @@ describe("packing API compatibility", function () {
   });
   it("invalid pack values remain explicit errors", function () {
     for (const pack of [-1, Infinity, NaN, {}, "3.5", 2 ** 31]) {
-      class Record extends c.Structure { static _pack_ = pack; static _fields_ = [["value", c.c_int32]]; }
+      class Record extends c.Structure {
+        static _pack_ = pack;
+        static _fields_ = [["value", c.c_int32]];
+      }
       assert.throws(() => c.sizeof(Record), /_pack_/);
     }
   });
@@ -50,7 +56,10 @@ describe("packing API compatibility", function () {
     class Record extends c.Structure {
       static _layout_ = "ms";
       static _pack_ = 3;
-      static _fields_ = [["a", c.c_uint8], ["b", c.c_uint32]];
+      static _fields_ = [
+        ["a", c.c_uint8],
+        ["b", c.c_uint32],
+      ];
     }
     const library = new c.CDLL(null);
     try {
@@ -58,6 +67,8 @@ describe("packing API compatibility", function () {
       assert.throws(() => library.func("abs", c.c_int32, [Record]), /power-of-two alignment/);
       assert.throws(() => new c.StructType({ alignment: 3 }), /power of two/);
       assert.throws(() => new c.StructType({ alignment: 2.1 }), /power of two/);
-    } finally { library.close(); }
+    } finally {
+      library.close();
+    }
   });
 });

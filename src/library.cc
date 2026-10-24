@@ -134,7 +134,8 @@ bool CloseSharedLibrary(void* handle) {
 LibraryHandle::~LibraryHandle() {
   if (handle_ && owned_ && !CloseSharedLibrary(handle_)) {
 #ifdef _WIN32
-    std::fprintf(stderr, "node-ctypes: deferred FreeLibrary failed (%lu)\n", static_cast<unsigned long>(::GetLastError()));
+    std::fprintf(stderr, "node-ctypes: deferred FreeLibrary failed (%lu)\n",
+                 static_cast<unsigned long>(::GetLastError()));
 #else
     const char* error = dlerror();
     std::fprintf(stderr, "node-ctypes: deferred dlclose failed: %s\n", error ? error : "unknown error");
@@ -171,7 +172,9 @@ Napi::Function Library::GetClass(Napi::Env env) {
 }
 
 Library::Library(const Napi::CallbackInfo& info)
-  : Napi::ObjectWrap<Library>(info), handle_(nullptr), is_loaded_(false),
+  : Napi::ObjectWrap<Library>(info),
+    handle_(nullptr),
+    is_loaded_(false),
     handle_owner_(std::make_shared<LibraryHandle>()) {
   Napi::Env env = info.Env();
   info.This().As<Napi::Object>().TypeTag(&kTypeTag);
@@ -348,7 +351,9 @@ Napi::Value Library::Close(const Napi::CallbackInfo& info) {
 Napi::Value Library::GetSymbolView(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   Napi::Value address = GetSymbol(info);
-  if (env.IsExceptionPending()) return env.Undefined();
+  if (env.IsExceptionPending()) {
+    return env.Undefined();
+  }
   auto owner = std::make_unique<std::shared_ptr<LibraryHandle>>(handle_owner_);
   auto token = Napi::External<std::shared_ptr<LibraryHandle>>::New(
     env, owner.get(), [](Napi::Env, std::shared_ptr<LibraryHandle>* lease) { delete lease; });

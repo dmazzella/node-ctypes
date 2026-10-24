@@ -8,8 +8,8 @@
  */
 
 #include <errno.h>
-#include <stdbool.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -37,7 +37,9 @@ FIXTURE_API void fixture_reset_global_pointer(void) {
 FIXTURE_API void fixture_clear_global_pointer(void) {
   fixture_global_record.pointer = NULL;
 }
-static int32_t fixture_increment(int32_t value) { return value + 1; }
+static int32_t fixture_increment(int32_t value) {
+  return value + 1;
+}
 struct FixtureFunctionRecord {
   int32_t (*function)(int32_t);
 };
@@ -52,7 +54,8 @@ BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID reserved) {
   (void)module;
   (void)reserved;
   if (reason == DLL_PROCESS_DETACH && fixture_unload_path[0]) {
-    HANDLE file = CreateFileW(fixture_unload_path, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE file = CreateFileW(fixture_unload_path, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS,
+                              FILE_ATTRIBUTE_NORMAL, NULL);
     if (file != INVALID_HANDLE_VALUE) {
       DWORD written;
       WriteFile(file, "unloaded", 8, &written, NULL);
@@ -65,7 +68,9 @@ BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID reserved) {
 static char fixture_unload_path[4096];
 FIXTURE_API int32_t fixture_set_unload_marker(const char* path) {
   const size_t size = strlen(path);
-  if (size >= sizeof(fixture_unload_path)) return 0;
+  if (size >= sizeof(fixture_unload_path)) {
+    return 0;
+  }
   memcpy(fixture_unload_path, path, size + 1);
   return 1;
 }
@@ -108,10 +113,17 @@ FIXTURE_API size_t fixture_wstring_length(const wchar_t* value) {
   return wcslen(value);
 }
 
-#define FIXTURE_SCALAR(name, type) \
-  FIXTURE_API type fixture_scalar_##name(type value) { return value; } \
-  FIXTURE_API type fixture_scalar_##name##_tail(type value, const char* tail) { (void)tail; return value; } \
-  FIXTURE_API type fixture_callback_##name(type (*callback)(type), type value) { return callback(value); }
+#define FIXTURE_SCALAR(name, type)                                               \
+  FIXTURE_API type fixture_scalar_##name(type value) {                           \
+    return value;                                                                \
+  }                                                                              \
+  FIXTURE_API type fixture_scalar_##name##_tail(type value, const char* tail) {  \
+    (void)tail;                                                                  \
+    return value;                                                                \
+  }                                                                              \
+  FIXTURE_API type fixture_callback_##name(type (*callback)(type), type value) { \
+    return callback(value);                                                      \
+  }
 
 FIXTURE_SCALAR(i8, int8_t)
 FIXTURE_SCALAR(u8, uint8_t)
@@ -132,6 +144,24 @@ FIXTURE_SCALAR(wchar, wchar_t)
 FIXTURE_SCALAR(bool, bool)
 
 #undef FIXTURE_SCALAR
+
+#define FIXTURE_CONVERSION(name, result, argument)    \
+  FIXTURE_API result fixture_##name(argument value) { \
+    return (result)value;                             \
+  }
+
+FIXTURE_CONVERSION(promote_i8, int32_t, int8_t)
+FIXTURE_CONVERSION(promote_u8, int32_t, uint8_t)
+FIXTURE_CONVERSION(promote_i16, int32_t, int16_t)
+FIXTURE_CONVERSION(promote_u16, int32_t, uint16_t)
+FIXTURE_CONVERSION(promote_bool, int32_t, bool)
+FIXTURE_CONVERSION(narrow_i8, int8_t, int32_t)
+FIXTURE_CONVERSION(narrow_u8, uint8_t, int32_t)
+FIXTURE_CONVERSION(narrow_i16, int16_t, int32_t)
+FIXTURE_CONVERSION(narrow_u16, uint16_t, int32_t)
+FIXTURE_CONVERSION(narrow_bool, bool, int32_t)
+
+#undef FIXTURE_CONVERSION
 
 FIXTURE_API double fixture_exact_mixed(int32_t a, double b, float c, int32_t d) {
   return a + 2 * b + 3 * c + d;
@@ -301,7 +331,9 @@ FIXTURE_API int32_t fixture_point_sum_extra(struct FixturePoint value, int32_t c
   int32_t result = value.x + value.y;
   va_list arguments;
   va_start(arguments, count);
-  for (int32_t i = 0; i < count; i++) result += va_arg(arguments, int32_t);
+  for (int32_t i = 0; i < count; i++) {
+    result += va_arg(arguments, int32_t);
+  }
   va_end(arguments);
   return result;
 }
@@ -331,7 +363,9 @@ struct FixtureReturnBlock {
 
 FIXTURE_API struct FixtureReturnBlock fixture_return_block_make(int32_t seed) {
   struct FixtureReturnBlock value;
-  for (int i = 0; i < 96; i++) value.values[i] = seed + i;
+  for (int i = 0; i < 96; i++) {
+    value.values[i] = seed + i;
+  }
   return value;
 }
 

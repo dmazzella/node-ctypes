@@ -73,7 +73,13 @@ describe("native descriptor finalization", function () {
     cannotGrow(child);
     parent.addField("tail", c.CType.INT32);
     assert.equal(parent.getSize(), 20);
-    const value = parent.create({ items: [{ x: 1, y: 2 }, { x: 3, y: 4 }], tail: 5 });
+    const value = parent.create({
+      items: [
+        { x: 1, y: 2 },
+        { x: 3, y: 4 },
+      ],
+      tail: 5,
+    });
     cannotGrow(parent);
     assert.deepEqual([...value._buffer], [...Buffer.from(new Int32Array([1, 2, 3, 4, 5]).buffer)]);
   });
@@ -82,9 +88,7 @@ describe("native descriptor finalization", function () {
     it(`${method} finalizes the layout used by the native value`, function () {
       const type = point();
       const bytes = Buffer.from(new Int32Array([1, 2]).buffer);
-      const value = method === "create" ? type.create({ x: 1, y: 2 })
-        : method === "read" ? type.read(bytes)
-        : type.toObject(method === "toObject-buffer" ? bytes : { _buffer: bytes });
+      const value = method === "create" ? type.create({ x: 1, y: 2 }) : method === "read" ? type.read(bytes) : type.toObject(method === "toObject-buffer" ? bytes : { _buffer: bytes });
       cannotGrow(type);
       assert.equal(value.x, 1);
       assert.equal(value.y, 2);
@@ -103,7 +107,10 @@ describe("native descriptor finalization", function () {
   it("a value getter cannot grow the layout while it is being materialized", function () {
     const type = point();
     const value = type.create({
-      get x() { cannotGrow(type); return 1; },
+      get x() {
+        cannotGrow(type);
+        return 1;
+      },
       y: 2,
     });
     assert.equal(value.x, 1);
@@ -114,22 +121,40 @@ describe("native descriptor finalization", function () {
     const type = point();
     new c.ArrayType(type, 1);
     let touched = false;
-    assert.throws(() => type.addField("late", {
-      get _native() { touched = true; return new c.ArrayType(c.CType.INT32, 1); },
-    }, {
-      get anonymous() { touched = true; return false; },
-    }), finalized);
+    assert.throws(
+      () =>
+        type.addField(
+          "late",
+          {
+            get _native() {
+              touched = true;
+              return new c.ArrayType(c.CType.INT32, 1);
+            },
+          },
+          {
+            get anonymous() {
+              touched = true;
+              return false;
+            },
+          },
+        ),
+      finalized,
+    );
     assert.equal(touched, false);
   });
 
   it("a reentrant option getter cannot add a field after another consumer finalizes the type", function () {
     const type = point();
-    assert.throws(() => type.addField("late", c.CType.INT32, {
-      get anonymous() {
-        new c.ArrayType(type, 1);
-        return false;
-      },
-    }), finalized);
+    assert.throws(
+      () =>
+        type.addField("late", c.CType.INT32, {
+          get anonymous() {
+            new c.ArrayType(type, 1);
+            return false;
+          },
+        }),
+      finalized,
+    );
     assert.equal(type.getSize(), 8);
   });
 
@@ -151,7 +176,9 @@ describe("native descriptor finalization", function () {
 
 describe("finalized ABI descriptors in prepared calls", { skip: !existsSync(fixture) && `${fixture} not built` }, function () {
   let lib;
-  before(() => { lib = new c.CDLL(fixture); });
+  before(() => {
+    lib = new c.CDLL(fixture);
+  });
   after(() => lib.close());
 
   it("function arguments keep a stable CIF and call plan after rejected mutations", async function () {
@@ -181,7 +208,9 @@ describe("finalized ABI descriptors in prepared calls", { skip: !existsSync(fixt
         cannotGrow(type);
         const invoke = lib.func("fixture_point_callback", c.c_int32, [c.c_void_p, c.c_int32, c.c_int32]);
         assert.equal(threadSafe ? await invoke.callAsync(callback, 3, 4) : invoke(callback, 3, 4), 7);
-      } finally { callback.release(); }
+      } finally {
+        callback.release();
+      }
     });
   }
 
@@ -203,7 +232,16 @@ describe("finalized ABI descriptors in prepared calls", { skip: !existsSync(fixt
     cannotGrow(type);
     assert.equal(type.getSize(), 20);
     assert.equal(array.getSize(), 16);
-    assert.equal(fn.call({ count: 2, points: [{ x: 1, y: 2 }, { x: 3, y: 4 }] }), 4);
+    assert.equal(
+      fn.call({
+        count: 2,
+        points: [
+          { x: 1, y: 2 },
+          { x: 3, y: 4 },
+        ],
+      }),
+      4,
+    );
   });
 
   it("native union arguments and returns keep their merged ABI class", function () {
@@ -228,10 +266,19 @@ describe("finalized ABI descriptors in prepared calls", { skip: !existsSync(fixt
   it("generated packed/bitfield descriptors are sealed without disrupting their builders", function () {
     class Packed extends c.Structure {
       static _pack_ = 1;
-      static _fields_ = [["a", c.c_uint8], ["b", c.c_uint32], ["c", c.c_double], ["d", c.c_uint16]];
+      static _fields_ = [
+        ["a", c.c_uint8],
+        ["b", c.c_uint32],
+        ["c", c.c_double],
+        ["d", c.c_uint16],
+      ];
     }
     class Bits extends c.Structure {
-      static _fields_ = [["a", c.c_uint8, 3], ["b", c.c_uint32, 5], ["tail", c.c_uint8]];
+      static _fields_ = [
+        ["a", c.c_uint8, 3],
+        ["b", c.c_uint32, 5],
+        ["tail", c.c_uint8],
+      ];
     }
     const sum = lib.func("fixture_packed_sum", c.c_double, [Packed]);
     const bits = lib.func("fixture_bits_sum", c.c_uint32, [Bits]);

@@ -17,12 +17,18 @@ void StructInfo::EnsureMutable() const {
 }
 
 void StructInfo::Finalize() {
-  if (finalized_) return;
+  if (finalized_) {
+    return;
+  }
   CalculateLayout();
   finalized_ = true;
   for (const auto& field : fields_) {
-    if (field.struct_type) field.struct_type->Finalize();
-    if (field.array_type) field.array_type->Finalize();
+    if (field.struct_type) {
+      field.struct_type->Finalize();
+    }
+    if (field.array_type) {
+      field.array_type->Finalize();
+    }
   }
 }
 
@@ -72,7 +78,9 @@ void StructInfo::AddField(const std::string& name, CType type, std::shared_ptr<S
   if (nested.get() == this) {
     throw std::invalid_argument("A structure cannot contain itself by value");
   }
-  if (nested) nested->Finalize();
+  if (nested) {
+    nested->Finalize();
+  }
   FieldInfo field;
   field.name = name;
   field.type = type;
@@ -274,8 +282,10 @@ ffi_type* StructInfo::GetFFIType() {
   return ffi_type_.get();
 }
 
-bool StructInfo::JSToStruct(Napi::Env env, Napi::Object obj, std::span<uint8_t> buffer,
-                          std::vector<Napi::ObjectReference>* owners) {
+bool StructInfo::JSToStruct(Napi::Env env,
+                            Napi::Object obj,
+                            std::span<uint8_t> buffer,
+                            std::vector<Napi::ObjectReference>* owners) {
   if (buffer.size() < size_) {
     Napi::TypeError::New(env, "Buffer too small for struct").ThrowAsJavaScriptException();
     return false;
@@ -295,7 +305,9 @@ bool StructInfo::JSToStruct(Napi::Env env, Napi::Object obj, std::span<uint8_t> 
       if (value.IsUndefined()) {
         continue;  // campo opzionale
       }
-      if (owners && value.IsObject()) owners->push_back(Napi::Persistent(value.As<Napi::Object>()));
+      if (owners && value.IsObject()) {
+        owners->push_back(Napi::Persistent(value.As<Napi::Object>()));
+      }
       if (!field.array_type->JSToArray(env, value, field_bytes, owners)) {
         return false;
       }
@@ -315,7 +327,9 @@ bool StructInfo::JSToStruct(Napi::Env env, Napi::Object obj, std::span<uint8_t> 
           Napi::TypeError::New(env, std::format("Field {} must be an object", field.name)).ThrowAsJavaScriptException();
           return false;
         }
-        if (owners) owners->push_back(Napi::Persistent(value.As<Napi::Object>()));
+        if (owners) {
+          owners->push_back(Napi::Persistent(value.As<Napi::Object>()));
+        }
         if (!field.struct_type->JSToStruct(env, value.As<Napi::Object>(), field_bytes, owners)) {
           return false;
         }
@@ -326,7 +340,9 @@ bool StructInfo::JSToStruct(Napi::Env env, Napi::Object obj, std::span<uint8_t> 
       if (value.IsUndefined()) {
         continue;  // campo opzionale
       }
-      if (owners && value.IsObject()) owners->push_back(Napi::Persistent(value.As<Napi::Object>()));
+      if (owners && value.IsObject()) {
+        owners->push_back(Napi::Persistent(value.As<Napi::Object>()));
+      }
       if (JSToC(value, field.type, field_bytes) < 0) {
         return false;
       }
@@ -421,7 +437,9 @@ ArrayInfo::ArrayInfo(CType element_type, size_t count, std::shared_ptr<StructInf
 ArrayInfo::~ArrayInfo() = default;
 
 void ArrayInfo::Finalize() {
-  if (element_struct_) element_struct_->Finalize();
+  if (element_struct_) {
+    element_struct_->Finalize();
+  }
 }
 
 ffi_type* ArrayInfo::GetFFIType() {
@@ -458,8 +476,10 @@ ffi_type* ArrayInfo::GetFFIType() {
   return ffi_type_.get();
 }
 
-bool ArrayInfo::JSToArray(Napi::Env env, Napi::Value val, std::span<uint8_t> buffer,
-                        std::vector<Napi::ObjectReference>* owners) {
+bool ArrayInfo::JSToArray(Napi::Env env,
+                          Napi::Value val,
+                          std::span<uint8_t> buffer,
+                          std::vector<Napi::ObjectReference>* owners) {
   if (buffer.size() < size_) {
     Napi::TypeError::New(env, "Buffer too small for array").ThrowAsJavaScriptException();
     return false;
@@ -473,7 +493,9 @@ bool ArrayInfo::JSToArray(Napi::Env env, Napi::Value val, std::span<uint8_t> buf
 
     for (size_t i = 0; i < copy_len; i++) {
       Napi::Value elem = arr.Get(static_cast<uint32_t>(i));
-      if (owners && elem.IsObject()) owners->push_back(Napi::Persistent(elem.As<Napi::Object>()));
+      if (owners && elem.IsObject()) {
+        owners->push_back(Napi::Persistent(elem.As<Napi::Object>()));
+      }
       const std::span<uint8_t> elem_bytes = bytes.subspan(i * element_size_, element_size_);
 
       if (element_struct_) {

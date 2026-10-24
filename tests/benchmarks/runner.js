@@ -49,9 +49,15 @@ function collectMetadata() {
   const cpuModel = [...new Set(cpuInfo.map((cpu) => cpu.model))].join("; ");
   if (!cpuModel) warn("CPU model unavailable from node:os.");
   return {
-    started_at: new Date().toISOString(), ctypes_version: version,
-    os_release: release(), os_version: osVersion(), cpu_model: cpuModel || null, cpu_threads: cpuInfo.length,
-    git_commit: commit, git_dirty: status === null ? null : status.length > 0, metadata_warnings: warnings,
+    started_at: new Date().toISOString(),
+    ctypes_version: version,
+    os_release: release(),
+    os_version: osVersion(),
+    cpu_model: cpuModel || null,
+    cpu_threads: cpuInfo.length,
+    git_commit: commit,
+    git_dirty: status === null ? null : status.length > 0,
+    metadata_warnings: warnings,
   };
 }
 
@@ -66,7 +72,7 @@ function measureSync(call, duration) {
     operations += 1024;
     elapsed = performance.now() - start;
   } while (elapsed < duration);
-  return { elapsed_ms: elapsed, operations, ns_per_op: elapsed * 1e6 / operations };
+  return { elapsed_ms: elapsed, operations, ns_per_op: (elapsed * 1e6) / operations };
 }
 
 async function measureAsync(call, concurrency, duration) {
@@ -78,16 +84,18 @@ async function measureAsync(call, concurrency, duration) {
     operations += concurrency;
     elapsed = performance.now() - start;
   } while (elapsed < duration);
-  return { elapsed_ms: elapsed, operations, ns_per_op: elapsed * 1e6 / operations };
+  return { elapsed_ms: elapsed, operations, ns_per_op: (elapsed * 1e6) / operations };
 }
 
 export async function runComparison(competitor, cases, { version, externalBuffers, notes = [], unsupported = [] } = {}) {
-  const { values } = parseArgs({ options: {
-    samples: { type: "string", default: "9" },
-    duration: { type: "string", default: "250" },
-    filter: { type: "string" },
-    output: { type: "string" },
-  } });
+  const { values } = parseArgs({
+    options: {
+      samples: { type: "string", default: "9" },
+      duration: { type: "string", default: "250" },
+      filter: { type: "string" },
+      output: { type: "string" },
+    },
+  });
   const samples = Number(values.samples);
   const duration = Number(values.duration);
   if (!Number.isSafeInteger(samples) || samples < 9) throw new RangeError("--samples must be an integer >= 9");
@@ -95,9 +103,7 @@ export async function runComparison(competitor, cases, { version, externalBuffer
   const filters = values.filter?.toLowerCase().split(",");
   const selected = cases.filter((item) => !filters || filters.some((filter) => item.name.toLowerCase().includes(filter)));
   if (!selected.length) throw new Error("No benchmark cases match --filter");
-  const htmlFile = values.output
-    ? `${path.resolve(values.output).replace(/\.json$/i, "")}.html`
-    : path.join(import.meta.dirname, "results", `${competitor.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.html`);
+  const htmlFile = values.output ? `${path.resolve(values.output).replace(/\.json$/i, "")}.html` : path.join(import.meta.dirname, "results", `${competitor.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.html`);
   mkdirSync(path.dirname(htmlFile), { recursive: true });
   const metadata = collectMetadata();
 
@@ -114,9 +120,17 @@ export async function runComparison(competitor, cases, { version, externalBuffer
   const timing = (result) => `${result.median_ns.toFixed(2)} +/- ${result.mad_ns.toFixed(2)}`;
   const report = {
     ...metadata,
-    competitor, competitor_version: version ?? null, node: process.version, platform: process.platform, arch: process.arch,
-    buffer_mode: externalBuffers ? "external" : "mirror", samples, duration_ms: duration,
-    notes, unsupported, cases: [],
+    competitor,
+    competitor_version: version ?? null,
+    node: process.version,
+    platform: process.platform,
+    arch: process.arch,
+    buffer_mode: externalBuffers ? "external" : "mirror",
+    samples,
+    duration_ms: duration,
+    notes,
+    unsupported,
+    cases: [],
   };
   let group;
   for (const [index, item] of selected.entries()) {
@@ -137,9 +151,7 @@ export async function runComparison(competitor, cases, { version, externalBuffer
     const measurements = [[], []];
     for (let sample = 0; sample < samples; sample++) {
       for (const side of (sample + index) % 2 ? [1, 0] : [0, 1]) {
-        const result = item.concurrency
-          ? await measureAsync(calls[side], item.concurrency, duration)
-          : measureSync(calls[side], duration);
+        const result = item.concurrency ? await measureAsync(calls[side], item.concurrency, duration) : measureSync(calls[side], duration);
         measurements[side].push(result);
         await new Promise((resolve) => setImmediate(resolve));
       }
@@ -149,9 +161,14 @@ export async function runComparison(competitor, cases, { version, externalBuffer
     const ratio = ctypes.median_ns / other.median_ns;
     console.log(`${item.name.padEnd(width)}  ${timing(ctypes).padStart(24)}  ${timing(other).padStart(24)}  ${`${ratio.toFixed(2)}x`.padStart(8)}`);
     report.cases.push({
-      name: item.name, group, representation: item.representation,
-      unit: item.concurrency ? "ns/completed-call" : "ns/op", concurrency: item.concurrency ?? null,
-      ctypes, other, ratio,
+      name: item.name,
+      group,
+      representation: item.representation,
+      unit: item.concurrency ? "ns/completed-call" : "ns/op",
+      concurrency: item.concurrency ?? null,
+      ctypes,
+      other,
+      ratio,
     });
   }
   sink = undefined;
@@ -169,9 +186,18 @@ function renderHtml(report) {
   const integer = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
   const decimal = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const axisNumber = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
-  const escape = (value) => String(value).replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;",
-  })[character]);
+  const escape = (value) =>
+    String(value).replace(
+      /[&<>"']/g,
+      (character) =>
+        ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&apos;",
+        })[character],
+    );
   const groups = new Map();
   for (const item of report.cases) {
     if (!groups.has(item.group)) groups.set(item.group, []);
@@ -179,67 +205,76 @@ function renderHtml(report) {
   }
   const competitor = `${report.competitor}${report.competitor_version ? ` ${report.competitor_version}` : ""}`;
   const title = `node-ctypes ${report.ctypes_version} vs ${competitor}`;
-  const commit = report.git_commit
-    ? `${report.git_commit.slice(0, 12)}${report.git_dirty === null ? " (working tree unavailable)" : report.git_dirty ? " + local changes" : " (clean)"}`
-    : "unavailable";
-  const platform = ({ darwin: "macOS", win32: "Windows", linux: "Linux" })[report.platform] ?? report.platform;
+  const commit = report.git_commit ? `${report.git_commit.slice(0, 12)}${report.git_dirty === null ? " (working tree unavailable)" : report.git_dirty ? " + local changes" : " (clean)"}` : "unavailable";
+  const platform = { darwin: "macOS", win32: "Windows", linux: "Linux" }[report.platform] ?? report.platform;
   const metadata = [
     ["Runtime", `Node.js ${report.node}`, `Buffers: ${report.buffer_mode}`],
     ["Platform", `${platform} / ${report.arch.toUpperCase()}`, `Kernel ${report.os_release}`],
     ["Sampling", `${report.samples} x >= ${report.duration_ms} ms / library`, "Per case; warmup excluded"],
     ["CPU", report.cpu_model ?? "Unavailable", `${report.cpu_threads} logical CPUs`],
-  ].map(([label, value, detail]) =>
-    `<div><dt>${escape(label)}</dt><dd>${escape(value)}<small>${escape(detail)}</small></dd></div>`).join("\n");
-  const sections = [...groups].map(([name, cases], groupIndex) => {
-    assert.ok(cases.every((item) => item.unit === cases[0].unit), `${name}: mixed units`);
-    const largest = Math.max(...cases.flatMap((item) => [
-      item.ctypes.median_ns + item.ctypes.mad_ns, item.other.median_ns + item.other.mad_ns,
-    ])) * 1.12;
-    const magnitude = 10 ** Math.floor(Math.log10(largest));
-    const axisMaximum = Math.ceil(largest / magnitude) * magnitude;
-    const percent = (value) => value / axisMaximum * 100;
-    const ticks = Array.from({ length: 5 }, (_, index) =>
-      `<span style="left:${index * 25}%">${escape(axisNumber.format(axisMaximum * index / 4))}</span>`).join("");
-    const charts = cases.map((item) => {
-      const ratio = item.ratio.toFixed(2);
-      const direction = Number(ratio) - 1;
-      const measurements = [
-        ["node-ctypes", item.ctypes, "ctypes"], [report.competitor, item.other, "other"],
-      ].map(([library, side, className]) => {
-        const low = percent(Math.max(0, side.median_ns - side.mad_ns));
-        const high = percent(side.median_ns + side.mad_ns);
-        const operations = side.samples.reduce((sum, sample) => sum + sample.operations, 0);
-        const elapsed = side.samples.reduce((sum, sample) => sum + sample.elapsed_ms, 0) / 1000;
-        return `<div class="measurement">
+  ]
+    .map(([label, value, detail]) => `<div><dt>${escape(label)}</dt><dd>${escape(value)}<small>${escape(detail)}</small></dd></div>`)
+    .join("\n");
+  const sections = [...groups]
+    .map(([name, cases], groupIndex) => {
+      assert.ok(
+        cases.every((item) => item.unit === cases[0].unit),
+        `${name}: mixed units`,
+      );
+      const largest = Math.max(...cases.flatMap((item) => [item.ctypes.median_ns + item.ctypes.mad_ns, item.other.median_ns + item.other.mad_ns])) * 1.12;
+      const magnitude = 10 ** Math.floor(Math.log10(largest));
+      const axisMaximum = Math.ceil(largest / magnitude) * magnitude;
+      const percent = (value) => (value / axisMaximum) * 100;
+      const ticks = Array.from({ length: 5 }, (_, index) => `<span style="left:${index * 25}%">${escape(axisNumber.format((axisMaximum * index) / 4))}</span>`).join("");
+      const charts = cases
+        .map((item) => {
+          const ratio = item.ratio.toFixed(2);
+          const direction = Number(ratio) - 1;
+          const measurements = [
+            ["node-ctypes", item.ctypes, "ctypes"],
+            [report.competitor, item.other, "other"],
+          ]
+            .map(([library, side, className]) => {
+              const low = percent(Math.max(0, side.median_ns - side.mad_ns));
+              const high = percent(side.median_ns + side.mad_ns);
+              const operations = side.samples.reduce((sum, sample) => sum + sample.operations, 0);
+              const elapsed = side.samples.reduce((sum, sample) => sum + sample.elapsed_ms, 0) / 1000;
+              return `<div class="measurement">
 <span class="library">${escape(library)}</span>
 <div class="plot" aria-hidden="true"><div class="bar ${className}" style="width:${percent(side.median_ns)}%"></div><div class="whisker" style="left:${low}%;width:${high - low}%"></div></div>
 <span class="timing">${escape(decimal.format(side.median_ns))} +/- ${escape(decimal.format(side.mad_ns))}<span class="sr-only"> ${escape(item.unit)}</span></span>
 <div class="counts"><span>${escape(integer.format(operations))} ${item.concurrency ? "completed calls" : "operations"}</span><span>${elapsed.toFixed(3)} s measured</span></div>
 </div>`;
-      }).join("\n");
-      return `<article class="case">
+            })
+            .join("\n");
+          return `<article class="case">
 <header><h3>${escape(item.name)}</h3><div class="case-meta"><span>${escape(item.representation)}${item.concurrency ? ` / concurrency ${item.concurrency}` : ""}</span><span class="ratio ${direction < 0 ? "good" : direction > 0 ? "other-ahead" : "neutral"}">${ratio}x</span></div></header>
 <div class="measurements">${measurements}</div>
 </article>`;
-    }).join("\n");
-    return `<section class="group" aria-labelledby="group-${groupIndex}">
+        })
+        .join("\n");
+      return `<section class="group" aria-labelledby="group-${groupIndex}">
 <h2 id="group-${groupIndex}"><span>${String(groupIndex + 1).padStart(2, "0")}</span> ${escape(name)}<small>${cases.length} ${cases.length === 1 ? "case" : "cases"}</small></h2>
 <div class="axis"><span class="axis-label">Library</span><div class="ticks">${ticks}</div><span class="unit">Median +/- MAD (${escape(cases[0].unit)})</span></div>
 ${charts}
 </section>`;
-  }).join("\n");
+    })
+    .join("\n");
   const notes = [
     `CPU: ${report.cpu_model ?? "unavailable"}. OS: ${report.os_version}.`,
     `Commit: ${report.git_commit ?? "unavailable"}; working tree: ${report.git_dirty === null ? "unavailable" : report.git_dirty ? "modified" : "clean"}.`,
     `Started: ${report.started_at}. Finished: ${report.finished_at}.`,
-    ...report.notes, ...report.metadata_warnings,
+    ...report.notes,
+    ...report.metadata_warnings,
     ...report.unsupported.map((item) => `Not compared: ${item}`),
     "Measured time excludes warmup, result checks and pauses between samples; it is not total wall-clock runtime.",
     "Each section has its own zero-based linear scale. Bar lengths are comparable within a section, not across sections.",
     "Whiskers show median +/- MAD, not a confidence interval. Ratio colors are descriptive, not a significance test.",
     "Ratio below 1 favors node-ctypes (green); above 1 favors the competitor (orange). Rounded ratios of 1.00 are neutral.",
     "Async timing measures completed calls including scheduling. No overall score is computed across workloads.",
-  ].map((note) => `<li>${escape(note)}</li>`).join("\n");
+  ]
+    .map((note) => `<li>${escape(note)}</li>`)
+    .join("\n");
   return `<!doctype html>
 <html lang="en">
 <head>

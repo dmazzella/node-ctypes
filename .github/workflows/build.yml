@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    tags: ['v*']
+    tags: ["v*"]
     paths-ignore:
-      - 'README.md'
+      - "README.md"
       # - '.github/**'
   pull_request:
     branches: [main]
@@ -280,7 +280,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
-          registry-url: 'https://registry.npmjs.org'
+          registry-url: "https://registry.npmjs.org"
 
       - name: Publish to npm
         run: npm publish "package/${{ needs.package.outputs.filename }}" --tag "${{ needs.package.outputs.npm_tag }}" --access public --provenance

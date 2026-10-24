@@ -249,105 +249,115 @@ describe("threadSafeCallback collected without release()", function () {
 });
 
 describe("converted argument ownership", { skip: !existsSync(FIXTURE) && "native fixture not built" }, function () {
-      let lib;
-      before(() => { lib = new CDLL(FIXTURE); });
-      after(() => lib.close());
+  let lib;
+  before(() => {
+    lib = new CDLL(FIXTURE);
+  });
+  after(() => lib.close());
 
-      for (const binding of ["func", "attribute", "prototype"]) {
-        it(`${binding} retains conversion temporaries before native entry and releases them afterwards`, async function () {
-          let owner = Buffer.alloc(4096, 65);
-          const weak = new WeakRef(owner);
-          await new Promise((resolve) => setImmediate(resolve));
-          class Temporary extends c_void_p {
-            static from_param() {
-              const buffer = owner;
-              owner = null;
-              return ctypes.cast(new c_void_p(buffer), ctypes.POINTER(c_uint8));
-            }
-          }
-          class Collect extends c_void_p {
-            static from_param() {
-              const nested = lib.func("fixture_address", c_size_t, [c_void_p]);
-              nested(new c_void_p(Buffer.alloc(32)));
-              for (let i = 0; i < 10; i++) gc();
-              // Failure stops conversion before C could read the pointer.
-              assert.ok(weak.deref(), "the first converted argument lost its owner");
-              return null;
-            }
-          }
-          let fn;
-          if (binding === "func") fn = lib.func("fixture_first_char_after", c_int32, [Temporary, Collect]);
-          else if (binding === "prototype") fn = CFUNCTYPE(c_int32, Temporary, Collect)(["fixture_first_char_after", lib]);
-          else {
-            fn = lib.fixture_first_char_after;
-            fn.argtypes = [Temporary, Collect];
-            fn.restype = c_int32;
-          }
-          assert.strictEqual(fn(0, null), 65);
-          await collectGarbage();
-          assert.strictEqual(weak.deref(), undefined, "completed conversions must not leak their owners");
-        });
+  for (const binding of ["func", "attribute", "prototype"]) {
+    it(`${binding} retains conversion temporaries before native entry and releases them afterwards`, async function () {
+      let owner = Buffer.alloc(4096, 65);
+      const weak = new WeakRef(owner);
+      await new Promise((resolve) => setImmediate(resolve));
+      class Temporary extends c_void_p {
+        static from_param() {
+          const buffer = owner;
+          owner = null;
+          return ctypes.cast(new c_void_p(buffer), ctypes.POINTER(c_uint8));
+        }
       }
-
-      it("releases conversion temporaries when a later converter throws", async function () {
-        let weak;
-        class Temporary extends c_void_p {
-          static from_param() {
-            const owner = Buffer.alloc(4096);
-            weak = new WeakRef(owner);
-            return ctypes.cast(new c_void_p(owner), ctypes.POINTER(c_uint8));
-          }
-        }
-        class Fail extends c_void_p {
-          static from_param() { throw new RangeError("conversion stopped"); }
-        }
-        const fn = lib.func("fixture_first_char_after", c_int32, [Temporary, Fail]);
-        assert.throws(() => fn(0, null), /conversion stopped/);
-        await collectGarbage();
-        assert.strictEqual(weak.deref(), undefined);
-      });
-
-      it("prevents close() while native getters materialize async arguments", async function () {
-        const isolated = new CDLL(FIXTURE);
-        const type = new ctypes.StructType();
-        type.addField("value", ctypes.CType.POINTER);
-        const fn = isolated._lib.func("fixture_pointer_value", ctypes.CType.SIZE_T, [type]);
-        const owner = Buffer.alloc(32);
-        try {
-          const result = await fn.callAsync({ get value() {
-            assert.throws(() => isolated.close(), /calls to its functions are in progress/);
-            return owner;
-          } });
-          assert.strictEqual(result, addressof(owner));
-        } finally {
-          isolated.close();
-        }
-      });
-
-      it("keeps owners until a converted result has passed errcheck", async function () {
-        let owner = Buffer.alloc(4096);
-        const weak = new WeakRef(owner);
-        await new Promise((resolve) => setImmediate(resolve));
-        class Temporary extends c_void_p {
-          static from_param() {
-            const buffer = owner; owner = null;
-            return ctypes.cast(new c_void_p(buffer), ctypes.POINTER(c_uint8));
-          }
-        }
-        const fn = lib.func("fixture_address", ctypes.POINTER(c_uint8), [Temporary]);
-        fn.errcheck = (result) => {
+      class Collect extends c_void_p {
+        static from_param() {
+          const nested = lib.func("fixture_address", c_size_t, [c_void_p]);
+          nested(new c_void_p(Buffer.alloc(32)));
           for (let i = 0; i < 10; i++) gc();
-          assert.ok(weak.deref(), "owner was released before JS errcheck");
-          return result.address;
-        };
-        try { assert.strictEqual(typeof fn(0), "bigint"); }
-        finally { fn.errcheck = null; }
-        await collectGarbage();
-        assert.strictEqual(weak.deref(), undefined);
-      });
+          // Failure stops conversion before C could read the pointer.
+          assert.ok(weak.deref(), "the first converted argument lost its owner");
+          return null;
+        }
+      }
+      let fn;
+      if (binding === "func") fn = lib.func("fixture_first_char_after", c_int32, [Temporary, Collect]);
+      else if (binding === "prototype") fn = CFUNCTYPE(c_int32, Temporary, Collect)(["fixture_first_char_after", lib]);
+      else {
+        fn = lib.fixture_first_char_after;
+        fn.argtypes = [Temporary, Collect];
+        fn.restype = c_int32;
+      }
+      assert.strictEqual(fn(0, null), 65);
+      await collectGarbage();
+      assert.strictEqual(weak.deref(), undefined, "completed conversions must not leak their owners");
+    });
+  }
 
-      it("retains queued async arguments, including native by-value and numeric-pointer extensions", { timeout: 12000 }, function () {
-        const script = `
+  it("releases conversion temporaries when a later converter throws", async function () {
+    let weak;
+    class Temporary extends c_void_p {
+      static from_param() {
+        const owner = Buffer.alloc(4096);
+        weak = new WeakRef(owner);
+        return ctypes.cast(new c_void_p(owner), ctypes.POINTER(c_uint8));
+      }
+    }
+    class Fail extends c_void_p {
+      static from_param() {
+        throw new RangeError("conversion stopped");
+      }
+    }
+    const fn = lib.func("fixture_first_char_after", c_int32, [Temporary, Fail]);
+    assert.throws(() => fn(0, null), /conversion stopped/);
+    await collectGarbage();
+    assert.strictEqual(weak.deref(), undefined);
+  });
+
+  it("prevents close() while native getters materialize async arguments", async function () {
+    const isolated = new CDLL(FIXTURE);
+    const type = new ctypes.StructType();
+    type.addField("value", ctypes.CType.POINTER);
+    const fn = isolated._lib.func("fixture_pointer_value", ctypes.CType.SIZE_T, [type]);
+    const owner = Buffer.alloc(32);
+    try {
+      const result = await fn.callAsync({
+        get value() {
+          assert.throws(() => isolated.close(), /calls to its functions are in progress/);
+          return owner;
+        },
+      });
+      assert.strictEqual(result, addressof(owner));
+    } finally {
+      isolated.close();
+    }
+  });
+
+  it("keeps owners until a converted result has passed errcheck", async function () {
+    let owner = Buffer.alloc(4096);
+    const weak = new WeakRef(owner);
+    await new Promise((resolve) => setImmediate(resolve));
+    class Temporary extends c_void_p {
+      static from_param() {
+        const buffer = owner;
+        owner = null;
+        return ctypes.cast(new c_void_p(buffer), ctypes.POINTER(c_uint8));
+      }
+    }
+    const fn = lib.func("fixture_address", ctypes.POINTER(c_uint8), [Temporary]);
+    fn.errcheck = (result) => {
+      for (let i = 0; i < 10; i++) gc();
+      assert.ok(weak.deref(), "owner was released before JS errcheck");
+      return result.address;
+    };
+    try {
+      assert.strictEqual(typeof fn(0), "bigint");
+    } finally {
+      fn.errcheck = null;
+    }
+    await collectGarbage();
+    assert.strictEqual(weak.deref(), undefined);
+  });
+
+  it("retains queued async arguments, including native by-value and numeric-pointer extensions", { timeout: 12000 }, function () {
+    const script = `
           import assert from "node:assert/strict";
           import * as c from "node-ctypes";
           const lib = new c.CDLL(${JSON.stringify(FIXTURE)});
@@ -443,21 +453,25 @@ describe("converted argument ownership", { skip: !existsSync(FIXTURE) && "native
           for (const item of cases) assert.equal(item.weak.deref(), undefined, item.name + " leaked after completion");
           lib.close(); system.close();
         `;
-        const child = spawnSync(process.execPath, ["--expose-gc", "--input-type=module", "-e", script], {
-          cwd: import.meta.dirname,
-          env: { ...process.env, UV_THREADPOOL_SIZE: "1" },
-          timeout: 10000,
-          encoding: "utf8",
-        });
-        assert.strictEqual(child.error, undefined);
-        assert.strictEqual(child.status, 0, child.stderr);
-      });
+    const child = spawnSync(process.execPath, ["--expose-gc", "--input-type=module", "-e", script], {
+      cwd: import.meta.dirname,
+      env: { ...process.env, UV_THREADPOOL_SIZE: "1" },
+      timeout: 10000,
+      encoding: "utf8",
     });
+    assert.strictEqual(child.error, undefined);
+    assert.strictEqual(child.status, 0, child.stderr);
+  });
+});
 
 describe("owners of pointer views", function () {
   const Ptr = ctypes.POINTER(c_int32);
-  class Record extends ctypes.Structure { static _fields_ = [["p", Ptr]]; }
-  class Value extends ctypes.Union { static _fields_ = [["p", Ptr]]; }
+  class Record extends ctypes.Structure {
+    static _fields_ = [["p", Ptr]];
+  }
+  class Value extends ctypes.Union {
+    static _fields_ = [["p", Ptr]];
+  }
   const Functional = ctypes.struct({ p: Ptr });
 
   it("a derived pointer snapshots a mutable c_void_p owner's memory", async function () {
@@ -480,7 +494,10 @@ describe("owners of pointer views", function () {
 
   it("overwriting union pointer storage releases the old owner", async function () {
     class Overlay extends ctypes.Union {
-      static _fields_ = [["p", Ptr], ["bits", ctypes.c_uint64]];
+      static _fields_ = [
+        ["p", Ptr],
+        ["bits", ctypes.c_uint64],
+      ];
     }
     function create() {
       const target = new c_int32(42);

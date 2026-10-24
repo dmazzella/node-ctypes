@@ -37,8 +37,8 @@ StructType::StructType(const Napi::CallbackInfo& info) : Napi::ObjectWrap<Struct
     Napi::Value alignment = options.Get("alignment");
     if (alignment.IsNumber()) {
       const int64_t value = alignment.As<Napi::Number>().Int64Value();
-      if (alignment.As<Napi::Number>().DoubleValue() != static_cast<double>(value) ||
-          value < 1 || value > 1 << 15 || (value & (value - 1)) != 0) {
+      if (alignment.As<Napi::Number>().DoubleValue() != static_cast<double>(value) || value < 1 || value > 1 << 15 ||
+          (value & (value - 1)) != 0) {
         throw Napi::RangeError::New(info.Env(), "alignment must be a power of two between 1 and 32768");
       }
       min_alignment = static_cast<size_t>(value);

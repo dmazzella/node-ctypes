@@ -29,7 +29,8 @@ uint64_t IntegerBits(const Napi::Value& value) {
     return value.As<Napi::Boolean>().Value() ? 1 : 0;
   }
   if (!value.IsNumber()) {
-    throw Napi::TypeError::New(value.Env(), std::format("'{}' object cannot be interpreted as an integer", JSTypeName(value)));
+    throw Napi::TypeError::New(value.Env(),
+                               std::format("'{}' object cannot be interpreted as an integer", JSTypeName(value)));
   }
   const double d = value.As<Napi::Number>().DoubleValue();
   if (d >= -9223372036854775808.0 && d < 9223372036854775808.0) {
@@ -95,9 +96,13 @@ double RealFromJS(const Napi::Value& value) {
     case napi_bigint: {
       bool lossless;
       const int64_t signed_value = value.As<Napi::BigInt>().Int64Value(&lossless);
-      if (lossless) return static_cast<double>(signed_value);
+      if (lossless) {
+        return static_cast<double>(signed_value);
+      }
       const uint64_t unsigned_value = value.As<Napi::BigInt>().Uint64Value(&lossless);
-      if (lossless) return static_cast<double>(unsigned_value);
+      if (lossless) {
+        return static_cast<double>(unsigned_value);
+      }
       throw Napi::RangeError::New(value.Env(), "BigInt out of range for a floating point argument");
     }
     default:
@@ -334,7 +339,8 @@ int JSToC(Napi::Value value, CType type, std::span<uint8_t> out) {
       } else if (value.IsBoolean()) {
         ptr = reinterpret_cast<void*>(static_cast<uintptr_t>(value.As<Napi::Boolean>().Value()));
       } else if (value.IsNumber()) {
-        ptr = reinterpret_cast<void*>(static_cast<uintptr_t>(IntegerBitsFromDouble(value, value.As<Napi::Number>().DoubleValue())));
+        ptr = reinterpret_cast<void*>(
+          static_cast<uintptr_t>(IntegerBitsFromDouble(value, value.As<Napi::Number>().DoubleValue())));
       } else if (value.IsTypedArray()) {
         const auto view = value.As<Napi::TypedArray>();
         ptr = static_cast<uint8_t*>(view.ArrayBuffer().Data()) + view.ByteOffset();
@@ -342,7 +348,8 @@ int JSToC(Napi::Value value, CType type, std::span<uint8_t> out) {
         const auto view = value.As<Napi::DataView>();
         ptr = static_cast<uint8_t*>(view.ArrayBuffer().Data()) + view.ByteOffset();
       } else {
-        throw Napi::TypeError::New(value.Env(), std::format("'{}' object cannot be interpreted as ctypes.c_void_p", JSTypeName(value)));
+        throw Napi::TypeError::New(
+          value.Env(), std::format("'{}' object cannot be interpreted as ctypes.c_void_p", JSTypeName(value)));
       }
 
       return StoreInto(out, ptr);

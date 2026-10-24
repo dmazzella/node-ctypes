@@ -9,32 +9,60 @@ const fixture = path.join(import.meta.dirname, "../../build/fixture", `ctypes_te
 const PointDef = c.struct({ x: c.c_int32, y: c.c_int32 });
 const NumberDef = c.union({ scalar: c.c_int64, values: c.array(c.c_int32, 2) });
 const TaggedValue = c.union({ f: c.c_float, i: c.c_int32 });
-class Point extends c.Structure { static _fields_ = [["x", c.c_int32], ["y", c.c_int32]]; }
-class NumberValue extends c.Union {
-  static _fields_ = [["scalar", c.c_int64], ["values", c.array(c.c_int32, 2)]];
+class Point extends c.Structure {
+  static _fields_ = [
+    ["x", c.c_int32],
+    ["y", c.c_int32],
+  ];
 }
-class Large extends c.Structure { static _fields_ = [["values", c.array(c.c_int32, 96)]]; }
+class NumberValue extends c.Union {
+  static _fields_ = [
+    ["scalar", c.c_int64],
+    ["values", c.array(c.c_int32, 2)],
+  ];
+}
+class Large extends c.Structure {
+  static _fields_ = [["values", c.array(c.c_int32, 96)]];
+}
 
 const cases = [
   {
-    name: "plain functional structure", type: PointDef, symbol: "fixture_point_make",
-    argtypes: [c.c_int32, c.c_int32], args: (seed) => [seed, seed + 1],
-    read: (value) => [value.x, value.y], expected: (seed) => [seed, seed + 1],
-    mutate: (value) => { value.x = -100; },
+    name: "plain functional structure",
+    type: PointDef,
+    symbol: "fixture_point_make",
+    argtypes: [c.c_int32, c.c_int32],
+    args: (seed) => [seed, seed + 1],
+    read: (value) => [value.x, value.y],
+    expected: (seed) => [seed, seed + 1],
+    mutate: (value) => {
+      value.x = -100;
+    },
     shape: (value) => assert.equal(Object.getPrototypeOf(value), Object.prototype),
   },
   {
-    name: "structure class", type: Point, symbol: "fixture_point_make",
-    argtypes: [c.c_int32, c.c_int32], args: (seed) => [seed, seed + 1],
-    read: (value) => [value.x, value.y], expected: (seed) => [seed, seed + 1],
-    mutate: (value) => { value.x = -100; },
+    name: "structure class",
+    type: Point,
+    symbol: "fixture_point_make",
+    argtypes: [c.c_int32, c.c_int32],
+    args: (seed) => [seed, seed + 1],
+    read: (value) => [value.x, value.y],
+    expected: (seed) => [seed, seed + 1],
+    mutate: (value) => {
+      value.x = -100;
+    },
     shape: (value) => assert.ok(value instanceof Point),
   },
   {
-    name: "functional union with array getters", type: NumberDef, symbol: "fixture_return_union_make",
-    argtypes: [c.c_int32, c.c_int32], args: (seed) => [seed, seed + 1],
-    read: (value) => [...value.values], expected: (seed) => [seed, seed + 1],
-    mutate: (value) => { value.values = [-100, -101]; },
+    name: "functional union with array getters",
+    type: NumberDef,
+    symbol: "fixture_return_union_make",
+    argtypes: [c.c_int32, c.c_int32],
+    args: (seed) => [seed, seed + 1],
+    read: (value) => [...value.values],
+    expected: (seed) => [seed, seed + 1],
+    mutate: (value) => {
+      value.values = [-100, -101];
+    },
     shape: (value) => {
       assert.equal(Object.getPrototypeOf(value), Object.prototype);
       assert.equal(typeof Object.getOwnPropertyDescriptor(value, "scalar").get, "function");
@@ -42,50 +70,80 @@ const cases = [
     },
   },
   {
-    name: "union class with array views", type: NumberValue, symbol: "fixture_return_union_make",
-    argtypes: [c.c_int32, c.c_int32], args: (seed) => [seed, seed + 1],
-    read: (value) => [...value.values], expected: (seed) => [seed, seed + 1],
-    mutate: (value) => { value.values[0] = -100; },
+    name: "union class with array views",
+    type: NumberValue,
+    symbol: "fixture_return_union_make",
+    argtypes: [c.c_int32, c.c_int32],
+    args: (seed) => [seed, seed + 1],
+    read: (value) => [...value.values],
+    expected: (seed) => [seed, seed + 1],
+    mutate: (value) => {
+      value.values[0] = -100;
+    },
     shape: (value) => assert.ok(value instanceof NumberValue),
   },
   {
     name: "functional array of nested structures",
     type: c.struct({ count: c.c_int32, points: c.array(PointDef, 2) }),
-    symbol: "fixture_polyline_make", argtypes: [c.c_int32], args: (seed) => [seed],
+    symbol: "fixture_polyline_make",
+    argtypes: [c.c_int32],
+    args: (seed) => [seed],
     read: (value) => [value.count, ...Array.from(value.points, (point) => [point.x, point.y]).flat()],
     expected: (seed) => [2, seed, seed + 1, seed + 2, seed + 3],
-    mutate: (value) => { value.points[0].x = -100; },
+    mutate: (value) => {
+      value.points[0].x = -100;
+    },
     shape: (value) => {
       assert.equal(Object.getPrototypeOf(value), Object.prototype);
       assert.equal(value.points._arrayType.elementType, PointDef);
     },
   },
   {
-    name: "functional nested union", type: c.struct({ tag: c.c_int32, value: TaggedValue }),
-    symbol: "fixture_tagged_make", argtypes: [c.c_int32, c.c_int32], args: (seed) => [0, seed],
-    read: (value) => [value.tag, value.value.i], expected: (seed) => [0, seed],
-    mutate: (value) => { value.value.i = -100; },
+    name: "functional nested union",
+    type: c.struct({ tag: c.c_int32, value: TaggedValue }),
+    symbol: "fixture_tagged_make",
+    argtypes: [c.c_int32, c.c_int32],
+    args: (seed) => [0, seed],
+    read: (value) => [value.tag, value.value.i],
+    expected: (seed) => [0, seed],
+    mutate: (value) => {
+      value.value.i = -100;
+    },
     shape: (value) => assert.equal(typeof Object.getOwnPropertyDescriptor(value.value, "i").get, "function"),
   },
   {
-    name: "large functional array", type: c.struct({ values: c.array(c.c_int32, 96) }),
-    symbol: "fixture_return_block_make", argtypes: [c.c_int32], args: (seed) => [seed],
-    read: (value) => [...value.values], expected: (seed) => Array.from({ length: 96 }, (_, i) => seed + i),
-    mutate: (value) => { value.values[0] = -100; },
+    name: "large functional array",
+    type: c.struct({ values: c.array(c.c_int32, 96) }),
+    symbol: "fixture_return_block_make",
+    argtypes: [c.c_int32],
+    args: (seed) => [seed],
+    read: (value) => [...value.values],
+    expected: (seed) => Array.from({ length: 96 }, (_, i) => seed + i),
+    mutate: (value) => {
+      value.values[0] = -100;
+    },
     shape: (value) => assert.equal(value.values.length, 96),
   },
   {
-    name: "large structure class", type: Large,
-    symbol: "fixture_return_block_make", argtypes: [c.c_int32], args: (seed) => [seed],
-    read: (value) => [...value.values], expected: (seed) => Array.from({ length: 96 }, (_, i) => seed + i),
-    mutate: (value) => { value.values[0] = -100; },
+    name: "large structure class",
+    type: Large,
+    symbol: "fixture_return_block_make",
+    argtypes: [c.c_int32],
+    args: (seed) => [seed],
+    read: (value) => [...value.values],
+    expected: (seed) => Array.from({ length: 96 }, (_, i) => seed + i),
+    mutate: (value) => {
+      value.values[0] = -100;
+    },
     shape: (value) => assert.ok(value instanceof Large),
   },
 ];
 
 describe("returned structure and union ownership", { skip: !existsSync(fixture) && `${fixture} not built` }, function () {
   let lib;
-  before(() => { lib = new c.CDLL(fixture); });
+  before(() => {
+    lib = new c.CDLL(fixture);
+  });
   after(() => lib.close());
 
   function bind(kind, symbol, type, argtypes) {
@@ -105,13 +163,11 @@ describe("returned structure and union ownership", { skip: !existsSync(fixture) 
       for (const mode of ["sync", "async"]) {
         it(`${kind} ${mode}: ${test.name} retains its own values and public shape`, async function () {
           const fn = bind(kind, test.symbol, test.type, test.argtypes);
-          const invoke = (seed) => mode === "sync" ? fn(...test.args(seed)) : fn.callAsync(...test.args(seed));
+          const invoke = (seed) => (mode === "sync" ? fn(...test.args(seed)) : fn.callAsync(...test.args(seed)));
           const first = await invoke(1);
           test.shape(first);
           assert.deepEqual(test.read(first), test.expected(1));
-          const later = mode === "sync"
-            ? Array.from({ length: 32 }, (_, i) => invoke(i + 2))
-            : await Promise.all(Array.from({ length: 32 }, (_, i) => invoke(i + 2)));
+          const later = mode === "sync" ? Array.from({ length: 32 }, (_, i) => invoke(i + 2)) : await Promise.all(Array.from({ length: 32 }, (_, i) => invoke(i + 2)));
           assert.deepEqual(test.read(first), test.expected(1));
           for (let i = 0; i < later.length; i++) assert.deepEqual(test.read(later[i]), test.expected(i + 2));
           const firstBytes = first._buffer ?? first.points?._buffer ?? first.values?._buffer ?? first.value?._buffer;
@@ -164,7 +220,9 @@ describe("returned structure and union ownership", { skip: !existsSync(fixture) 
         assert.equal(nested.points[0].x, 90);
         assert.equal(fn(200).points[0].x, 200);
         assert.equal(first.points[0].x, 1);
-      } finally { fn.errcheck = null; }
+      } finally {
+        fn.errcheck = null;
+      }
     });
   }
 
@@ -216,7 +274,9 @@ describe("returned structure and union ownership", { skip: !existsSync(fixture) 
       assert.equal(asyncResults[0].points[0].x, 200);
       assert.equal(asyncResults[1].points[0].x, 300);
       assert.equal(first.points[0].x, 1);
-    } finally { fn.errcheck = null; }
+    } finally {
+      fn.errcheck = null;
+    }
   });
 
   it("explicit toObject(buffer) remains a view rather than changing helper semantics", function () {

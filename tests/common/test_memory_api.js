@@ -25,8 +25,12 @@ describe("scalar buffer factories", function () {
 
   it("accepts byte-addressed typed views and bypasses derived constructors", function () {
     class Value extends c.c_int32 {
-      constructor() { throw new Error("constructor must not run"); }
-      static _writer() { throw new Error("writer must not run"); }
+      constructor() {
+        throw new Error("constructor must not run");
+      }
+      static _writer() {
+        throw new Error("writer must not run");
+      }
     }
     const source = Buffer.from(new Int32Array([7, 8]).buffer);
     for (const view of [source, new Uint8Array(source.buffer, source.byteOffset, source.byteLength), new DataView(source.buffer, source.byteOffset, source.byteLength)]) {
@@ -42,7 +46,9 @@ describe("scalar buffer factories", function () {
 
 describe("memory API address contracts", { skip: !existsSync(fixture) && `${fixture} not built` }, function () {
   let lib;
-  before(() => { lib = new c.CDLL(fixture); });
+  before(() => {
+    lib = new c.CDLL(fixture);
+  });
   after(() => lib.close());
 
   it("byref offsets preserve the origin and signed address arithmetic", function () {
@@ -83,10 +89,16 @@ describe("memory API address contracts", { skip: !existsSync(fixture) && `${fixt
       return { reference: c.byref(value, 1), weak: new WeakRef(value) };
     }
     const state = prepare();
-    for (let i = 0; i < 10; i++) { gc(); await new Promise((resolve) => setImmediate(resolve)); }
+    for (let i = 0; i < 10; i++) {
+      gc();
+      await new Promise((resolve) => setImmediate(resolve));
+    }
     assert.ok(state.weak.deref());
     state.reference = null;
-    for (let i = 0; i < 10; i++) { gc(); await new Promise((resolve) => setImmediate(resolve)); }
+    for (let i = 0; i < 10; i++) {
+      gc();
+      await new Promise((resolve) => setImmediate(resolve));
+    }
     assert.equal(state.weak.deref(), undefined);
   });
 

@@ -8,7 +8,9 @@ const fixture = path.join(import.meta.dirname, "../../build/fixture", `ctypes_te
 
 describe("native exact-call and closure ABI", { skip: !existsSync(fixture) && `${fixture} not built` }, function () {
   let lib;
-  before(() => { lib = new c.CDLL(fixture); });
+  before(() => {
+    lib = new c.CDLL(fixture);
+  });
   after(() => lib.close());
 
   it("mixed and homogeneous exact signatures agree with asynchronous libffi calls", async function () {
@@ -58,7 +60,9 @@ describe("native exact-call and closure ABI", { skip: !existsSync(fixture) && `$
             const expected = new T(value).value;
             assert.equal(mode === "worker" ? await fn.callAsync(callback, value) : fn(callback, value), expected);
           }
-        } finally { callback.release(); }
+        } finally {
+          callback.release();
+        }
       });
     }
   }
@@ -66,13 +70,21 @@ describe("native exact-call and closure ABI", { skip: !existsSync(fixture) && `$
   for (const mode of ["ordinary", "thread-safe", "worker", "wrong-thread"]) {
     it(`${mode} callback failures return zero and retain diagnostics`, async function () {
       const make = mode === "ordinary" || mode === "wrong-thread" ? c.callback : c.threadSafeCallback;
-      const callback = make(() => { throw new Error("expected callback failure"); }, c.c_int8, [c.c_int8]);
+      const callback = make(
+        () => {
+          throw new Error("expected callback failure");
+        },
+        c.c_int8,
+        [c.c_int8],
+      );
       const fn = lib.func("fixture_callback_i8", c.c_int8, [c.c_void_p, c.c_int8]);
       callback._callback.setErrorHandler(() => {});
       try {
         assert.equal(mode === "worker" || mode === "wrong-thread" ? await fn.callAsync(callback, 7) : fn(callback, 7), 0);
         assert.match(callback._callback.getLastError(), /expected callback failure|other than the one/);
-      } finally { callback.release(); }
+      } finally {
+        callback.release();
+      }
     });
   }
 
@@ -85,7 +97,9 @@ describe("native exact-call and closure ABI", { skip: !existsSync(fixture) && `$
       try {
         assert.equal(mode === "worker" ? await fn.callAsync(callback, 65535) : fn(callback, 65535), 0);
         assert.match(callback._callback.getLastError(), /function.*cannot be interpreted/);
-      } finally { callback.release(); }
+      } finally {
+        callback.release();
+      }
     });
   }
 

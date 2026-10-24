@@ -18,11 +18,18 @@ async function collect() {
 
 describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixture) && "native fixture not built" }, function () {
   let lib;
-  before(() => { lib = new c.CDLL(fixture); });
+  before(() => {
+    lib = new c.CDLL(fixture);
+  });
   after(() => lib.close());
 
   function bind(library, kind, restype = c.c_int32, argtypes = [c.c_char_p, c.c_void_p], symbol = "fixture_first_char_after") {
-    if (kind === "raw") return library._lib.func(symbol, restype._type, argtypes.map((type) => type._type));
+    if (kind === "raw")
+      return library._lib.func(
+        symbol,
+        restype._type,
+        argtypes.map((type) => type._type),
+      );
     if (kind === "prototype") return c.CFUNCTYPE(restype, ...argtypes)([symbol, library]);
     if (kind === "attribute") {
       const fn = library[symbol];
@@ -32,8 +39,8 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
     }
     return library.func(symbol, restype, argtypes);
   }
-  const setCheck = (fn, kind, check) => kind === "raw" ? fn.setErrcheck(check) : (fn.errcheck = check);
-  const invoke = (fn, kind, ...args) => kind === "raw" ? fn.call(...args) : fn(...args);
+  const setCheck = (fn, kind, check) => (kind === "raw" ? fn.setErrcheck(check) : (fn.errcheck = check));
+  const invoke = (fn, kind, ...args) => (kind === "raw" ? fn.call(...args) : fn(...args));
 
   for (const kind of ["func", "attribute", "prototype", "raw"]) {
     it(`${kind}: an abandoned self-referencing hook does not retain the function or library`, async function () {
@@ -65,10 +72,14 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
         return 101;
       };
       let nested;
-      const cb = c.callback(() => {
-        setCheck(fn, kind, next);
-        nested = invoke(fn, kind, "B", null);
-      }, null, []);
+      const cb = c.callback(
+        () => {
+          setCheck(fn, kind, next);
+          nested = invoke(fn, kind, "B", null);
+        },
+        null,
+        [],
+      );
       try {
         for (const text of ["A", "A".repeat(2048)]) {
           setCheck(fn, kind, old);
@@ -84,7 +95,10 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
 
     it(`${kind}: async calls own their original hook, including clearing and adding hooks`, async function () {
       const fn = bind(lib, kind);
-      const first = (result, func) => { assert.equal(func, fn); return 101; };
+      const first = (result, func) => {
+        assert.equal(func, fn);
+        return 101;
+      };
       setCheck(fn, kind, first);
       const pending = fn.callAsync("A", null);
       setCheck(fn, kind, () => 202);
@@ -95,7 +109,9 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
       const unchecked = fn.callAsync("A", null);
       setCheck(fn, kind, () => 303);
       assert.equal(await unchecked, 65);
-      setCheck(fn, kind, () => { throw new Error("original async hook"); });
+      setCheck(fn, kind, () => {
+        throw new Error("original async hook");
+      });
       const rejected = fn.callAsync("A", null);
       setCheck(fn, kind, null);
       await assert.rejects(rejected, /original async hook/);
@@ -123,7 +139,9 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
           assert.equal(fn(input, null), 202);
           fn.errcheck = null;
           assert.equal(fn(input, null), 65, "an adapter cannot add an errcheck to the call already in progress");
-        } finally { fn.errcheck = null; }
+        } finally {
+          fn.errcheck = null;
+        }
       });
     }
   }
@@ -139,13 +157,21 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
     await collect();
     assert.ok(check.deref());
     await new Promise((resolve) => setImmediate(resolve));
-    const cb = c.callback(() => {
+    const cb = c.callback(
+      () => {
+        fn.setErrcheck(null);
+        for (let i = 0; i < 8; i++) gc();
+        assert.ok(check.deref(), "the active native call must keep its snapshot");
+      },
+      null,
+      [],
+    );
+    try {
+      assert.equal(fn.call("A", cb.pointer), 101);
+    } finally {
+      cb.release();
       fn.setErrcheck(null);
-      for (let i = 0; i < 8; i++) gc();
-      assert.ok(check.deref(), "the active native call must keep its snapshot");
-    }, null, []);
-    try { assert.equal(fn.call("A", cb.pointer), 101); }
-    finally { cb.release(); fn.setErrcheck(null); }
+    }
     await collect();
     assert.equal(check.deref(), undefined);
   });
@@ -159,13 +185,21 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
         return new WeakRef(check);
       }
       const reference = install();
-      const cb = c.threadSafeCallback(() => {
+      const cb = c.threadSafeCallback(
+        () => {
+          setCheck(fn, kind, null);
+          for (let i = 0; i < 8; i++) gc();
+          assert.ok(reference.deref(), "the async worker must own the removed hook");
+        },
+        null,
+        [],
+      );
+      try {
+        assert.equal(await fn.callAsync("A", cb.pointer), 101);
+      } finally {
+        cb.release();
         setCheck(fn, kind, null);
-        for (let i = 0; i < 8; i++) gc();
-        assert.ok(reference.deref(), "the async worker must own the removed hook");
-      }, null, []);
-      try { assert.equal(await fn.callAsync("A", cb.pointer), 101); }
-      finally { cb.release(); setCheck(fn, kind, null); }
+      }
       await collect();
       assert.equal(reference.deref(), undefined, "the completed worker retained its snapshot");
     });
@@ -173,11 +207,16 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
 
   it("a raw detached call passes its native handle to errcheck", function () {
     const fn = bind(lib, "raw");
-    fn.setErrcheck((result, func) => { assert.equal(func, fn); return result; });
+    fn.setErrcheck((result, func) => {
+      assert.equal(func, fn);
+      return result;
+    });
     try {
       const call = fn.call;
       assert.equal(call("A", null), 65);
-    } finally { fn.setErrcheck(null); }
+    } finally {
+      fn.setErrcheck(null);
+    }
   });
 
   it("raw hooks remain mutable when the native handle is frozen", function () {
@@ -188,7 +227,9 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
       assert.equal(fn.call("A", null), 101);
       fn.setErrcheck(() => 202);
       assert.equal(fn.call("A", null), 202);
-    } finally { fn.setErrcheck(null); }
+    } finally {
+      fn.setErrcheck(null);
+    }
     assert.equal(fn.call("A", null), 65);
   });
 
@@ -201,8 +242,11 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
       }
     }
     fn.setErrcheck(() => 101);
-    try { assert.equal(fn.call(new Text(), null), 101); }
-    finally { fn.setErrcheck(null); }
+    try {
+      assert.equal(fn.call(new Text(), null), 101);
+    } finally {
+      fn.setErrcheck(null);
+    }
   });
 
   for (const kind of ["func", "prototype"]) {
@@ -217,16 +261,27 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
       };
       const pending = fn.callAsync(input);
       fn.errcheck = () => 202;
-      try { assert.equal(await pending, 101); }
-      finally { fn.errcheck = null; }
+      try {
+        assert.equal(await pending, 101);
+      } finally {
+        fn.errcheck = null;
+      }
     });
   }
 
   it("a result constructor cannot replace the hook of its own call", function () {
     let fn;
-    class Bits extends c.Union { static _fields_ = [["integer", c.c_int32], ["real", c.c_float]]; }
+    class Bits extends c.Union {
+      static _fields_ = [
+        ["integer", c.c_int32],
+        ["real", c.c_float],
+      ];
+    }
     class Tagged extends c.Structure {
-      static _fields_ = [["tag", c.c_int32], ["value", Bits]];
+      static _fields_ = [
+        ["tag", c.c_int32],
+        ["value", Bits],
+      ];
       constructor(...args) {
         super(...args);
         fn.errcheck = () => 202;
@@ -238,8 +293,11 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
       assert.ok(result instanceof Tagged);
       return 101;
     };
-    try { assert.equal(fn(0, 7), 101); }
-    finally { fn.errcheck = null; }
+    try {
+      assert.equal(fn(0, 7), 101);
+    } finally {
+      fn.errcheck = null;
+    }
   });
 
   it("invalid hook assignments do not replace a valid hook", function () {
@@ -249,7 +307,9 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
       try {
         assert.throws(() => setCheck(fn, kind, {}), /errcheck must be a function or null/);
         assert.equal(invoke(fn, kind, "A", null), 101);
-      } finally { setCheck(fn, kind, null); }
+      } finally {
+        setCheck(fn, kind, null);
+      }
     }
   });
 
@@ -280,7 +340,9 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
     try {
       assert.equal(fn(...values), 36);
       assert.equal(await fn.callAsync(...values), 36);
-    } finally { fn.errcheck = null; }
+    } finally {
+      fn.errcheck = null;
+    }
   });
 
   it("public errcheck still runs while its native library call is active", function () {
@@ -290,31 +352,53 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
       assert.throws(() => library.close(), /calls to its functions are in progress/);
       return result;
     };
-    try { assert.equal(fn("A", null), 65); }
-    finally { fn.errcheck = null; library.close(); }
+    try {
+      assert.equal(fn("A", null), 65);
+    } finally {
+      fn.errcheck = null;
+      library.close();
+    }
   });
 
   it("paramflags use their own binding and snapshot the hook before named getters", function () {
     const argtypes = [c.c_int32, c.c_int32, c.POINTER(c.c_int32)];
     const shared = lib.func("fixture_divmod", c.c_int32, argtypes);
     shared.errcheck = () => 303;
-    const fn = c.CFUNCTYPE(c.c_int32, ...argtypes).bind(lib, "fixture_divmod", [[1, "a"], [1, "b"], [2, "remainder"]]);
+    const fn = c.CFUNCTYPE(c.c_int32, ...argtypes).bind(lib, "fixture_divmod", [
+      [1, "a"],
+      [1, "b"],
+      [2, "remainder"],
+    ]);
     fn.errcheck = (result, func, args) => {
       assert.equal(result, 3);
       assert.equal(func, fn);
       return args;
     };
     try {
-      assert.equal(fn({ get a() { fn.errcheck = () => 202; return 17; }, b: 5 }), 2);
+      assert.equal(
+        fn({
+          get a() {
+            fn.errcheck = () => 202;
+            return 17;
+          },
+          b: 5,
+        }),
+        2,
+      );
       assert.equal(fn(17, 5), 202);
       assert.equal(shared(17, 5, new c.c_int32()), 303);
-    } finally { shared.errcheck = null; fn.errcheck = null; }
+    } finally {
+      shared.errcheck = null;
+      fn.errcheck = null;
+    }
   });
 
   it("paramflags async calls preserve output instances, hook identity and snapshots", async function () {
-    const fn = c.CFUNCTYPE(c.c_int32, c.c_int32, c.c_int32, c.POINTER(c.c_int32)).bind(
-      lib, "fixture_divmod", [[1, "a"], [1, "b"], [2, "remainder"]],
-    );
+    const fn = c.CFUNCTYPE(c.c_int32, c.c_int32, c.c_int32, c.POINTER(c.c_int32)).bind(lib, "fixture_divmod", [
+      [1, "a"],
+      [1, "b"],
+      [2, "remainder"],
+    ]);
     fn.errcheck = (result, func, args) => {
       assert.equal(func, fn);
       assert.ok(args[2] instanceof c.c_int32);
@@ -324,7 +408,9 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
     fn.errcheck = () => 202;
     assert.equal(await pending, 2);
     assert.equal(await fn.callAsync(17, 5), 202);
-    fn.errcheck = () => { throw new Error("output hook failed"); };
+    fn.errcheck = () => {
+      throw new Error("output hook failed");
+    };
     await assert.rejects(fn.callAsync(17, 5), /output hook failed/);
     fn.errcheck = null;
   });
@@ -351,7 +437,9 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
       try {
         const result = async ? await fn.callAsync(0) : fn(0);
         assert.equal(typeof result, "bigint");
-      } finally { fn.errcheck = null; }
+      } finally {
+        fn.errcheck = null;
+      }
       await collect();
       assert.equal(reference.deref(), undefined);
     });
@@ -359,11 +447,16 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
 
   it("HRESULT validation remains before errcheck for synchronous and async output bindings", async function () {
     const ole = new c.OleDLL(fixture);
-    const fn = c.WINFUNCTYPE(c.HRESULT, c.c_int32, c.c_int32, c.POINTER(c.c_int32)).bind(
-      ole, "fixture_divmod", [[1, "a"], [1, "b"], [2, "remainder"]],
-    );
+    const fn = c.WINFUNCTYPE(c.HRESULT, c.c_int32, c.c_int32, c.POINTER(c.c_int32)).bind(ole, "fixture_divmod", [
+      [1, "a"],
+      [1, "b"],
+      [2, "remainder"],
+    ]);
     let checks = 0;
-    fn.errcheck = (_result, _func, args) => { checks++; return args; };
+    fn.errcheck = (_result, _func, args) => {
+      checks++;
+      return args;
+    };
     try {
       assert.throws(() => fn(-7, 2), /HRESULT/);
       assert.equal(checks, 0);
@@ -371,6 +464,9 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
       assert.equal(checks, 0);
       assert.equal(await fn.callAsync(17, 5), 2);
       assert.equal(checks, 1);
-    } finally { fn.errcheck = null; ole.close(); }
+    } finally {
+      fn.errcheck = null;
+      ole.close();
+    }
   });
 });

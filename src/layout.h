@@ -34,8 +34,10 @@ class StructInfo {
     [[nodiscard]] ffi_type* GetFFIType();
 
     // Converte JS array → C array buffer
-    [[nodiscard]] bool JSToArray(Napi::Env env, Napi::Value val, std::span<uint8_t> buffer,
-                                std::vector<Napi::ObjectReference>* owners = nullptr);
+    [[nodiscard]] bool JSToArray(Napi::Env env,
+                                 Napi::Value val,
+                                 std::span<uint8_t> buffer,
+                                 std::vector<Napi::ObjectReference>* owners = nullptr);
 
     // Converte C array buffer → JS array
     Napi::Array ArrayToJS(Napi::Env env, const void* buffer);
@@ -107,8 +109,10 @@ class StructInfo {
   ffi_type* GetFFIType();
 
   // Converte JS object -> C struct buffer
-  [[nodiscard]] bool JSToStruct(Napi::Env env, Napi::Object obj, std::span<uint8_t> buffer,
-                               std::vector<Napi::ObjectReference>* owners = nullptr);
+  [[nodiscard]] bool JSToStruct(Napi::Env env,
+                                Napi::Object obj,
+                                std::span<uint8_t> buffer,
+                                std::vector<Napi::ObjectReference>* owners = nullptr);
 
   // Converte C struct buffer -> JS object
   [[nodiscard]] Napi::Object StructToJS(Napi::Env env, const void* buffer);

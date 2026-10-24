@@ -36,6 +36,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Narrow call-conversion tests across ABIs**: use matching C fixture
+  signatures for narrow arguments/results instead of declaring `abs(int)`
+  with incompatible 8/16-bit or boolean types. Preserve signedness, narrowing
+  and boolean coverage without relying on unspecified register bits.
+- **Library-view lifetime tests on musl**: preserve view/owner GC and logical
+  close checks without assuming that `dlclose()` physically unloads a module.
+  Probe the OS loader independently of `Library.close()` and reset fixture
+  state between cases, since resident libraries keep their static data.
+  Clarify the loader-dependent unloading contract in the API documentation.
 - **Canonical test timeout**: test scripts use `--test-timeout=5000` before
   the file selector; the old trailing `--timeout` was not a valid runner
   option. `test:js` allows runtime controls to reuse the native artifacts.
@@ -293,7 +302,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   methods, so a JS object with the same methods reached the native code and
   failed with an unclear error. Their instances are now marked with a
   Node-API type tag; other values raise a `TypeError` (`Type must be a CType
-  enum value (number), StructType or ArrayType`). Invalid types of
+enum value (number), StructType or ArrayType`). Invalid types of
   functions, callbacks, fields and arrays raise `TypeError` everywhere.
 - **Arguments of a type that cannot be converted** left their slot
   uninitialized instead of raising `ArgumentError`.
@@ -364,7 +373,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Structures and unions by value as callback arguments**, as in Python;
   a structure restype of a callback raises `TypeError: invalid result type
-  for callback function` at creation, as in Python.
+for callback function` at creation, as in Python.
 - **`winmode`** option of `CDLL` (Windows `LoadLibraryExW` flags), as Python.
 - **`pack`, `layout`, `align` options** of `struct()` / `union()`;
   `union()` and `defineUnion()` accept options.
@@ -374,7 +383,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Non-integral numbers for integer types raise `TypeError`** (`'float'
-  object cannot be interpreted as an integer`), as Python does for floats:
+object cannot be interpreted as an integer`), as Python does for floats:
   arguments (`ArgumentError`), constructors, fields, bit fields and callback
   results. Integral numbers outside the range of the type wrap as before
   (64-bit values no longer saturate).
@@ -423,11 +432,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   structure returned by value.
 - **Error messages follow Python 3.14+ ctypes**: `c_char` / `c_wchar`
   values (`one character bytes, bytearray, or an integer in range(256)
-  expected, not a string of length 2`, `a unicode character expected, ...`),
+expected, not a string of length 2`, `a unicode character expected, ...`),
   pointer arguments (`'function' object cannot be interpreted as
-  ctypes.c_void_p` instead of `wrong type`) and numeric arguments
+ctypes.c_void_p` instead of `wrong type`) and numeric arguments
   (`'string' object cannot be interpreted as an integer`, `must be real
-  number, not string`).
+number, not string`).
 - **`ArgumentError`** accepts the `options` of `Error` (`{ cause }`).
 - **Python reference tests run in CI** (Python 3.14, with `unittest`; no
   longer `pytest`).

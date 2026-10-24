@@ -177,7 +177,8 @@ export class Library {
    * throw when called afterwards. Throws while a call to one of its
    * functions is in progress (from a callback, or a pending `callAsync()`).
    * Existing `in_dll()` views and dependent memory remain valid and defer
-   * physical unloading until their last owner is collected.
+   * native handle release until their last owner is collected.
+   * Physical unloading depends on the OS loader; musl keeps modules resident.
    */
   close(): void;
 
@@ -399,8 +400,9 @@ export class CDLL {
    * Close the library and clear the function cache. Functions obtained from
    * it throw when called afterwards. Throws while a call to one of its
    * functions is in progress (from a callback, or a pending `callAsync()`).
-   * Existing `in_dll()` views defer physical unloading until their dependent
+   * Existing `in_dll()` views defer native handle release until their dependent
    * memory is collected, but new calls and symbol lookups are rejected.
+   * Physical unloading depends on the OS loader; musl keeps modules resident.
    */
   close(): void;
 
@@ -433,7 +435,7 @@ export class CDLL {
   /** Library file path. */
   readonly path: string;
 
-  /** Whether the logical handle is open; existing views may defer physical unloading. */
+  /** Whether the logical handle is open, independently of physical module residency. */
   readonly loaded: boolean;
 
   /**
@@ -745,7 +747,11 @@ export type FieldSpec = AnyType | StructDef | ArrayTypeDef | BitFieldDef | Anony
  */
 export type JsFromCType<T> =
   T extends SimpleCDataConstructor<infer Tag>
-    ? T extends { prototype: infer Instance } ? IsAny<Instance> extends true ? JsFromTag<Tag> : Instance : JsFromTag<Tag>
+    ? T extends { prototype: infer Instance }
+      ? IsAny<Instance> extends true
+        ? JsFromTag<Tag>
+        : Instance
+      : JsFromTag<Tag>
     : T extends BitFieldDef
       ? number
       : T extends PointerTypeDef<infer B>
@@ -815,7 +821,18 @@ type ArrayElementArg<E> = IsAny<E> extends true ? any : E extends StructureClass
 type PointerValue<T> = IsAny<T> extends true ? any : T extends StructureClass ? InstanceType<T> : JsFromCType<T>;
 
 /** `p.contents`: a live instance on the pointed memory (Python parity). */
-type PointerContents<T> = IsAny<T> extends true ? any : T extends SimpleCDataConstructor<infer Tag> ? T extends { prototype: infer Instance } ? IsAny<Instance> extends true ? SimpleCDataInstance<JsFromTag<Tag>> : Instance : SimpleCDataInstance<JsFromTag<Tag>> : T extends StructureClass ? InstanceType<T> : JsFromCType<T>;
+type PointerContents<T> =
+  IsAny<T> extends true
+    ? any
+    : T extends SimpleCDataConstructor<infer Tag>
+      ? T extends { prototype: infer Instance }
+        ? IsAny<Instance> extends true
+          ? SimpleCDataInstance<JsFromTag<Tag>>
+          : Instance
+        : SimpleCDataInstance<JsFromTag<Tag>>
+      : T extends StructureClass
+        ? InstanceType<T>
+        : JsFromCType<T>;
 
 /** `string` for `c_char`/`c_wchar` arrays (read as text, as Python), otherwise `Else`. */
 type CharArrayValue<E, Else> = IsAny<E> extends true ? Else : [E] extends [SimpleCDataConstructor<"char">] ? string : [E] extends [SimpleCDataConstructor<"wchar">] ? string : Else;
@@ -871,7 +888,8 @@ type ArgsFromCTypes<TArgs extends readonly any[]> = {
 };
 
 /** JS argument accepted for a function parameter of type `T`. */
-type JsArgFromFFIType<T> = { readonly _as_parameter_: unknown } | (T extends StructureClass ? Buffer | { _buffer: Buffer } | Record<string, any> : T extends ArrayTypeDef<infer E> ? ArrayInstance<E> | ArrayBufferView | ArrayBuffer : JsArgFromCType<T>);
+type JsArgFromFFIType<T> =
+  { readonly _as_parameter_: unknown } | (T extends StructureClass ? Buffer | { _buffer: Buffer } | Record<string, any> : T extends ArrayTypeDef<infer E> ? ArrayInstance<E> | ArrayBufferView | ArrayBuffer : JsArgFromCType<T>);
 
 /** Function arguments for `argtypes` `TArgs` (`any[]` when not a literal tuple). */
 type FFIArgs<TArgs extends readonly any[]> = FFIType[] extends TArgs ? any[] : { [K in keyof TArgs]: JsArgFromFFIType<TArgs[K]> };

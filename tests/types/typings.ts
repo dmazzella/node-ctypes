@@ -124,16 +124,20 @@ check(expectType<string | null>()(cb.getLastError()));
 cb.setErrorHandler((message: string) => void message);
 check(expectType<bigint>()(cb.getPointer()));
 cb.release();
-const pointerCallback = callback((value) => {
-  check(expectType<PointerInstance<typeof c_int32> | null>()(value));
-  return value === null ? 0 : value[0];
-}, c_int32, [POINTER(c_int32)]);
+const pointerCallback = callback(
+  (value) => {
+    check(expectType<PointerInstance<typeof c_int32> | null>()(value));
+    return value === null ? 0 : value[0];
+  },
+  c_int32,
+  [POINTER(c_int32)],
+);
 pointerCallback.release();
-const pointerThreadCallback = threadSafeCallback((value) => value === null ? 0 : value[0], c_int32, [POINTER(c_int32)]);
+const pointerThreadCallback = threadSafeCallback((value) => (value === null ? 0 : value[0]), c_int32, [POINTER(c_int32)]);
 check(expectType<bigint>()(pointerThreadCallback._callback.getPointer()));
 pointerThreadCallback.release();
 const callbackFactory = CFUNCTYPE(c_int32, POINTER(c_int32));
-const factoryCallback = callbackFactory((value) => value === null ? 0 : value[0]);
+const factoryCallback = callbackFactory((value) => (value === null ? 0 : value[0]));
 factoryCallback.release();
 const typedPrototype = callbackFactory(1n);
 check(expectType<number>()(typedPrototype(null)));
@@ -330,14 +334,18 @@ const variantEcho = libc.func("variant_echo", wintypes.VARIANT_BOOL, [wintypes.V
 check(expectType<boolean>()(variantEcho(false)));
 check(expectType<Promise<boolean>>()(variantEcho.callAsync(true)));
 class ScalarResult extends c_int32 {
-  label() { return "result"; }
+  label() {
+    return "result";
+  }
 }
 check(expectType<ScalarResult>()(ScalarResult.from_buffer(Buffer.alloc(4))));
 const scalarResult = libc.func("scalar_result", ScalarResult, [c_int32] as const);
 check(expectType<ScalarResult>()(scalarResult(7)));
 check(expectType<Promise<ScalarResult>>()(scalarResult.callAsync(7)));
 class CheckedScalar extends c_int32 {
-  static _check_retval_(value: CheckedScalar) { return value.value + 100; }
+  static _check_retval_(value: CheckedScalar) {
+    return value.value + 100;
+  }
 }
 const checkedScalar = libc.func("checked_scalar", CheckedScalar, [c_int32] as const);
 check(expectType<number>()(checkedScalar(7)));
@@ -362,7 +370,10 @@ check(expectType<ErrcheckCallback | null>()(strlenProto.errcheck));
 check(expectType<bigint>()(strlenProto.address));
 // @ts-expect-error errcheck must be callable or null
 strlenProto.errcheck = 123;
-const outputProto = CFUNCTYPE(c_int, c_int, POINTER(c_int)).bind(libc, "output", [[1, "value"], [2, "out"]]);
+const outputProto = CFUNCTYPE(c_int, c_int, POINTER(c_int)).bind(libc, "output", [
+  [1, "value"],
+  [2, "out"],
+]);
 check(expectType<Promise<any>>()(outputProto.callAsync(1)));
 check(expectType<ErrcheckCallback | null>()(outputProto.errcheck));
 raw.setErrcheck((result, func, args) => {

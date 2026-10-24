@@ -9,11 +9,11 @@ const fixture = path.join(import.meta.dirname, "..", "..", "build", "fixture", `
 
 describe("library memory leases", { skip: !existsSync(fixture) && "native fixture not built" }, function () {
   for (const explicitClose of [false, true]) {
-    it(`${explicitClose ? "logical close" : "GC of the library"} defers physical unload until the last view disappears`, { timeout: 20000 }, function () {
+    it(`${explicitClose ? "logical close" : "GC of the library"} keeps exported views valid until they are collected`, { timeout: 20000 }, function (t) {
       const script = `
         import assert from "node:assert/strict";
         import { existsSync, mkdtempSync, rmdirSync, unlinkSync } from "node:fs";
-        import { tmpdir } from "node:os";
+        import { constants, tmpdir } from "node:os";
         import path from "node:path";
         import * as c from "node-ctypes";
         const dir = mkdtempSync(path.join(tmpdir(), "ctypes-lease-"));
@@ -33,6 +33,7 @@ describe("library memory leases", { skip: !existsSync(fixture) && "native fixtur
         function open(kind) {
           const lib = new c.CDLL(${JSON.stringify(fixture)});
           assert.equal(lib.func("fixture_set_unload_marker", c.c_int32, [c.c_char_p])(marker), 1);
+          lib.func("fixture_reset_global_pointer", null, [])();
           const fn = lib.func("fixture_address", c.c_size_t, [c.c_void_p]);
           const scalar = c.c_int32.in_dll(lib, "fixture_global_value");
           let value, oldOwner;
@@ -78,11 +79,36 @@ describe("library memory leases", { skip: !existsSync(fixture) && "native fixtur
           return { value, oldOwner, library: new WeakRef(lib._lib) };
         }
         try {
+          // Probe the OS directly so a Library.close() leak cannot disable its own checks.
+          const unloads = (() => {
+            const windows = process.platform === "win32";
+            const system = windows ? new c.WinDLL("kernel32.dll") : new c.CDLL(null);
+            try {
+              const load = system.func(windows ? "LoadLibraryW" : "dlopen", c.c_void_p, windows ? [c.c_wchar_p] : [c.c_char_p, c.c_int32]);
+              const symbol = system.func(windows ? "GetProcAddress" : "dlsym", c.c_void_p, [c.c_void_p, c.c_char_p]);
+              const close = system.func(windows ? "FreeLibrary" : "dlclose", c.c_int32, [c.c_void_p]);
+              const handle = windows ? load(${JSON.stringify(fixture)}) : load(${JSON.stringify(fixture)}, constants.dlopen.RTLD_NOW | constants.dlopen.RTLD_LOCAL);
+              assert.notEqual(handle, null, "the OS could not open the unload probe");
+              try {
+                const address = symbol(handle, "fixture_set_unload_marker");
+                assert.notEqual(address, null, "unload probe symbol not found");
+                assert.equal(c.CFUNCTYPE(c.c_int32, c.c_char_p)(address)(marker), 1);
+              } finally {
+                assert.equal(close(handle) !== 0, windows, "the OS could not close the unload probe");
+              }
+            } finally {
+              system.close();
+            }
+            return existsSync(marker);
+          })();
+          if (unloads) unlinkSync(marker);
+          else console.log("The loader keeps the fixture resident; physical unloading cannot be observed.");
           for (const kind of ["scalar", "record", "union", "pointer", "C-updated pointer", "C-cleared pointer", "contents", "function", "typed copy", "Buffer", "typed array", "ArrayBuffer", "multiple views", "cleared typed copy", "numeric copy"]) {
             let state = open(kind);
+            const view = new WeakRef(state.value);
             await collect();
             const dependent = kind !== "cleared typed copy" && kind !== "numeric copy";
-            assert.equal(existsSync(marker), !dependent, kind + ": incorrect module dependency");
+            assert.equal(existsSync(marker), unloads && !dependent, kind + ": incorrect module dependency");
             assert.equal(state.library.deref(), undefined, "the lease must not keep the Library wrapper alive");
             if (state.oldOwner) assert.equal(state.oldOwner.deref(), undefined, "C cleared the pointer, but its previous owner is still retained");
             if (kind === "scalar" || kind === "contents") assert.equal(state.value.value, 42);
@@ -100,8 +126,9 @@ describe("library memory leases", { skip: !existsSync(fixture) && "native fixtur
             }
             state = null;
             await collect();
-            assert.equal(existsSync(marker), true, kind + ": module lease was not released");
-            unlinkSync(marker);
+            assert.equal(view.deref(), undefined, kind + ": view was not collected");
+            assert.equal(existsSync(marker), unloads, kind + ": unexpected physical unload state");
+            if (unloads) unlinkSync(marker);
           }
         } finally {
           if (existsSync(marker)) unlinkSync(marker);
@@ -115,6 +142,7 @@ describe("library memory leases", { skip: !existsSync(fixture) && "native fixtur
       });
       assert.equal(child.error, undefined);
       assert.equal(child.status, 0, child.stderr);
+      if (child.stdout) t.diagnostic(child.stdout.trim());
     });
   }
 

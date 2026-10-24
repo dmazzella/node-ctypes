@@ -10,7 +10,10 @@ class LibraryHandle {
   LibraryHandle(const LibraryHandle&) = delete;
   LibraryHandle& operator=(const LibraryHandle&) = delete;
   ~LibraryHandle();
-  void Set(void* handle, bool owned) noexcept { handle_ = handle; owned_ = owned; }
+  void Set(void* handle, bool owned) noexcept {
+    handle_ = handle;
+    owned_ = owned;
+  }
   bool Close(std::string& error);
 
  private:

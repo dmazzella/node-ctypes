@@ -520,7 +520,8 @@ static uint8_t* MemoryArgument(Napi::Env env, const Napi::Value& value, size_t s
 
 Napi::Value CTypesAddon::AddressOf(const Napi::CallbackInfo& info) {
   const Napi::Env env = info.Env();
-  if (info.Length() < 1 || !(info[0].IsBuffer() || info[0].IsTypedArray() || info[0].IsDataView() || info[0].IsArrayBuffer())) {
+  if (info.Length() < 1 ||
+      !(info[0].IsBuffer() || info[0].IsTypedArray() || info[0].IsDataView() || info[0].IsArrayBuffer())) {
     throw Napi::TypeError::New(env, "addressOf requires a Buffer, typed view or ArrayBuffer");
   }
   const auto address = reinterpret_cast<uintptr_t>(MemoryArgument(env, info[0], 0, "addressOf"));
@@ -536,15 +537,18 @@ Napi::Value CTypesAddon::Memmove(const Napi::CallbackInfo& info) {
     return env.Undefined();
   }
   const double size_raw = info[2].As<Napi::Number>().DoubleValue();
-  if (!std::isfinite(size_raw) || size_raw < 0 || std::floor(size_raw) != size_raw ||
-      size_raw > 9007199254740991.0 || size_raw > static_cast<double>(SIZE_MAX)) {
+  if (!std::isfinite(size_raw) || size_raw < 0 || std::floor(size_raw) != size_raw || size_raw > 9007199254740991.0 ||
+      size_raw > static_cast<double>(SIZE_MAX)) {
     throw Napi::RangeError::New(env, "memmove: size must be a non-negative safe integer");
   }
   size_t size = static_cast<size_t>(size_raw);
   if (size == 0) {
     if (info[0].IsNull() || (info[0].IsBigInt() && info[0].As<Napi::BigInt>().WordCount() == 0) ||
-        (info[0].IsNumber() && info[0].As<Napi::Number>().DoubleValue() == 0)) return Napi::BigInt::New(env, uint64_t{0});
-    return Napi::BigInt::New(env, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(MemoryArgument(env, info[0], 0, "dst"))));
+        (info[0].IsNumber() && info[0].As<Napi::Number>().DoubleValue() == 0)) {
+      return Napi::BigInt::New(env, uint64_t{0});
+    }
+    return Napi::BigInt::New(
+      env, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(MemoryArgument(env, info[0], 0, "dst"))));
   }
   uint8_t* dst = MemoryArgument(env, info[0], size, "dst");
   if (dst == nullptr) {

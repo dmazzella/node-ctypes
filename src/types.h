@@ -53,30 +53,52 @@ enum class CType : int32_t {
 // Mappa CType -> ffi_type*
 [[nodiscard]] inline ffi_type* CTypeToFFI(CType type) {
   switch (type) {
-    case CType::CTYPES_VOID: return &ffi_type_void;
-    case CType::CTYPES_INT8: return &ffi_type_sint8;
-    case CType::CTYPES_UINT8: return &ffi_type_uint8;
-    case CType::CTYPES_INT16: return &ffi_type_sint16;
-    case CType::CTYPES_UINT16: return &ffi_type_uint16;
-    case CType::CTYPES_INT32: return &ffi_type_sint32;
-    case CType::CTYPES_UINT32: return &ffi_type_uint32;
-    case CType::CTYPES_INT64: return &ffi_type_sint64;
-    case CType::CTYPES_UINT64: return &ffi_type_uint64;
-    case CType::CTYPES_FLOAT: return &ffi_type_float;
-    case CType::CTYPES_DOUBLE: return &ffi_type_double;
+    case CType::CTYPES_VOID:
+      return &ffi_type_void;
+    case CType::CTYPES_INT8:
+      return &ffi_type_sint8;
+    case CType::CTYPES_UINT8:
+      return &ffi_type_uint8;
+    case CType::CTYPES_INT16:
+      return &ffi_type_sint16;
+    case CType::CTYPES_UINT16:
+      return &ffi_type_uint16;
+    case CType::CTYPES_INT32:
+      return &ffi_type_sint32;
+    case CType::CTYPES_UINT32:
+      return &ffi_type_uint32;
+    case CType::CTYPES_INT64:
+      return &ffi_type_sint64;
+    case CType::CTYPES_UINT64:
+      return &ffi_type_uint64;
+    case CType::CTYPES_FLOAT:
+      return &ffi_type_float;
+    case CType::CTYPES_DOUBLE:
+      return &ffi_type_double;
     case CType::CTYPES_POINTER:
     case CType::CTYPES_STRING:
-    case CType::CTYPES_WSTRING: return &ffi_type_pointer;
-    case CType::CTYPES_CHAR: return std::is_signed_v<char> ? &ffi_type_sint8 : &ffi_type_uint8;
+    case CType::CTYPES_WSTRING:
+      return &ffi_type_pointer;
+    case CType::CTYPES_CHAR:
+      return std::is_signed_v<char> ? &ffi_type_sint8 : &ffi_type_uint8;
     case CType::CTYPES_WCHAR:
-      if constexpr (sizeof(wchar_t) == 2) return std::is_signed_v<wchar_t> ? &ffi_type_sint16 : &ffi_type_uint16;
-      else return std::is_signed_v<wchar_t> ? &ffi_type_sint32 : &ffi_type_uint32;
-    case CType::CTYPES_BOOL: return &ffi_type_uint8;
-    case CType::CTYPES_SIZE_T: return sizeof(size_t) == 8 ? &ffi_type_uint64 : &ffi_type_uint32;
-    case CType::CTYPES_SSIZE_T: return sizeof(ssize_t) == 8 ? &ffi_type_sint64 : &ffi_type_sint32;
-    case CType::CTYPES_LONG: return sizeof(long) == 8 ? &ffi_type_sint64 : &ffi_type_sint32;
-    case CType::CTYPES_ULONG: return sizeof(unsigned long) == 8 ? &ffi_type_uint64 : &ffi_type_uint32;
-    default: return &ffi_type_void;
+      if constexpr (sizeof(wchar_t) == 2) {
+        return std::is_signed_v<wchar_t> ? &ffi_type_sint16 : &ffi_type_uint16;
+      } else {
+        return std::is_signed_v<wchar_t> ? &ffi_type_sint32 : &ffi_type_uint32;
+      }
+    case CType::CTYPES_BOOL:
+      return &ffi_type_uint8;
+    case CType::CTYPES_SIZE_T:
+      return sizeof(size_t) == 8 ? &ffi_type_uint64 : &ffi_type_uint32;
+    case CType::CTYPES_SSIZE_T:
+      return sizeof(ssize_t) == 8 ? &ffi_type_sint64 : &ffi_type_sint32;
+    case CType::CTYPES_LONG:
+      return sizeof(long) == 8 ? &ffi_type_sint64 : &ffi_type_sint32;
+    case CType::CTYPES_ULONG:
+      return sizeof(unsigned long) == 8 ? &ffi_type_uint64 : &ffi_type_uint32;
+    default:
+      return &ffi_type_void;
   }
 }
 
@@ -126,9 +148,8 @@ template <typename T>
   requires std::is_trivially_copyable_v<T>
 inline void StoreReturnValue(void* destination, T value) noexcept {
   if constexpr (std::is_integral_v<T> && sizeof(T) < sizeof(ffi_arg)) {
-    const ffi_arg widened = std::is_signed_v<T>
-      ? static_cast<ffi_arg>(static_cast<ffi_sarg>(value))
-      : static_cast<ffi_arg>(value);
+    const ffi_arg widened =
+      std::is_signed_v<T> ? static_cast<ffi_arg>(static_cast<ffi_sarg>(value)) : static_cast<ffi_arg>(value);
     std::memcpy(destination, &widened, sizeof(widened));
   } else {
     std::memcpy(destination, &value, sizeof(value));
@@ -164,7 +185,9 @@ inline void StoreReturnValue(void* destination, T value) noexcept {
 }
 
 inline void ZeroReturnValue(CType type, void* destination) noexcept {
-  if (const size_t size = ReturnStorageSize(type); size != 0) std::memset(destination, 0, size);
+  if (const size_t size = ReturnStorageSize(type); size != 0) {
+    std::memset(destination, 0, size);
+  }
 }
 
 inline void StoreCallbackValue(CType type, const void* source, void* destination) noexcept {
@@ -173,20 +196,47 @@ inline void StoreCallbackValue(CType type, const void* source, void* destination
     return;
   }
   switch (type) {
-    case CType::CTYPES_INT8: StoreReturnValue(destination, LoadAs<int8_t>(source)); break;
-    case CType::CTYPES_UINT8: StoreReturnValue(destination, LoadAs<uint8_t>(source)); break;
-    case CType::CTYPES_INT16: StoreReturnValue(destination, LoadAs<int16_t>(source)); break;
-    case CType::CTYPES_UINT16: StoreReturnValue(destination, LoadAs<uint16_t>(source)); break;
-    case CType::CTYPES_INT32: StoreReturnValue(destination, LoadAs<int32_t>(source)); break;
-    case CType::CTYPES_UINT32: StoreReturnValue(destination, LoadAs<uint32_t>(source)); break;
-    case CType::CTYPES_CHAR: StoreReturnValue(destination, LoadAs<char>(source)); break;
-    case CType::CTYPES_WCHAR: StoreReturnValue(destination, LoadAs<wchar_t>(source)); break;
-    case CType::CTYPES_BOOL: StoreReturnValue(destination, LoadAs<uint8_t>(source)); break;
-    case CType::CTYPES_LONG: StoreReturnValue(destination, LoadAs<long>(source)); break;
-    case CType::CTYPES_ULONG: StoreReturnValue(destination, LoadAs<unsigned long>(source)); break;
-    case CType::CTYPES_SIZE_T: StoreReturnValue(destination, LoadAs<size_t>(source)); break;
-    case CType::CTYPES_SSIZE_T: StoreReturnValue(destination, LoadAs<ssize_t>(source)); break;
-    default: break;
+    case CType::CTYPES_INT8:
+      StoreReturnValue(destination, LoadAs<int8_t>(source));
+      break;
+    case CType::CTYPES_UINT8:
+      StoreReturnValue(destination, LoadAs<uint8_t>(source));
+      break;
+    case CType::CTYPES_INT16:
+      StoreReturnValue(destination, LoadAs<int16_t>(source));
+      break;
+    case CType::CTYPES_UINT16:
+      StoreReturnValue(destination, LoadAs<uint16_t>(source));
+      break;
+    case CType::CTYPES_INT32:
+      StoreReturnValue(destination, LoadAs<int32_t>(source));
+      break;
+    case CType::CTYPES_UINT32:
+      StoreReturnValue(destination, LoadAs<uint32_t>(source));
+      break;
+    case CType::CTYPES_CHAR:
+      StoreReturnValue(destination, LoadAs<char>(source));
+      break;
+    case CType::CTYPES_WCHAR:
+      StoreReturnValue(destination, LoadAs<wchar_t>(source));
+      break;
+    case CType::CTYPES_BOOL:
+      StoreReturnValue(destination, LoadAs<uint8_t>(source));
+      break;
+    case CType::CTYPES_LONG:
+      StoreReturnValue(destination, LoadAs<long>(source));
+      break;
+    case CType::CTYPES_ULONG:
+      StoreReturnValue(destination, LoadAs<unsigned long>(source));
+      break;
+    case CType::CTYPES_SIZE_T:
+      StoreReturnValue(destination, LoadAs<size_t>(source));
+      break;
+    case CType::CTYPES_SSIZE_T:
+      StoreReturnValue(destination, LoadAs<ssize_t>(source));
+      break;
+    default:
+      break;
   }
 }
 

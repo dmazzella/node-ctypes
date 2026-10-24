@@ -438,7 +438,9 @@ CTYPES_ALWAYS_INLINE Napi::Value FFIFunction::InvokeCall(const Args& args, const
 
 Napi::Value FFIFunction::FastCall(const Napi::CallbackInfo& info) {
   FFIFunction* self = static_cast<FFIFunction*>(info.Data());
-  if (self->errcheck_callback_.IsEmpty()) [[likely]] return self->InvokeCall<Napi::CallbackInfo, false>(info, nullptr);
+  if (self->errcheck_callback_.IsEmpty()) [[likely]] {
+    return self->InvokeCall<Napi::CallbackInfo, false>(info, nullptr);
+  }
   const Napi::Function errcheck = self->SnapshotErrcheck();
   return self->InvokeCall(info, errcheck.IsEmpty() ? nullptr : &errcheck);
 }
@@ -945,7 +947,9 @@ bool FFIFunction::MarshalStructArg(Napi::Env env,
     // undefined, che non è un Buffer, quindi il check IsBuffer copre tutto.
     Napi::Value buf_prop = obj.Get("_buffer");
     if (buf_prop.IsBuffer()) {
-      if (owners) owners->push_back(Napi::Persistent(buf_prop.As<Napi::Object>()));
+      if (owners) {
+        owners->push_back(Napi::Persistent(buf_prop.As<Napi::Object>()));
+      }
       Napi::Buffer<uint8_t> buf = buf_prop.As<Napi::Buffer<uint8_t>>();
       if (buf.Length() >= struct_size) {
         memcpy(dest, buf.Data(), struct_size);
@@ -1426,7 +1430,9 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
       type = extra.type;
       val = extra.value;
       extra_types[i - expected_argc] = type;
-      if (!IsSimpleArgumentType(type)) return false;
+      if (!IsSimpleArgumentType(type)) {
+        return false;
+      }
     }
     try {
       if (MarshalPrimitive(val, type, slot)) [[likely]] {
@@ -1505,26 +1511,28 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
 
   if (scalar_as_buffer_) {
     result = ConvertReturn(env, return_value, return_type_, return_struct_info_, return_array_info_, false, true);
-  } else switch (return_type_) {
-    case CType::CTYPES_VOID:
-      result = env.Undefined();
-      break;
-    case CType::CTYPES_INT32:
-      result = napi_fast::Int32(env, LoadAs<int32_t>(return_value));
-      break;
-    case CType::CTYPES_UINT32:
-      result = napi_fast::Uint32(env, LoadAs<uint32_t>(return_value));
-      break;
-    case CType::CTYPES_DOUBLE:
-      result = Napi::Number::New(env, LoadAs<double>(return_value));
-      break;
-    case CType::CTYPES_STRUCT:
-      result = StructResult(return_value);
-      break;
-    default:
-      result =
-        ConvertReturn(env, return_value, return_type_, return_struct_info_, return_array_info_, struct_as_buffer_);
-      break;
+  } else {
+    switch (return_type_) {
+      case CType::CTYPES_VOID:
+        result = env.Undefined();
+        break;
+      case CType::CTYPES_INT32:
+        result = napi_fast::Int32(env, LoadAs<int32_t>(return_value));
+        break;
+      case CType::CTYPES_UINT32:
+        result = napi_fast::Uint32(env, LoadAs<uint32_t>(return_value));
+        break;
+      case CType::CTYPES_DOUBLE:
+        result = Napi::Number::New(env, LoadAs<double>(return_value));
+        break;
+      case CType::CTYPES_STRUCT:
+        result = StructResult(return_value);
+        break;
+      default:
+        result =
+          ConvertReturn(env, return_value, return_type_, return_struct_info_, return_array_info_, struct_as_buffer_);
+        break;
+    }
   }
   if constexpr (HasErrcheck) {
     if (errcheck != nullptr) [[unlikely]] {
@@ -1687,9 +1695,14 @@ Napi::Value FFIFunction::SetErrcheck(const Napi::CallbackInfo& info) {
     return env.Undefined();
   }
 
-  if (callback.IsNull() && errcheck_callback_.IsEmpty()) return env.Undefined();
-  if (addon_ == nullptr) throw Napi::Error::New(env, "Addon not properly initialized");
-  Napi::FunctionReference next = callback.IsNull() ? Napi::FunctionReference() : Napi::Weak(callback.As<Napi::Function>());
+  if (callback.IsNull() && errcheck_callback_.IsEmpty()) {
+    return env.Undefined();
+  }
+  if (addon_ == nullptr) {
+    throw Napi::Error::New(env, "Addon not properly initialized");
+  }
+  Napi::FunctionReference next =
+    callback.IsNull() ? Napi::FunctionReference() : Napi::Weak(callback.As<Napi::Function>());
   if (callback.IsNull()) {
     addon_->errcheck_owner_delete.Call(addon_->errcheck_owners.Value(), {Value()});
   } else {
@@ -1700,9 +1713,13 @@ Napi::Value FFIFunction::SetErrcheck(const Napi::CallbackInfo& info) {
   return env.Undefined();
 }
 
-Napi::Value FFIFunction::ApplyErrcheck(Napi::Env env, Napi::Value result, const FunctionArguments& info,
-                                      const Napi::Function& errcheck) {
-  if (info.HasResultHandler()) return errcheck.Call(env.Undefined(), {result});
+Napi::Value FFIFunction::ApplyErrcheck(Napi::Env env,
+                                       Napi::Value result,
+                                       const FunctionArguments& info,
+                                       const Napi::Function& errcheck) {
+  if (info.HasResultHandler()) {
+    return errcheck.Call(env.Undefined(), {result});
+  }
 
   // errcheck(result, this, args). Un'eccezione lanciata da errcheck diventa
   // Napi::Error (NAPI_CPP_EXCEPTIONS) e si propaga al caller JS.
@@ -1993,11 +2010,11 @@ Napi::Value FFIFunction::CallAsyncArguments(const FunctionArguments& info, const
   // ---- Create worker, move buffers, return Promise ----------------
   // =====================================================================
 
-  auto worker = std::make_unique<CallWorker>(env, this, &cif_, fn_ptr_, return_type_, return_struct_info_, return_array_info_,
-                                std::move(async_arg_storage), std::move(async_arg_values),
-                                std::move(async_string_buffer), std::move(string_fixups), std::move(wstring_fixups),
-                                std::move(buffer_refs), std::move(owned_cif), std::move(owned_ffi_types),
-                                std::move(large_arg_buffers), std::move(large_arg_indices), errcheck, info.HasResultHandler());
+  auto worker = std::make_unique<CallWorker>(
+    env, this, &cif_, fn_ptr_, return_type_, return_struct_info_, return_array_info_, std::move(async_arg_storage),
+    std::move(async_arg_values), std::move(async_string_buffer), std::move(string_fixups), std::move(wstring_fixups),
+    std::move(buffer_refs), std::move(owned_cif), std::move(owned_ffi_types), std::move(large_arg_buffers),
+    std::move(large_arg_indices), errcheck, info.HasResultHandler());
 
   if (errcheck != nullptr && !info.HasResultHandler()) {
     worker->KeepArguments(info);

@@ -71,8 +71,7 @@ describe("prototype signature interning", function () {
 
   it("collects unused builtin signatures and recreates a valid canonical type", async function () {
     function abandon() {
-      return Array.from({ length: 32 }, (_, length) =>
-        new WeakRef(c.CFUNCTYPE(c.c_int32, ...Array(length).fill(c.c_uint16))));
+      return Array.from({ length: 32 }, (_, length) => new WeakRef(c.CFUNCTYPE(c.c_int32, ...Array(length).fill(c.c_uint16))));
     }
     const references = abandon();
     await collect();
@@ -96,12 +95,16 @@ describe("prototype signature interning", function () {
 const fixture = path.join(import.meta.dirname, "../../build/fixture", `ctypes_test_fixture${process.platform === "win32" ? ".dll" : process.platform === "darwin" ? ".dylib" : ".so"}`);
 describe("interned prototype bindings", { skip: !existsSync(fixture) && `${fixture} not built` }, function () {
   let lib;
-  before(() => { lib = new c.CDLL(fixture); });
+  before(() => {
+    lib = new c.CDLL(fixture);
+  });
   after(() => lib.close());
 
   it("captures retval hooks for each binding, not once for the cached type", async function () {
     class Result extends c.c_int32 {
-      static _check_retval_(value) { return value.value + 1; }
+      static _check_retval_(value) {
+        return value.value + 1;
+      }
     }
     const type = c.CFUNCTYPE(Result, c.c_int32);
     const first = type(["fixture_scalar_i32", lib]);
@@ -145,19 +148,26 @@ describe("interned prototype bindings", { skip: !existsSync(fixture) && `${fixtu
     try {
       const invoke = lib.func("fixture_scalar_callback", c.c_int32, [c.c_void_p, c.c_int32]);
       assert.equal(invoke(callback, -7), -7);
-    } finally { callback.release(); }
+    } finally {
+      callback.release();
+    }
   });
 
   for (const kind of ["caller", "callback", "paramflags"]) {
     it(`a live ${kind} retains its prototype but an abandoned binding does not`, async function () {
       function prepare() {
         class Value extends c.c_int32 {}
-        const type = kind === "paramflags"
-          ? c.CFUNCTYPE(c.c_int32, c.c_int32, c.c_int32, c.POINTER(Value))
-          : c.CFUNCTYPE(c.c_int32, Value);
-        const binding = kind === "callback" ? type((value) => value.value)
-          : kind === "paramflags" ? type.bind(lib, "fixture_divmod", [[1, "a"], [1, "b"], [2, "remainder"]])
-          : type(["fixture_scalar_i32", lib]);
+        const type = kind === "paramflags" ? c.CFUNCTYPE(c.c_int32, c.c_int32, c.c_int32, c.POINTER(Value)) : c.CFUNCTYPE(c.c_int32, Value);
+        const binding =
+          kind === "callback"
+            ? type((value) => value.value)
+            : kind === "paramflags"
+              ? type.bind(lib, "fixture_divmod", [
+                  [1, "a"],
+                  [1, "b"],
+                  [2, "remainder"],
+                ])
+              : type(["fixture_scalar_i32", lib]);
         return { binding, type: new WeakRef(type), value: new WeakRef(Value) };
       }
       const state = prepare();

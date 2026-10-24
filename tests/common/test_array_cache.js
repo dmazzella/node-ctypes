@@ -140,10 +140,7 @@ describe("array type cache lifetime", function () {
         const type = c.array(c.c_int32, count);
         const source = Buffer.alloc(type.getSize());
         source.writeInt32LE(7);
-        const instance = method === "call" ? type(7)
-          : method === "create" ? type.create([7])
-          : method === "from_address" ? type.from_address(c.addressof(source))
-          : type[method](source);
+        const instance = method === "call" ? type(7) : method === "create" ? type.create([7]) : method === "from_address" ? type.from_address(c.addressof(source)) : type[method](source);
         return { instance, source, type: new WeakRef(type) };
       }
       const state = prepare();
@@ -165,9 +162,7 @@ describe("array type cache lifetime", function () {
       const count = 30 + ["array", "pointer", "struct", "union"].indexOf(container);
       function prepare() {
         const type = c.array(c.c_int32, count);
-        const owner = container === "array" ? c.array(type, 2)
-          : container === "pointer" ? c.POINTER(type)
-          : c[container]({ values: type });
+        const owner = container === "array" ? c.array(type, 2) : container === "pointer" ? c.POINTER(type) : c[container]({ values: type });
         return { owner, type: new WeakRef(type) };
       }
       const state = prepare();

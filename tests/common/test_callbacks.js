@@ -59,7 +59,9 @@ describe("Callbacks", function () {
         }
 
         assert.deepStrictEqual(sorted, [1, 2, 5, 8, 9]);
-      } finally { compare.release(); }
+      } finally {
+        compare.release();
+      }
     });
 
     it("should sort array in reverse order", function () {

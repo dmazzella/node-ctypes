@@ -386,7 +386,9 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
   Napi::FunctionReference errcheck_callback_;  // weak; the environment's JS WeakMap owns the callback
 
   // Helper per applicare errcheck callback
-  Napi::Value ApplyErrcheck(Napi::Env env, Napi::Value result, const FunctionArguments& info,
+  Napi::Value ApplyErrcheck(Napi::Env env,
+                            Napi::Value result,
+                            const FunctionArguments& info,
                             const Napi::Function& errcheck);
 
   // ============================================================

@@ -18,7 +18,9 @@ bool StoreJSCallbackResult(const Napi::Value& result, CType type, void* destinat
     return JSToC(result, type, std::span(static_cast<uint8_t*>(destination), size)) > 0;
   }
   std::array<uint8_t, sizeof(ffi_arg)> bytes{};
-  if (JSToC(result, type, std::span(bytes).first(size)) <= 0) return false;
+  if (JSToC(result, type, std::span(bytes).first(size)) <= 0) {
+    return false;
+  }
   StoreCallbackValue(type, bytes.data(), destination);
   return true;
 }
@@ -80,7 +82,9 @@ void ParseCallbackTypes(const Napi::CallbackInfo& info, CType& return_type, std:
     if (info.Length() > 4 && info[4].IsArray()) {
       const Napi::Array buffers = info[4].As<Napi::Array>();
       const Napi::Value flag = buffers.Get(i);
-      if (!flag.IsBoolean()) throw Napi::TypeError::New(env, "scalar callback buffer flags must be boolean");
+      if (!flag.IsBoolean()) {
+        throw Napi::TypeError::New(env, "scalar callback buffer flags must be boolean");
+      }
       spec.scalar_buffer = flag.As<Napi::Boolean>().Value();
       if (spec.scalar_buffer && CTypeSize(spec.type) == 0) {
         throw Napi::TypeError::New(env, "scalar callback buffers require primitive argument types");
@@ -203,7 +207,9 @@ void CallbackHandler(ffi_cif* cif, void* ret, void** args, void* user_data) {
   // `ret` è fornito da libffi ed è abbastanza grande per il tipo dichiarato.
   if (data->return_type != CType::CTYPES_VOID) {
     try {
-      if (!StoreJSCallbackResult(result, data->return_type, ret)) ZeroReturnValue(data->return_type, ret);
+      if (!StoreJSCallbackResult(result, data->return_type, ret)) {
+        ZeroReturnValue(data->return_type, ret);
+      }
     } catch (const Napi::Error& e) {
       // Python: "Exception ignored on converting result of ctypes callback
       // function" e risultato zero; nessuna eccezione attraversa il frame C.
@@ -419,7 +425,9 @@ void InvokeThreadSafeCallback(Napi::Env env,
     }
 
     if (data->return_type != CType::CTYPES_VOID) {
-      if (!StoreJSCallbackResult(result, data->return_type, ret)) ZeroResult(data->return_type, ret);
+      if (!StoreJSCallbackResult(result, data->return_type, ret)) {
+        ZeroResult(data->return_type, ret);
+      }
     }
   } catch (const Napi::Error& e) {
     // Conversione di argomenti o risultato fallita.
@@ -582,7 +590,8 @@ ThreadSafeCallback::ThreadSafeCallback(const Napi::CallbackInfo& info) : Napi::O
   }
 
   // Prepara closure
-  status = ffi_prep_closure_loc(data_->closure.get(), &data_->cif, ThreadSafeCallbackHandler, data_.get(), data_->code_ptr);
+  status =
+    ffi_prep_closure_loc(data_->closure.get(), &data_->cif, ThreadSafeCallbackHandler, data_.get(), data_->code_ptr);
 
   if (status != FFI_OK) {
     ReleaseResources();

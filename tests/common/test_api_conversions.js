@@ -12,7 +12,9 @@ const gc = vm.runInNewContext("gc");
 
 describe("API conversion compatibility", { skip: !existsSync(fixture) && `${fixture} not built` }, function () {
   let lib;
-  before(() => { lib = new c.CDLL(fixture); });
+  before(() => {
+    lib = new c.CDLL(fixture);
+  });
   after(() => lib.close());
 
   for (const async of [false, true]) {
@@ -20,7 +22,7 @@ describe("API conversion compatibility", { skip: !existsSync(fixture) && `${fixt
       class Int extends c.c_int32 {}
       const P = c.POINTER(c.c_int32);
       const fn = lib.func("fixture_address", c.c_size_t, [P]);
-      const invoke = (value) => async ? fn.callAsync(value) : fn(value);
+      const invoke = (value) => (async ? fn.callAsync(value) : fn(value));
       const value = new c.c_int32(7);
       const derived = new Int(8);
       const array = c.array(c.c_int32, 2)(1, 2);
@@ -44,11 +46,13 @@ describe("API conversion compatibility", { skip: !existsSync(fixture) && `${fixt
     it(`recursive adapters resolve ctypes and report cycles for ${async ? "async" : "sync"}`, async function () {
       const fn = lib.func("fixture_scalar_i32", c.c_int32, [c.c_int32]);
       const pointer = lib.func("fixture_address", c.c_size_t, [c.POINTER(c.c_int32)]);
-      const invoke = (fn, value) => async ? fn.callAsync(value) : fn(value);
+      const invoke = (fn, value) => (async ? fn.callAsync(value) : fn(value));
       const adapter = { _as_parameter_: { _as_parameter_: new c.c_int32(7) } };
       assert.equal(await invoke(fn, adapter), 7);
       class Adapted extends c.c_int32 {
-        static from_param(value) { return { _as_parameter_: { _as_parameter_: value } }; }
+        static from_param(value) {
+          return { _as_parameter_: { _as_parameter_: value } };
+        }
       }
       const adapted = lib.func("fixture_scalar_i32", c.c_int32, [Adapted]);
       assert.equal(await invoke(adapted, 9), 9);
@@ -56,21 +60,34 @@ describe("API conversion compatibility", { skip: !existsSync(fixture) && `${fixt
       assert.equal(await invoke(pointer, { _as_parameter_: { _as_parameter_: target } }), c.addressof(target));
       const self = {};
       self._as_parameter_ = self;
-      const first = {}, second = {};
+      const first = {},
+        second = {};
       first._as_parameter_ = second;
       second._as_parameter_ = first;
       let deep = 7;
       for (let i = 0; i < 256; i++) deep = { _as_parameter_: deep };
       for (const bad of [self, first, deep]) {
-        if (async) await assert.rejects(async () => invoke(fn, bad), (error) => error instanceof c.ArgumentError && /cycle|depth|recursive/i.test(error.message));
-        else assert.throws(() => invoke(fn, bad), (error) => error instanceof c.ArgumentError && /cycle|depth|recursive/i.test(error.message));
+        if (async)
+          await assert.rejects(
+            async () => invoke(fn, bad),
+            (error) => error instanceof c.ArgumentError && /cycle|depth|recursive/i.test(error.message),
+          );
+        else
+          assert.throws(
+            () => invoke(fn, bad),
+            (error) => error instanceof c.ArgumentError && /cycle|depth|recursive/i.test(error.message),
+          );
       }
     });
   }
 
   it("structure pointer covariance preserves the original allocation", function () {
-    class Base extends c.Structure { static _fields_ = [["x", c.c_int32]]; }
-    class Derived extends Base { static _fields_ = [["y", c.c_int32]]; }
+    class Base extends c.Structure {
+      static _fields_ = [["x", c.c_int32]];
+    }
+    class Derived extends Base {
+      static _fields_ = [["y", c.c_int32]];
+    }
     const fn = lib.func("fixture_address", c.c_size_t, [c.POINTER(Base)]);
     const value = new Derived(1, 2);
     assert.equal(fn(value), c.addressof(value));
@@ -79,7 +96,9 @@ describe("API conversion compatibility", { skip: !existsSync(fixture) && `${fixt
 
   it("function pointers read from fields round-trip through fields, arrays and arguments", async function () {
     const Prototype = c.CFUNCTYPE(c.c_int32, c.c_int32);
-    class Record extends c.Structure { static _fields_ = [["function", Prototype]]; }
+    class Record extends c.Structure {
+      static _fields_ = [["function", Prototype]];
+    }
     const source = Record.in_dll(lib, "fixture_global_function");
     const fn = source.function;
     const copy = new Record();
@@ -91,7 +110,9 @@ describe("API conversion compatibility", { skip: !existsSync(fixture) && `${fixt
     const invoke = lib.func("fixture_scalar_callback", c.c_int32, [Prototype, c.c_int32]);
     assert.equal(invoke(fn, 7), 8);
     assert.equal(await invoke.callAsync(fn, 7), 8);
-    assert.throws(() => { copy.function = (value) => value; }, TypeError);
+    assert.throws(() => {
+      copy.function = (value) => value;
+    }, TypeError);
     assert.throws(() => invoke((value) => value, 7), c.ArgumentError);
   });
 
@@ -113,20 +134,28 @@ describe("API conversion compatibility", { skip: !existsSync(fixture) && `${fixt
     try {
       const invoke = c.CFUNCTYPE(Prototype)(callback.pointer);
       assert.equal(invoke()(7), 7);
-    } finally { callback.release(); }
+    } finally {
+      callback.release();
+    }
     const invalid = c.callback(() => () => 1, Prototype, []);
     try {
       assert.equal(c.CFUNCTYPE(Prototype)(invalid.pointer)(), null);
       assert.match(invalid._callback.getLastError(), /function.*cannot be interpreted/);
-    } finally { invalid.release(); }
+    } finally {
+      invalid.release();
+    }
   });
 
   it("adapter intermediates keep otherwise opaque pointer owners alive through async callbacks", async function () {
     let weak;
-    const callback = c.threadSafeCallback(() => {
-      gc();
-      return weak.deref() === undefined ? 0 : 1;
-    }, c.c_int32, []);
+    const callback = c.threadSafeCallback(
+      () => {
+        gc();
+        return weak.deref() === undefined ? 0 : 1;
+      },
+      c.c_int32,
+      [],
+    );
     const fn = lib.func("fixture_owner_check", c.c_int32, [c.POINTER(c.c_int32), c.c_void_p]);
     try {
       const adapter = {
@@ -140,9 +169,14 @@ describe("API conversion compatibility", { skip: !existsSync(fixture) && `${fixt
         },
       };
       assert.equal(await fn.callAsync(adapter, callback), 1);
-      for (let i = 0; i < 10; i++) { gc(); await new Promise((resolve) => setImmediate(resolve)); }
+      for (let i = 0; i < 10; i++) {
+        gc();
+        await new Promise((resolve) => setImmediate(resolve));
+      }
       assert.equal(weak.deref(), undefined);
-    } finally { callback.release(); }
+    } finally {
+      callback.release();
+    }
   });
 
   it("explicit null casts and pointers to entire arrays remain valid", function () {
@@ -169,6 +203,8 @@ describe("API conversion compatibility", { skip: !existsSync(fixture) && `${fixt
       fn.restype = c.c_int32;
       assert.equal(fn(-1), -1);
       assert.equal(lib.fixture_scalar_i32.restype, c.c_int32);
-    } finally { library.close(); }
+    } finally {
+      library.close();
+    }
   });
 });

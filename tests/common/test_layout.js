@@ -293,8 +293,12 @@ describe("Objects kept alive by fields", function () {
   });
 
   it("self-assignment preserves nested keepalives", function () {
-    class Child extends Structure { static _fields_ = [["text", c_char_p]]; }
-    class Outer extends Structure { static _fields_ = [["child", Child]]; }
+    class Child extends Structure {
+      static _fields_ = [["text", c_char_p]];
+    }
+    class Outer extends Structure {
+      static _fields_ = [["child", Child]];
+    }
     const outer = new Outer();
     outer.child.text = "self";
     const owner = keptObject(outer._buffer, 0);
@@ -304,7 +308,10 @@ describe("Objects kept alive by fields", function () {
 
   it("overlapping typed copies snapshot the owners before clearing the target", function () {
     class Pair extends Structure {
-      static _fields_ = [["first", c_char_p], ["second", c_char_p]];
+      static _fields_ = [
+        ["first", c_char_p],
+        ["second", c_char_p],
+      ];
     }
     const word = sizeof(c_char_p);
     const buffer = Buffer.alloc(word * 3);
@@ -321,8 +328,12 @@ describe("Objects kept alive by fields", function () {
 
   it("array fields and nested array elements transfer their keepalives", function () {
     const Strings = ctypes.array(c_char_p, 2);
-    class Record extends Structure { static _fields_ = [["items", Strings]]; }
-    class Value extends Union { static _fields_ = [["items", Strings]]; }
+    class Record extends Structure {
+      static _fields_ = [["items", Strings]];
+    }
+    class Value extends Union {
+      static _fields_ = [["items", Strings]];
+    }
     const source = Strings("one", "two");
     const owners = [keptObject(source._buffer, 0), keptObject(source._buffer, sizeof(c_char_p))];
     for (const target of [new Record(), new Value()]) {
@@ -346,7 +357,9 @@ describe("Objects kept alive by fields", function () {
   });
 
   it("typed copies keep known pointer owners but raw memmove does not", function () {
-    class Record extends Structure { static _fields_ = [["text", c_char_p]]; }
+    class Record extends Structure {
+      static _fields_ = [["text", c_char_p]];
+    }
     const source = new Record("known owner");
     const typed = Record.from_buffer_copy(source);
     assert.strictEqual(keptObject(typed._buffer, 0), keptObject(source._buffer, 0));
@@ -360,10 +373,14 @@ describe("Objects kept alive by fields", function () {
   });
 
   it("failed pointer writes leave the previous reference intact", function () {
-    class Record extends Structure { static _fields_ = [["text", c_char_p]]; }
+    class Record extends Structure {
+      static _fields_ = [["text", c_char_p]];
+    }
     const record = new Record("still owned");
     const owner = keptObject(record._buffer, 0);
-    assert.throws(() => { record.text = -1n; }, RangeError);
+    assert.throws(() => {
+      record.text = -1n;
+    }, RangeError);
     assert.strictEqual(keptObject(record._buffer, 0), owner);
     assert.strictEqual(record.text, "still owned");
   });

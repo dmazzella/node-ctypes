@@ -3,10 +3,7 @@ import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync,
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-export const platforms = Object.freeze([
-  "win32-x64", "win32-arm64", "linux-x64", "linux-arm64",
-  "linux-x64-musl", "linux-arm64-musl", "darwin-arm64", "darwin-x64",
-]);
+export const platforms = Object.freeze(["win32-x64", "win32-arm64", "linux-x64", "linux-arm64", "linux-x64-musl", "linux-arm64-musl", "darwin-arm64", "darwin-x64"]);
 const source = path.resolve(import.meta.dirname, "../..");
 
 export function releaseTag(version, ref) {
@@ -22,7 +19,8 @@ export function assemblePackage(artifacts, output, targets = platforms) {
     if (item.startsWith("ctypes-")) assert.ok(targets.includes(item.slice(7)), `unexpected addon artifact: ${item}`);
   }
   const binaries = targets.map((target) => ({
-    target, file: path.join(artifacts, `ctypes-${target}`, "ctypes.node"),
+    target,
+    file: path.join(artifacts, `ctypes-${target}`, "ctypes.node"),
   }));
   for (const { file } of binaries) {
     const info = statSync(file);

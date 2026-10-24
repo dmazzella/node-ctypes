@@ -208,14 +208,16 @@ import { POINTER, pointer, cast, c_int32, c_void_p } from "node-ctypes";
 const x = new c_int32(42);
 const px = pointer(x);
 px.contents.value; // 42   (Python: px.contents.value — a live c_int32)
-px[0];             // 42   (Python: px[0])
+px[0]; // 42   (Python: px[0])
 px[0] = 100;
-x.value;           // 100  (same memory)
+x.value; // 100  (same memory)
 
 // View existing memory as a typed pointer
 const IntPtr = POINTER(c_int32);
 const p = IntPtr.fromBuffer(someBuffer);
-p[0]; p[1]; p[2];   // pointer arithmetic
+p[0];
+p[1];
+p[2]; // pointer arithmetic
 
 // cast() — Python: cast(ptr, POINTER(T))
 const q = cast(someBuffer, POINTER(c_int32));
@@ -256,11 +258,7 @@ const CompareFn = CFUNCTYPE(c_int32, c_void_p, c_void_p);
 const cmp = new CompareFn((a, b) => readValue(a, c_int32) - readValue(b, c_int32));
 
 // Or the one-shot form:
-const cmp2 = callback(
-  (a, b) => readValue(a, c_int32) - readValue(b, c_int32),
-  c_int32,
-  [c_void_p, c_void_p]
-);
+const cmp2 = callback((a, b) => readValue(a, c_int32) - readValue(b, c_int32), c_int32, [c_void_p, c_void_p]);
 
 // Pass the callback itself (as in Python) or its address `cmp.pointer`.
 qsort(arr, 5, 4, cmp);
@@ -306,10 +304,11 @@ throws while a call to one of them is in progress (from a callback, or a
 pending `callAsync()`). Repeated `close()` calls are harmless.
 
 Existing `in_dll()` views keep the underlying module loaded even after
-`close()`. Physical unloading is deferred until the last dependent view,
-Buffer, typed array or typed pointer copy is collected; those existing views
-remain usable. Raw addresses obtained with `symbol()` do not carry this
-ownership information.
+`close()`. Release of the native library handle is deferred until the last
+dependent view, Buffer, typed array or typed pointer copy is collected; those
+existing views remain usable. Actual physical unloading depends on the OS loader: for example,
+musl keeps shared libraries resident until process exit even after `dlclose()`.
+Raw addresses obtained with `symbol()` do not carry this ownership information.
 
 Set `NODE_CTYPES_DEBUG_CALLBACKS=1` to log a stack trace for every
 callback garbage-collected without `.release()`.
@@ -348,8 +347,8 @@ const user32 = new WinDLL("user32.dll", { use_last_error: true });
 const FindWindow = user32.func("FindWindowW", c_void_p, [c_wchar_p, c_wchar_p]);
 FindWindow("NoSuchClass", null);
 
-GetLastError();              // top-level (Python: ctypes.get_last_error)
-user32.get_last_error();     // per-library alias
+GetLastError(); // top-level (Python: ctypes.get_last_error)
+user32.get_last_error(); // per-library alias
 ```
 
 The snapshot is captured in native code immediately after the native call,
@@ -372,8 +371,14 @@ const kernel32 = new WinDLL("kernel32.dll");
 
 class SYSTEMTIME extends Structure {
   static _fields_ = [
-    ["wYear", WORD], ["wMonth", WORD], ["wDayOfWeek", WORD], ["wDay", WORD],
-    ["wHour", WORD], ["wMinute", WORD], ["wSecond", WORD], ["wMilliseconds", WORD],
+    ["wYear", WORD],
+    ["wMonth", WORD],
+    ["wDayOfWeek", WORD],
+    ["wDay", WORD],
+    ["wHour", WORD],
+    ["wMinute", WORD],
+    ["wSecond", WORD],
+    ["wMilliseconds", WORD],
   ];
 }
 
@@ -455,8 +460,8 @@ const fn = proto.bind(user32, "GetWindowThreadProcessId", [
   { dir: "out", name: "pid" },
 ]);
 
-const pid = fn(hwnd);             // positional; thread ID is discarded
-const p2 = fn({ hWnd: hwnd });    // or named-args
+const pid = fn(hwnd); // positional; thread ID is discarded
+const p2 = fn({ hWnd: hwnd }); // or named-args
 
 fn.errcheck = (threadId, func, args) => {
   if (!threadId) throw new Error("call failed");
@@ -529,7 +534,7 @@ before producing an instance and accept Buffer, typed views and ctypes memory.
 ### Electron
 
 Electron does not allow Buffers over memory that V8 did not allocate, so a
-Buffer *view* of native memory cannot exist there. node-ctypes detects this
+Buffer _view_ of native memory cannot exist there. node-ctypes detects this
 when it loads (`EXTERNAL_BUFFERS` is `false`) and keeps the same API:
 
 - instances on native memory (`from_address`, `in_dll`, `pointer.contents`,
@@ -552,13 +557,17 @@ to run in this mode on Node.js.
 ```javascript
 // Instance protocol: auto-unwrap on call
 class Handle {
-  constructor(h) { this._as_parameter_ = h; }
+  constructor(h) {
+    this._as_parameter_ = h;
+  }
 }
 user32.CloseHandle(new Handle(hwnd));
 
 // Class protocol: custom conversion in argtypes
 class StrLen extends c_int32 {
-  static from_param(s) { return typeof s === "string" ? s.length : s; }
+  static from_param(s) {
+    return typeof s === "string" ? s.length : s;
+  }
 }
 const abs = libc.func("abs", c_int32, [StrLen]);
 abs("hello"); // 5
@@ -624,7 +633,9 @@ const n: bigint = strlen("hello"); // typed as bigint, not any
 
 ```ts
 class Point extends defineStruct({ x: c_int32, y: c_int32 }) {
-  distance() { return Math.sqrt(this.x ** 2 + this.y ** 2); }
+  distance() {
+    return Math.sqrt(this.x ** 2 + this.y ** 2);
+  }
 }
 const p = new Point({ x: 3, y: 4 }); // p.x, p.y typed as number
 ```
@@ -634,10 +645,10 @@ types are typed too; a `null` return type is `void`:
 
 ```ts
 const PointDef = struct({ x: c_int32, y: c_double });
-PointDef.get(buf, "y");                       // number
-POINTER(c_int32).fromAddress(addr)[0];        // number (.contents: c_int32 instance)
-array(c_int32, 4).create([1, 2, 3, 4])[0];    // number
-libc.func("srand", null, [c_uint32]);         // returns undefined
+PointDef.get(buf, "y"); // number
+POINTER(c_int32).fromAddress(addr)[0]; // number (.contents: c_int32 instance)
+array(c_int32, 4).create([1, 2, 3, 4])[0]; // number
+libc.func("srand", null, [c_uint32]); // returns undefined
 ```
 
 ---
@@ -646,30 +657,30 @@ libc.func("srand", null, [c_uint32]);         // returns undefined
 
 ### Primitive types
 
-| Type        | Aliases        | Size     | Notes                                         |
-| ----------- | -------------- | -------- | --------------------------------------------- |
-| `c_int8`    | `c_byte`       | 1        |                                               |
-| `c_uint8`   | `c_ubyte`      | 1        |                                               |
-| `c_int16`   | `c_short`      | 2        |                                               |
-| `c_uint16`  | `c_ushort`     | 2        |                                               |
-| `c_int32`   | `c_int`        | 4        |                                               |
-| `c_uint32`  | `c_uint`       | 4        |                                               |
-| `c_int64`   | `c_longlong`   | 8        |                                               |
-| `c_uint64`  | `c_ulonglong`  | 8        |                                               |
-| `c_long`    |                | platform | 4 on Windows, 8 on Unix 64-bit; BigInt values |
-| `c_ulong`   |                | platform | mirrors `c_long`; BigInt values               |
-| `c_float`   |                | 4        |                                               |
-| `c_double`  |                | 8        |                                               |
-| `c_bool`    |                | 1        |                                               |
-| `c_char`    |                | 1        | 1-char string (Python `bytes`); also 0..255   |
-| `c_wchar`   |                | 2 or 4   | 1-char string; 2 on Windows, 4 on Unix        |
-| `c_char_p`  |                | pointer  | `char *` (NUL-terminated)                     |
-| `c_wchar_p` |                | pointer  | `wchar_t *` (NUL-terminated wide)             |
-| `c_void_p`  | `c_voidp`      | pointer  | opaque pointer / `HANDLE`                     |
-| `c_time_t`  |                | 8        | `time_t` (`SIZEOF_TIME_T`)                    |
-| `c_size_t`  |                | pointer  | pointer-sized unsigned integer                |
-| `c_ssize_t` |                | pointer  | pointer-sized signed integer                  |
-| `HRESULT`   |                | 4        | `c_int32` subclass — auto-raise on `OleDLL`   |
+| Type        | Aliases       | Size     | Notes                                         |
+| ----------- | ------------- | -------- | --------------------------------------------- |
+| `c_int8`    | `c_byte`      | 1        |                                               |
+| `c_uint8`   | `c_ubyte`     | 1        |                                               |
+| `c_int16`   | `c_short`     | 2        |                                               |
+| `c_uint16`  | `c_ushort`    | 2        |                                               |
+| `c_int32`   | `c_int`       | 4        |                                               |
+| `c_uint32`  | `c_uint`      | 4        |                                               |
+| `c_int64`   | `c_longlong`  | 8        |                                               |
+| `c_uint64`  | `c_ulonglong` | 8        |                                               |
+| `c_long`    |               | platform | 4 on Windows, 8 on Unix 64-bit; BigInt values |
+| `c_ulong`   |               | platform | mirrors `c_long`; BigInt values               |
+| `c_float`   |               | 4        |                                               |
+| `c_double`  |               | 8        |                                               |
+| `c_bool`    |               | 1        |                                               |
+| `c_char`    |               | 1        | 1-char string (Python `bytes`); also 0..255   |
+| `c_wchar`   |               | 2 or 4   | 1-char string; 2 on Windows, 4 on Unix        |
+| `c_char_p`  |               | pointer  | `char *` (NUL-terminated)                     |
+| `c_wchar_p` |               | pointer  | `wchar_t *` (NUL-terminated wide)             |
+| `c_void_p`  | `c_voidp`     | pointer  | opaque pointer / `HANDLE`                     |
+| `c_time_t`  |               | 8        | `time_t` (`SIZEOF_TIME_T`)                    |
+| `c_size_t`  |               | pointer  | pointer-sized unsigned integer                |
+| `c_ssize_t` |               | pointer  | pointer-sized signed integer                  |
+| `HRESULT`   |               | 4        | `c_int32` subclass — auto-raise on `OleDLL`   |
 
 Plus the Win32 types, structures and pointer types of `ctypes.wintypes` under `wintypes`.
 
@@ -799,20 +810,20 @@ pointer arithmetic (also `POINTER(POINTER(T))`), callbacks (`CFUNCTYPE` /
 2.0 follows Python ctypes more closely. Code relying on the 1.x behavior
 needs these changes:
 
-| 1.x | 2.0 (as Python) |
-| --- | --- |
-| `ptr.contents` returned the value | returns a live instance: `ptr.contents.value` (simple types), `ptr.contents.x` (structs); `ptr[0]` still returns the value |
-| `POINTER(T)` restype returned a `bigint` address | returns a pointer object (`null` for NULL); use `.address` for the number |
-| NULL `POINTER` struct fields were pointer objects | they are `null` |
-| `c_char` values were numbers | 1-character strings; `c_char * n` fields read/write as strings |
-| invalid `c_char` values were truncated | `TypeError` (`"one character bytes, bytearray, or an integer in range(256) expected, not ..."`) |
-| wrong argument types raised `TypeError` | raise `ArgumentError` (a `TypeError` subclass), message `"argument N: TypeError: ..."` |
-| unsupported pointer arguments (functions, plain objects) passed NULL | raise `ArgumentError` (`"'function' object cannot be interpreted as ctypes.c_void_p"`) |
-| functions without `restype` / `argtypes` | default `restype` is `c_int`; without `argtypes` the call uses the fixed-argument ABI |
-| `create_string_buffer(init)` | also takes `size` and returns a Buffer with `.value` / `.raw` |
-| `c_long` / `c_ulong` (and `BOOL`, `LONG`, `DWORD`, `ULONG`) fields and `.value` were numbers on Windows | `BigInt` on every platform, like function results; writes accept numbers and BigInt |
-| `wintypes.CHAR` was `c_ubyte`; `LPDWORD`, `PDWORD`, `LPBYTE`, `PBYTE`, `PHKEY` were `c_void_p` | as Python: `CHAR = c_char` and pointer types are `POINTER(T)` (fields and results are pointer objects) |
-| `string_at(addr, n)` / `wstring_at(addr, n)` stopped at the first NUL | read exactly `n` units; without `n`, `wstring_at` reads up to the NUL (no 256-character limit) |
+| 1.x                                                                                                     | 2.0 (as Python)                                                                                                            |
+| ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `ptr.contents` returned the value                                                                       | returns a live instance: `ptr.contents.value` (simple types), `ptr.contents.x` (structs); `ptr[0]` still returns the value |
+| `POINTER(T)` restype returned a `bigint` address                                                        | returns a pointer object (`null` for NULL); use `.address` for the number                                                  |
+| NULL `POINTER` struct fields were pointer objects                                                       | they are `null`                                                                                                            |
+| `c_char` values were numbers                                                                            | 1-character strings; `c_char * n` fields read/write as strings                                                             |
+| invalid `c_char` values were truncated                                                                  | `TypeError` (`"one character bytes, bytearray, or an integer in range(256) expected, not ..."`)                            |
+| wrong argument types raised `TypeError`                                                                 | raise `ArgumentError` (a `TypeError` subclass), message `"argument N: TypeError: ..."`                                     |
+| unsupported pointer arguments (functions, plain objects) passed NULL                                    | raise `ArgumentError` (`"'function' object cannot be interpreted as ctypes.c_void_p"`)                                     |
+| functions without `restype` / `argtypes`                                                                | default `restype` is `c_int`; without `argtypes` the call uses the fixed-argument ABI                                      |
+| `create_string_buffer(init)`                                                                            | also takes `size` and returns a Buffer with `.value` / `.raw`                                                              |
+| `c_long` / `c_ulong` (and `BOOL`, `LONG`, `DWORD`, `ULONG`) fields and `.value` were numbers on Windows | `BigInt` on every platform, like function results; writes accept numbers and BigInt                                        |
+| `wintypes.CHAR` was `c_ubyte`; `LPDWORD`, `PDWORD`, `LPBYTE`, `PBYTE`, `PHKEY` were `c_void_p`          | as Python: `CHAR = c_char` and pointer types are `POINTER(T)` (fields and results are pointer objects)                     |
+| `string_at(addr, n)` / `wstring_at(addr, n)` stopped at the first NUL                                   | read exactly `n` units; without `n`, `wstring_at` reads up to the NUL (no 256-character limit)                             |
 
 ---
 
@@ -876,11 +887,11 @@ are ignored by Git. Open the HTML file directly in a browser: it is responsive
 and self-contained, with native HTML/CSS bar charts and no browser JavaScript,
 external resources or server requirements.
 
-| Column | Meaning |
-| --- | --- |
-| Case | The same operation and inputs for both libraries |
+| Column                   | Meaning                                               |
+| ------------------------ | ----------------------------------------------------- |
+| Case                     | The same operation and inputs for both libraries      |
 | node-ctypes / competitor | Median time +/- MAD (dispersion), in ns per operation |
-| Ratio | node-ctypes time divided by competitor time |
+| Ratio                    | node-ctypes time divided by competitor time           |
 
 A ratio of `0.50x` means node-ctypes took half the time; `2.00x` means it
 took twice the time. Lower times are better. There is no overall score
