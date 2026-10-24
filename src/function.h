@@ -108,6 +108,12 @@ struct FunctionArguments {
   bool HasResultHandler() const noexcept { return first != 0; }
 };
 
+#if defined(_MSC_VER)
+// The inline return/string buffers require alignas(16); class padding is intentional.
+#pragma warning(push)
+#pragma warning(disable : 4324)
+#endif
+
 // Wrapper per una funzione C chiamabile da JavaScript
 class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
  public:
@@ -420,5 +426,9 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
   Napi::Value GetLastErrorCaptured(const Napi::CallbackInfo& info);
   Napi::Value GetErrnoCaptured(const Napi::CallbackInfo& info);
 };
+
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 }  // namespace ctypes

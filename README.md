@@ -875,6 +875,11 @@ npm run bench:koffi                    # node-ctypes vs Koffi; Node 24+
 npm run bench:ffi                      # node-ctypes vs node:ffi; Node 26+
 ```
 
+The private test package explicitly approves the install script for Koffi 3.3.3.
+When upgrading Koffi, review the new version before updating that approval with
+`npm --prefix tests install-scripts approve koffi`; future versions are not
+automatically authorized.
+
 `bench:ffi` adds `--experimental-ffi` automatically. Both comparisons
 print a table grouped by workload and automatically generate HTML reports:
 

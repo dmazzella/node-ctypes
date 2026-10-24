@@ -173,10 +173,15 @@ Invoker SelectForResult(std::span<const CType> args) {
     bool core = true;
     for (const auto type : args) {
       if (Matches<int32_t>(type)) {
-      } else if (kFloatArgsAllowed && Matches<double>(type)) {
-        code += weight;
-      } else if (kFloatArgsAllowed && Matches<float>(type)) {
-        code += 2 * weight;
+      } else if constexpr (kFloatArgsAllowed) {
+        if (Matches<double>(type)) {
+          code += weight;
+        } else if (Matches<float>(type)) {
+          code += 2 * weight;
+        } else {
+          core = false;
+          break;
+        }
       } else {
         core = false;
         break;

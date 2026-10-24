@@ -341,6 +341,11 @@ if(MSVC)
         $<$<COMPILE_LANGUAGE:C>:/wd4018>   # Signed/unsigned mismatch
         $<$<COMPILE_LANGUAGE:C>:/wd4267>   # size_t to int conversion
     )
+    if(FFI_ARCH STREQUAL "aarch64")
+        # Upstream FFI_ALIGN_DOWN intentionally negates unsigned alignment to form a mask.
+        set_property(SOURCE "${LIBFFI_SOURCE_DIR}/src/aarch64/ffi.c"
+            APPEND PROPERTY COMPILE_OPTIONS /wd4146)
+    endif()
 else()
     target_compile_options(ffi_static PRIVATE
         -Wall

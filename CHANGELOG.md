@@ -36,6 +36,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Windows build diagnostics**: use compile-time guards for disabled floating-point
+  direct invokers. Keep the required inline-buffer alignment and scope MSVC padding
+  diagnostics to the affected class; waive upstream libffi's intentional unsigned
+  alignment-mask negation only in its Windows ARM64 source file.
+- **libffi header generation**: recognize `AC_PACKAGE_VERSION` as an Autoconf
+  reference instead of reporting a false version mismatch, while retaining checks
+  for conflicting literal version assignments.
+- **Koffi installation policy**: explicitly approve only the reviewed Koffi 3.3.3
+  install script in the private test package, eliminating the unreviewed-script
+  warning without authorizing future dependency versions.
 - **Narrow call-conversion tests across ABIs**: use matching C fixture
   signatures for narrow arguments/results instead of declaring `abs(int)`
   with incompatible 8/16-bit or boolean types. Preserve signedness, narrowing

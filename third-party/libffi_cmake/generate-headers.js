@@ -28,8 +28,8 @@ const OUTPUT_DIR = path.join(__dirname, "fficonfig");
  *
  * The release version comes from AC_INIT(...), which is the single source of
  * truth (it drives autotools' @VERSION@). The FFI_VERSION_STRING /
- * FFI_VERSION_NUMBER lines are cross-checked and a warning is emitted if they
- * drift, because upstream has at times forgotten to bump them in lockstep with
+ * FFI_VERSION_NUMBER literal assignments are cross-checked and a warning is
+ * emitted if they drift, because upstream has at times forgotten to bump them in lockstep with
  * AC_INIT (e.g. libffi 3.6.0 still declares FFI_VERSION_STRING="3.5.2").
  */
 function extractVersion() {
@@ -53,7 +53,8 @@ function extractVersion() {
   // Cross-check against the FFI_VERSION_* lines and warn on drift.
   const versionStringMatch = configureAc.match(/FFI_VERSION_STRING="([^"]+)"/);
   const versionNumberMatch = configureAc.match(/FFI_VERSION_NUMBER=(\d+)/);
-  if (versionStringMatch && versionStringMatch[1] !== string) {
+  // m4 expands AC_PACKAGE_VERSION from AC_INIT; it is not a conflicting literal.
+  if (versionStringMatch && versionStringMatch[1] !== "AC_PACKAGE_VERSION" && versionStringMatch[1] !== string) {
     console.warn(`Warning: FFI_VERSION_STRING="${versionStringMatch[1]}" disagrees with AC_INIT "${string}"; using AC_INIT.`);
   }
   if (versionNumberMatch && parseInt(versionNumberMatch[1], 10) !== number) {
