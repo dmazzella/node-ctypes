@@ -94,6 +94,27 @@ try {
     10.75,
   );
 
+  const prototypeZero = c.CFUNCTYPE(c.c_int32)(["fixture_benchmark_zero", lib]);
+  const prototypeI32 = c.CFUNCTYPE(c.c_int32, c.c_int32)(["fixture_scalar_i32", lib]);
+  const otherPrototypeZero = other.func("int32_t fixture_benchmark_zero(void)");
+  const otherPrototypeI32 = other.func("int32_t fixture_scalar_i32(int32_t value)");
+  add(
+    "zero arguments via CFUNCTYPE",
+    "Prototype callers",
+    "number",
+    () => prototypeZero(),
+    () => otherPrototypeZero(),
+    7,
+  );
+  add(
+    "echo i32 via CFUNCTYPE",
+    "Prototype callers",
+    "number",
+    () => prototypeI32(-7),
+    () => otherPrototypeI32(-7),
+    -7,
+  );
+
   const length = lib.func("fixture_string_length", c.c_size_t, [c.c_char_p]);
   const otherLength = other.func("size_t fixture_string_length(const char *text)");
   for (const size of [16, 4096]) {
@@ -206,6 +227,7 @@ try {
     externalBuffers: c.EXTERNAL_BUFFERS,
     notes: [
       "Both libraries call the same C fixture with matching native signatures.",
+      "CFUNCTYPE rows use independently bound functions to keep optimization feedback separate from direct-call rows.",
       "String lengths are normalized to Number; node-ctypes BigInt-to-Number conversion is included.",
       "Wide i64 values return BigInt in both APIs. Struct results are plain objects in both APIs.",
       "Async compares Promise completion at the stated concurrency; the libraries use different worker pools.",

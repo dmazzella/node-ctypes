@@ -70,8 +70,9 @@ struct CallScratch {
   std::vector<uint8_t> return_buffer;            // struct/array > sizeof(ReturnValue)
 
   void Reset() {
-    strings.clear();
+    // CallContext counts used bytes; keep initialized storage to avoid zeroing it again.
     if (strings.capacity() > 10 * 1024 * 1024) {
+      strings.clear();
       strings.shrink_to_fit();
     }
     string_fixups.clear();
@@ -160,6 +161,7 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
     CallScratch* scratch = nullptr;
     char* inline_strings = nullptr;
     size_t inline_string_offset = 0;
+    size_t heap_string_offset = 0;
     ReturnValue* return_value = nullptr;
     const Napi::Function* errcheck = nullptr;
   };

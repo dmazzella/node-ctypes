@@ -113,6 +113,10 @@ FIXTURE_API size_t fixture_wstring_length(const wchar_t* value) {
   return wcslen(value);
 }
 
+FIXTURE_API size_t fixture_mixed_string_lengths(const char* first, const wchar_t* middle, const char* last) {
+  return strlen(first) + wcslen(middle) + strlen(last);
+}
+
 #define FIXTURE_SCALAR(name, type)                                               \
   FIXTURE_API type fixture_scalar_##name(type value) {                           \
     return value;                                                                \

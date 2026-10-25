@@ -1117,13 +1117,24 @@ CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalArguments(CallContext& ctx) {
                 ctx.inline_string_offset += *copied + 1;
                 break;
               }
-              // Fallback: heap scratch.strings. Il puntatore viene scritto a fine
-              // marshalling (string_fixups) perché resize() successivi possono riallocare.
-              const std::string str = js_str.Utf8Value();
-              const size_t needed = str.size() + 1;
-              size_t offset = scratch.strings.size();
-              scratch.strings.resize(offset + needed);
-              memcpy(scratch.strings.data() + offset, str.c_str(), needed);
+              // Encode into reusable storage; fix pointers after any later growth.
+              const size_t offset = ctx.heap_string_offset;
+              if (auto copied = napi_fast::TryCopyUtf8Into(js_str, std::span(scratch.strings).subspan(offset))) {
+                ctx.heap_string_offset = offset + *copied + 1;
+              } else {
+                const std::string str = js_str.Utf8Value();
+                const size_t needed = str.size() + 1;
+                const size_t capacity =
+                  std::max(needed + napi_fast::kMaxUtf8CharBytes, napi_fast::kMaxUtf8CharBytes + 2);
+                if (capacity > scratch.strings.max_size() - offset) {
+                  throw Napi::RangeError::New(env, "String argument buffer is too large");
+                }
+                // resize alone can round capacity past the retention limit.
+                scratch.strings.reserve(offset + capacity);
+                scratch.strings.resize(offset + capacity);
+                memcpy(scratch.strings.data() + offset, str.c_str(), needed);
+                ctx.heap_string_offset = offset + needed;
+              }
               scratch.string_fixups.emplace_back(i, offset);
               break;
             }
@@ -1154,9 +1165,13 @@ CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalArguments(CallContext& ctx) {
               constexpr size_t wchar_size = sizeof(wchar_t);
               constexpr size_t wchar_align = alignof(wchar_t);
               size_t byte_len = (u16str.length() + 1) * wchar_size;
-              size_t offset = scratch.strings.size();
+              size_t offset = ctx.heap_string_offset;
               offset = (offset + wchar_align - 1) & ~(wchar_align - 1);
-              scratch.strings.resize(offset + byte_len);
+              ctx.heap_string_offset = offset + byte_len;
+              if (scratch.strings.size() < ctx.heap_string_offset) {
+                scratch.strings.reserve(ctx.heap_string_offset);
+                scratch.strings.resize(ctx.heap_string_offset);
+              }
               Utf16ToWide(u16str,
                           std::span(reinterpret_cast<wchar_t*>(scratch.strings.data() + offset), u16str.size() + 1));
               scratch.string_fixups.emplace_back(i, offset);

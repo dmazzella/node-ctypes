@@ -15,6 +15,8 @@ try {
 const file = fixturePath();
 const lib = new c.CDLL(file);
 const other = new ffi.DynamicLibrary(file);
+// getFunction caches per library; prototype rows need independent function identities.
+const prototypeOther = new ffi.DynamicLibrary(file);
 let callback;
 let otherCallback;
 
@@ -105,6 +107,29 @@ try {
   );
 
   const sizeType = c.sizeof(c.c_size_t) === 8 ? "u64" : "u32";
+  const prototypeZero = c.CFUNCTYPE(c.c_int32)(["fixture_benchmark_zero", lib]);
+  const prototypeI32 = c.CFUNCTYPE(c.c_int32, c.c_int32)(["fixture_scalar_i32", lib]);
+  const otherPrototypeZero = prototypeOther.getFunction("fixture_benchmark_zero", { return: "i32", arguments: [] });
+  const otherPrototypeI32 = prototypeOther.getFunction("fixture_scalar_i32", { return: "i32", arguments: ["i32"] });
+  assert.notEqual(otherPrototypeZero, otherZero);
+  assert.notEqual(otherPrototypeI32, otherI32);
+  add(
+    "zero arguments via CFUNCTYPE",
+    "Prototype callers",
+    "number",
+    () => prototypeZero(),
+    () => otherPrototypeZero(),
+    7,
+  );
+  add(
+    "echo i32 via CFUNCTYPE",
+    "Prototype callers",
+    "number",
+    () => prototypeI32(-7),
+    () => otherPrototypeI32(-7),
+    -7,
+  );
+
   const length = lib.func("fixture_string_length", c.c_size_t, [c.c_char_p]);
   const otherLength = other.getFunction("fixture_string_length", { return: sizeType, arguments: ["string"] });
   for (const size of [16, 4096]) {
@@ -167,6 +192,7 @@ try {
     externalBuffers: c.EXTERNAL_BUFFERS,
     notes: [
       "Both libraries call the same C fixture with matching native signatures.",
+      "CFUNCTYPE rows use a separate library binding: node:ffi caches functions per library, so direct-call feedback stays separate.",
       "String lengths are normalized to Number; BigInt-to-Number conversion is included for both libraries.",
       "Wide i64 values return BigInt in both APIs. Callback registration is outside the timed loop.",
     ],
@@ -179,5 +205,6 @@ try {
   callback?.release();
   if (otherCallback !== undefined) other.unregisterCallback(otherCallback);
   other.close();
+  prototypeOther.close();
   lib.close();
 }

@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Prototype callers**: eligible synchronous prototype bindings reuse the
+  fixed-arity JavaScript wrappers used by library functions. Calls needing
+  owners, custom adapters, result conversion or argument-count fallback keep
+  the general pipeline. Hook snapshots, original argument arrays, callable
+  metadata and prototype asynchronous behavior are preserved. External
+  comparisons include explicit already-bound `CFUNCTYPE` caller rows.
+- **Callback conversion**: builtin-only signatures skip the generic argument
+  conversion dispatcher while preserving invocation and result conversion. Native
+  handlers construct fallback error messages only on failure, with unchanged
+  diagnostics and thread-safety checks.
+- **Long UTF-8 arguments**: synchronous calls encode directly into reusable
+  scratch storage when it fits, keeping the ordinary encoder for growth.
+  String contents are still encoded on every call; the existing retention
+  bound, wide-string alignment and independent reentrant buffers are preserved.
+- **Structure argument conversion**: plain-object arguments for functional
+  `struct()` definitions containing only builtin non-pointer scalar fields
+  skip the transient Proxy and use the same byte initializer as `create()`.
+  Field validation, zero defaults, dynamic `create()` / `set()` hooks and
+  argument lifetimes are preserved. Classes and complex definitions keep
+  their existing conversion paths.
+
 ## [2.4.0] - 2026-10-24
 
 ### Added

@@ -128,6 +128,129 @@ describe("native fixture", { skip: !existsSync(FIXTURE) && `${FIXTURE} not built
     });
   });
 
+  describe("plain-object structure arguments", function () {
+    for (const [name, bind] of [
+      ["CDLL.func", (Point) => lib.func("fixture_point_sum", c_int32, [Point])],
+      [
+        "library attribute",
+        (Point) => {
+          const sum = lib.fixture_point_sum;
+          sum.argtypes = [Point];
+          sum.restype = c_int32;
+          return sum;
+        },
+      ],
+      ["CFUNCTYPE address", (Point) => CFUNCTYPE(c_int32, Point)(lib.symbol("fixture_point_sum"))],
+      ["CFUNCTYPE library", (Point) => CFUNCTYPE(c_int32, Point)(["fixture_point_sum", lib])],
+    ]) {
+      it(`${name} preserves values, zero defaults and concurrent async arguments`, async function () {
+        const Point = ctypes.struct({ x: c_int32, y: c_int32 });
+        const sum = bind(Point);
+        assert.strictEqual(sum({ x: 3, y: 4 }), 7);
+        assert.strictEqual(sum({ x: new c_int32(-3), y: 4 }), 1);
+        assert.strictEqual(sum({ y: 4 }), 4);
+        assert.strictEqual(sum({}), 0);
+        assert.deepStrictEqual(await Promise.all([{ x: 3, y: 4 }, { x: -10, y: 7 }, { x: 2 }, {}].map((value) => sum.callAsync(value))), [7, -3, 2, 0]);
+        assert.throws(() => sum([3, 4]), ArgumentError);
+      });
+    }
+
+    it("preserves scalar validation before native entry", async function () {
+      const Point = ctypes.struct({ x: c_int32, y: c_int32 });
+      const sum = lib.func("fixture_point_sum", c_int32, [Point]);
+      for (const value of ["3", null, {}, new ctypes.c_double(3)]) {
+        assert.throws(() => sum({ x: value, y: 4 }), TypeError);
+        await assert.rejects(async () => sum.callAsync({ x: value, y: 4 }), TypeError);
+      }
+      assert.strictEqual(sum({ x: 3, y: 4 }), 7);
+    });
+
+    it("preserves field access order, custom setters and reentrant initialization", function () {
+      const Point = ctypes.struct({ x: c_int32, y: c_int32 });
+      const sum = lib.func("fixture_point_sum", c_int32, [Point]);
+      const events = [];
+      const set = Point.set;
+      Point.set = function (buffer, name, value) {
+        events.push(`set ${name}`);
+        return set.call(this, buffer, name, value);
+      };
+      let entered = false;
+      const values = {
+        get x() {
+          events.push("get x");
+          if (!entered) {
+            entered = true;
+            assert.strictEqual(sum({ x: 10, y: 20 }), 30);
+          }
+          return 3;
+        },
+        get y() {
+          events.push("get y");
+          return 4;
+        },
+      };
+      assert.strictEqual(sum(values), 7);
+      assert.deepStrictEqual(events, ["get x", "set x", "set y", "get x", "set x", "get y", "get y", "set y"]);
+    });
+
+    it("honors a create override installed after binding without extra getter reads", function () {
+      const Point = ctypes.struct({ x: c_int32, y: c_int32 });
+      const sum = lib.func("fixture_point_sum", c_int32, [Point]);
+      const create = Point.create;
+      let reads = 0;
+      let calls = 0;
+      Object.defineProperty(Point, "create", {
+        get() {
+          reads++;
+          return function (values) {
+            assert.strictEqual(this, Point);
+            calls++;
+            return create.call(this, { x: values.x + 10, y: values.y });
+          };
+        },
+      });
+      assert.strictEqual(sum({ x: 3, y: 4 }), 17);
+      assert.deepStrictEqual([reads, calls], [1, 1]);
+    });
+
+    it("preserves dynamic from_param adapters and original errcheck arguments", async function () {
+      const Point = ctypes.struct({ x: c_int32, y: c_int32 });
+      Point.from_param = function (value) {
+        assert.strictEqual(this, Point);
+        return { _as_parameter_: value };
+      };
+      const sum = lib.func("fixture_point_sum", c_int32, [Point]);
+      const values = { x: 3, y: 4 };
+      sum.errcheck = (result, fn, args) => {
+        assert.strictEqual(fn, sum);
+        assert.strictEqual(args[0], values);
+        return result;
+      };
+      assert.strictEqual(sum(values), 7);
+      assert.strictEqual(await sum.callAsync(values), 7);
+      Point.from_param = (value) => ({ x: value.x + 1, y: value.y });
+      assert.strictEqual(sum(values), 8);
+      assert.strictEqual(await sum.callAsync(values), 8);
+    });
+
+    it("keeps Structure subclass constructors in the conversion path", function () {
+      let calls = 0;
+      class Point extends Structure {
+        static _fields_ = [
+          ["x", c_int32],
+          ["y", c_int32],
+        ];
+        constructor(values) {
+          super(values);
+          calls++;
+          this.x += 10;
+        }
+      }
+      assert.strictEqual(lib.func("fixture_point_sum", c_int32, [Point])({ x: 3, y: 4 }), 17);
+      assert.strictEqual(calls, 1);
+    });
+  });
+
   describe("structures by value with _pack_ and padding", function () {
     class Packed extends Structure {
       static _pack_ = 1;
@@ -242,6 +365,23 @@ describe("native fixture", { skip: !existsSync(FIXTURE) && `${FIXTURE} not built
   });
 
   describe("reentrant calls", function () {
+    it("a nested call with longer heap strings does not overwrite the outer string", function () {
+      const first = lib.func("fixture_first_char_after", c_int32, [c_char_p, c_void_p]);
+      const inner = callback(
+        () => {
+          assert.strictEqual(first("inner" + "x".repeat(90000), null), "i".charCodeAt(0));
+        },
+        null,
+        [],
+      );
+      try {
+        assert.strictEqual(first("outer" + "x".repeat(9000), inner), "o".charCodeAt(0));
+        assert.strictEqual(first("again" + "x".repeat(700), inner), "a".charCodeAt(0));
+      } finally {
+        inner.release();
+      }
+    });
+
     it("a call from a callback does not overwrite the string arguments of the outer call", function () {
       const first = lib.func("fixture_first_char_after", c_int32, [c_char_p, c_void_p]);
       const inner = callback(

@@ -100,6 +100,69 @@ describe("interned prototype bindings", { skip: !existsSync(fixture) && `${fixtu
   });
   after(() => lib.close());
 
+  for (const [name, make] of [
+    ["CFUNCTYPE", c.CFUNCTYPE],
+    ["WINFUNCTYPE", c.WINFUNCTYPE],
+  ]) {
+    it(`${name} callers preserve zero through seven argument signatures and callable metadata`, function () {
+      for (let count = 0; count <= 7; count++) {
+        const type = make(c.c_int32, ...Array(count).fill(c.c_int32));
+        const callback = type((...values) => values.reduce((sum, value) => sum + value, 0));
+        const fn = type(callback.pointer);
+        const values = Array.from({ length: count }, (_, index) => index + 1);
+        try {
+          assert.equal(
+            fn(...values),
+            values.reduce((sum, value) => sum + value, 0),
+          );
+          assert.equal(fn.name, "callMethod");
+          assert.equal(fn.length, 0);
+          assert.equal(fn.address, callback.pointer);
+          assert.equal(fn._as_parameter_, fn.address);
+          assert.deepEqual(Object.keys(fn), []);
+          assert.deepEqual(Object.getOwnPropertyDescriptor(fn, "length"), { value: 0, writable: false, enumerable: false, configurable: true });
+          const descriptor = Object.getOwnPropertyDescriptor(fn, "callAsync");
+          assert.equal(typeof descriptor.value, "function");
+          assert.equal(descriptor.writable, false);
+          assert.equal(descriptor.enumerable, false);
+          assert.equal(descriptor.configurable, false);
+        } finally {
+          callback.release();
+        }
+      }
+    });
+  }
+
+  for (const binding of ["address", "library"]) {
+    it(`${binding} callers preserve original hook arguments and asynchronous results`, async function () {
+      const type = c.CFUNCTYPE(c.c_int32, c.c_int32);
+      const fn = type(binding === "address" ? lib.symbol("fixture_scalar_i32") : ["fixture_scalar_i32", lib]);
+      assert.equal(fn(-7), -7);
+      assert.equal(await fn.callAsync(-7), -7);
+      assert.throws(() => fn(), /Expected 1 arguments, got 0/);
+      const value = new c.c_int32(-7);
+      fn.errcheck = (result, invoked, args) => {
+        assert.equal(invoked, fn);
+        assert.ok(Array.isArray(args));
+        assert.equal(args.length, 1);
+        assert.equal(args[0], value);
+        return result + 1;
+      };
+      assert.equal(fn(value), -6);
+      assert.equal(await fn.callAsync(value), -6);
+      fn.errcheck = null;
+      assert.equal(fn(-7), -7);
+    });
+  }
+
+  it("prototype callers preserve extra arguments for real variadic signatures", function () {
+    const sum = c.CFUNCTYPE(c.c_int32, c.c_void_p, c.c_int32)(["fixture_variadic_sum", lib]);
+    assert.equal(sum(null, 0), 0);
+    assert.equal(sum(null, 3, 7, 8, 9), 24);
+    assert.equal(sum(null, 1, -7), -7);
+    assert.throws(() => sum(null), /Expected 2 arguments, got 1/);
+  });
+
   it("captures retval hooks for each binding, not once for the cached type", async function () {
     class Result extends c.c_int32 {
       static _check_retval_(value) {

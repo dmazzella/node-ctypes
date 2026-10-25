@@ -135,6 +135,45 @@ describe("Call conversions (Python ctypes parity)", function () {
       assert.ok(strcmp("z".repeat(700), "y".repeat(90000)) > 0);
     });
 
+    it("repeatedly grows and reuses storage for UTF-8 strings and embedded NULs", function () {
+      const strlen = libc.func("strlen", ctypes.c_size_t, [ctypes.c_char_p]);
+      const strcmp = libc.func("strcmp", ctypes.c_int32, [ctypes.c_char_p, ctypes.c_char_p]);
+      for (const length of [1020, 4096, 90000, 700, 8192, 513]) {
+        const text = "\u{1f642}".repeat(length) + "\ud800";
+        assert.strictEqual(strlen(text), BigInt(Buffer.byteLength(text)));
+        assert.strictEqual(strlen(`${text}\0ignored`), BigInt(Buffer.byteLength(text)));
+        assert.strictEqual(strcmp(text, text), 0);
+        assert.ok(strcmp(`${text}a`, `${text}b`) < 0);
+      }
+    });
+
+    it("reuses the same function after argument conversion fails", function () {
+      const strcmp = libc.func("strcmp", ctypes.c_int32, [ctypes.c_char_p, ctypes.c_char_p]);
+      assert.strictEqual(strcmp("x".repeat(3000), "x".repeat(3000)), 0);
+      assert.throws(() => strcmp("q".repeat(90000), {}));
+      assert.strictEqual(strcmp("é".repeat(700), "é".repeat(700)), 0);
+      assert.ok(strcmp("a".repeat(8192), "b".repeat(8192)) < 0);
+    });
+
+    it("handles repeated multi-megabyte strings followed by shorter values", function () {
+      const strlen = libc.func("strlen", ctypes.c_size_t, [ctypes.c_char_p]);
+      for (const length of [9 * 1024 * 1024, 9 * 1024 * 1024 - 1, 11 * 1024 * 1024, 700, 9 * 1024 * 1024]) {
+        assert.strictEqual(strlen("x".repeat(length)), BigInt(length));
+      }
+    });
+
+    it("preserves wide-string alignment between heap-encoded UTF-8 arguments", { skip: !fixtureAvailable && "native fixture not built" }, async function () {
+      const lengths = fixture.func("fixture_mixed_string_lengths", ctypes.c_size_t, [ctypes.c_char_p, ctypes.c_wchar_p, ctypes.c_char_p]);
+      for (const count of [1000, 9000, 700]) {
+        const first = "é".repeat(count) + "a";
+        const middle = "中".repeat(700);
+        const last = "\u{1f642}".repeat(count);
+        const expected = BigInt(Buffer.byteLength(first) + middle.length + Buffer.byteLength(last));
+        assert.strictEqual(lengths(first, middle, last), expected);
+        assert.strictEqual(await lengths.callAsync(first, middle, last), expected);
+      }
+    });
+
     it("call without strings after a call that failed mid-marshalling", function () {
       const strcmp = libc.func("strcmp", ctypes.c_int32, [ctypes.c_char_p, ctypes.c_char_p]);
       const abs = libc.func("abs", ctypes.c_int32, [ctypes.c_int32]);

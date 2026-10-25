@@ -43,6 +43,46 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
   const invoke = (fn, kind, ...args) => (kind === "raw" ? fn.call(...args) : fn(...args));
 
   for (const kind of ["func", "attribute", "prototype", "raw"]) {
+    if (kind !== "raw") {
+      it(`${kind}: owner probes do not resnapshot hooks or run twice`, function () {
+        const fn = bind(lib, kind, c.c_size_t, [c.c_void_p], "fixture_address");
+        const buffer = Buffer.alloc(4);
+        const address = c.addressof(buffer);
+        const prototype = Object.getPrototypeOf(buffer);
+        let probes = 0;
+        const next = (result, invoked, args) => {
+          assert.equal(invoked, fn);
+          assert.ok(Array.isArray(args));
+          assert.equal(args[0], buffer);
+          return result + 1n;
+        };
+        Object.setPrototypeOf(
+          buffer,
+          new Proxy(prototype, {
+            has(target, prop) {
+              if (prop === "_buffer") {
+                probes++;
+                fn.errcheck = next;
+                return true;
+              }
+              return Reflect.has(target, prop);
+            },
+          }),
+        );
+        fn.errcheck = null;
+        try {
+          assert.equal(fn(buffer), address, "a hook added by an owner probe starts with the next call");
+          assert.equal(probes, 1);
+          probes = 0;
+          assert.equal(fn(buffer), address + 1n);
+          assert.equal(probes, 1);
+        } finally {
+          fn.errcheck = null;
+          Object.setPrototypeOf(buffer, prototype);
+        }
+      });
+    }
+
     it(`${kind}: an abandoned self-referencing hook does not retain the function or library`, async function () {
       function abandon() {
         const library = new c.CDLL(fixture);

@@ -916,7 +916,16 @@ variadic calls and async calls with 1/8 calls in flight. Cases without an
 equivalent documented node:ffi API are listed as **not compared**, not
 emulated with a different native signature.
 
+The `CFUNCTYPE` rows measure calls through an already-bound node-ctypes
+prototype, against an independently bound competitor function with the same
+C signature. Bindings are separate to avoid sharing optimization feedback
+with the direct-call rows. These cases do not include prototype construction
+or callback registration.
+
 Both sides call the same C fixture and verify results before/after timing.
+String contents are encoded on every call; node-ctypes reuses scratch storage,
+not previously encoded strings. Measurements describe warmed repeated calls,
+not cold-start allocation costs.
 String lengths are compared as Numbers, including conversion where the API
 returns BigInt; wide integers are BigInt in both APIs. Structures are plain
 objects. Async times include scheduling and are reported per completed call,

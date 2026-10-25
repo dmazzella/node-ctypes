@@ -89,6 +89,56 @@ describe("native exact-call and closure ABI", { skip: !existsSync(fixture) && `$
   }
 
   for (const mode of ["ordinary", "thread-safe", "worker"]) {
+    it(`${mode} callbacks preserve arity, receiver and C-data result conversion`, async function () {
+      for (const values of [[], [3], [3, 4], [3, 4, 5], [1, 2, 3, 4, 5, 6, 7, 8, 9]]) {
+        const types = values.map(() => c.c_int32);
+        const make = mode === "ordinary" ? c.callback : c.threadSafeCallback;
+        const handler = function (...args) {
+          assert.equal(this, undefined);
+          assert.deepEqual(args, values);
+          return new c.c_int32(args.reduce((sum, value) => sum + value, 0));
+        };
+        handler.call = () => 99;
+        handler.apply = function (receiver, args) {
+          assert.equal(this, handler);
+          assert.ok(Array.isArray(args));
+          return Reflect.apply(handler, receiver, args);
+        };
+        const callback = make(handler, c.c_int32, types);
+        const fn = c.CFUNCTYPE(c.c_int32, ...types)(callback.pointer);
+        try {
+          assert.equal(
+            mode === "worker" ? await fn.callAsync(...values) : fn(...values),
+            values.reduce((sum, value) => sum + value, 0),
+          );
+        } finally {
+          callback.release();
+        }
+      }
+    });
+
+    it(`${mode} callbacks retain fallback diagnostics for errors without a message`, async function () {
+      const make = mode === "ordinary" ? c.callback : c.threadSafeCallback;
+      const callback = make(
+        () => {
+          throw new Error();
+        },
+        c.c_int8,
+        [c.c_int8],
+      );
+      const fn = lib.func("fixture_callback_i8", c.c_int8, [c.c_void_p, c.c_int8]);
+      const errors = [];
+      callback._callback.setErrorHandler((message) => errors.push(message));
+      const expected = mode === "ordinary" ? "Unknown error in callback" : mode === "worker" ? "Unknown error in thread-safe callback (external thread)" : "Unknown error in thread-safe callback";
+      try {
+        assert.equal(mode === "worker" ? await fn.callAsync(callback, 7) : fn(callback, 7), 0);
+        assert.equal(callback._callback.getLastError(), expected);
+        assert.deepEqual(errors, [expected]);
+      } finally {
+        callback.release();
+      }
+    });
+
     it(`${mode} callback return conversion failures zero the result and retain diagnostics`, async function () {
       const make = mode === "ordinary" ? c.callback : c.threadSafeCallback;
       const callback = make(() => function invalidCallbackResult() {}, c.c_uint16, [c.c_uint16]);

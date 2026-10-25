@@ -176,8 +176,11 @@ void CallbackHandler(ffi_cif* cif, void* ret, void** args, void* user_data) {
   }
 
   Napi::Value result;
-  std::string error_msg = "Unknown error in callback";
+  std::string error_msg;
   if (!CallJSCallback(env, data->js_function_ref.Value(), cif->nargs, js_args, result, error_msg)) {
+    if (error_msg.empty()) {
+      error_msg = "Unknown error in callback";
+    }
     // Salva l'ultimo errore
     {
       std::lock_guard<std::mutex> lock(data->error_mutex);
@@ -408,8 +411,11 @@ void InvokeThreadSafeCallback(Napi::Env env,
     }
 
     Napi::Value result;
-    std::string error_msg = default_error;
+    std::string error_msg;
     if (!CallJSCallback(env, fn, nargs, js_args, result, error_msg)) {
+      if (error_msg.empty()) {
+        error_msg = default_error;
+      }
       RecordThreadSafeError(data, error_msg);
       if (!data->error_handler_ref.IsEmpty()) {
         try {
