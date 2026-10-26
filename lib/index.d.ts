@@ -134,7 +134,7 @@ export type FFIType = AnyType | StructureClass | PointerTypeDef | ArrayTypeDef |
  * @example
  * ```javascript
  * import { Version } from 'node-ctypes';
- * console.log(Version.toString());  // "2.4.0"
+ * console.log(Version.toString());  // "2.5.0"
  * ```
  *
  * @category Library Loading

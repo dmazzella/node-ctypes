@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-10-26
+
 ### Fixed
 
 - **Portable CI validation**: large BigInt-to-float conversion no longer requires
@@ -972,7 +974,8 @@ It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-
 
 Initial releases.
 
-[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.4.0...HEAD
+[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.5.0...HEAD
+[2.5.0]: https://github.com/dmazzella/node-ctypes/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/dmazzella/node-ctypes/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/dmazzella/node-ctypes/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/dmazzella/node-ctypes/compare/v2.1.1...v2.2.0
