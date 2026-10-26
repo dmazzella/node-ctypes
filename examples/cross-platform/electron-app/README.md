@@ -95,7 +95,7 @@ Build this local example on the target platform; copying a macOS ARM64 binary
 into an x64/Windows/Linux package is not cross-compilation. Other native
 dependencies added later may have different rebuild requirements.
 
-## Verified locally
+## Validation
 
 On macOS ARM64, the example was exercised with:
 
@@ -112,5 +112,7 @@ native/main PID comparison, automatic one-second React updates and renderer
 isolation checks. The same addon built for Node was used without an
 Electron-specific rebuild.
 
-Windows/Linux implementations are included but still require native validation
-on those systems. No Windows/Linux success is inferred from the macOS run.
+Windows was also tested successfully by the project maintainer. The detailed
+checks above refer to macOS only.
+
+The Linux implementation is included but still requires native validation.
