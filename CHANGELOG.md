@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Electron + React example**: a real native system clock and process-ID check
+  in `examples/cross-platform/electron-app`, with node-ctypes confined to the main process,
+  typed sandboxed IPC and no renderer Node polyfill. Native `malloc`/clock/view/
+  `free` reads exercise automatic synchronized mirrors when Electron disables
+  external buffers. Local dependency packaging keeps the addon outside ASAR;
+  real macOS ARM64 development and standalone packaged-app checks passed without
+  an Electron-specific addon rebuild.
+
 ## [2.5.0] - 2026-10-26
 
 ### Fixed

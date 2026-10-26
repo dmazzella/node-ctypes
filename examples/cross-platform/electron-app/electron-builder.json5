@@ -1,0 +1,55 @@
+// @see - https://www.electron.build/configuration/configuration
+{
+  $schema: "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  appId: "io.github.dmazzella.node-ctypes-example",
+  asar: true,
+  asarUnpack: ["**/*.node"],
+  npmRebuild: false,
+  productName: "node-ctypes Electron Example",
+  directories: {
+    output: "release/${version}",
+  },
+  files: [
+    "dist",
+    "dist-electron",
+    "!node_modules/node-ctypes/**/*",
+    {
+      from: "../../..",
+      to: "node_modules/node-ctypes",
+      filter: ["package.json", "LICENSE", "lib/**/*", "third-party/libffi/LICENSE"],
+    },
+    {
+      from: "../../../node_modules/node-addon-api",
+      to: "node_modules/node-ctypes/third-party/node-addon-api",
+      filter: ["LICENSE.md"],
+    },
+  ],
+  extraResources: [
+    {
+      from: "../../../build/Release/ctypes.node",
+      to: "app.asar.unpacked/node_modules/node-ctypes/build/Release/ctypes.node",
+    },
+  ],
+  mac: {
+    target: ["dmg"],
+    artifactName: "${productName}-Mac-${version}-Installer.${ext}",
+  },
+  win: {
+    target: [
+      {
+        target: "nsis",
+      },
+    ],
+    artifactName: "${productName}-Windows-${version}-Setup.${ext}",
+  },
+  nsis: {
+    oneClick: false,
+    perMachine: false,
+    allowToChangeInstallationDirectory: true,
+    deleteAppDataOnUninstall: false,
+  },
+  linux: {
+    target: ["AppImage"],
+    artifactName: "${productName}-Linux-${version}.${ext}",
+  },
+}

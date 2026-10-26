@@ -842,6 +842,7 @@ needs these changes:
 
 Each example in `examples/` has its own README; see the [index](examples/README.md).
 
+- [Electron + React](examples/cross-platform/electron-app/README.md) — a native system clock through a sandboxed preload bridge, synchronized C-memory views and a packaged ASAR application
 - [Embedded Python](examples/cross-platform/python/README.md) — CPython through its C API: code, modules, callbacks, JavaScript objects by reference, shared memory, threads, asyncio and cancellation (Windows, macOS, Linux)
 - [Smart card (PC/SC)](examples/cross-platform/smartcard/README.md) — `winscard` on Windows, `PCSC.framework` on macOS, `libpcsclite` on Linux
 - [Accessibility](examples/macos/accessibility/README.md) — macOS UI automation with the Accessibility API
