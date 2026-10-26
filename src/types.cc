@@ -1,6 +1,7 @@
 #include "types.h"
 
-#include <charconv>
+#include <cerrno>
+#include <cstdlib>
 
 namespace ctypes {
 CType CTypeFromJS(const Napi::Value& value) {
@@ -105,13 +106,18 @@ double RealFromJS(const Napi::Value& value) {
       if (lossless) {
         return static_cast<double>(unsigned_value);
       }
+      // Integer-only decimal digits do not depend on the locale's decimal separator.
       const std::string digits = value.ToString().Utf8Value();
-      double result;
-      const auto [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), result);
-      if (error == std::errc::result_out_of_range) {
+      char* end = nullptr;
+      const int saved_errno = errno;
+      errno = 0;
+      const double result = std::strtod(digits.c_str(), &end);
+      const int parse_errno = errno;
+      errno = saved_errno;
+      if (parse_errno == ERANGE || !std::isfinite(result)) {
         throw Napi::RangeError::New(value.Env(), "int too large to convert to float");
       }
-      if (error != std::errc{} || end != digits.data() + digits.size()) {
+      if (end == digits.c_str() || end != digits.c_str() + digits.size()) {
         throw Napi::TypeError::New(value.Env(), "cannot convert bigint to float");
       }
       return result;

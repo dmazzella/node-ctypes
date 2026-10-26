@@ -203,7 +203,8 @@ class TestPrimitiveConversions(unittest.TestCase):
         values = [2**54 + 2, 2**54 + 6, 2**64 + 2048, 2**64 + 6144,
                   2**128 - 2**104, 2**128 - 2**103, 2**128 - 2**103 - 2**75,
                   2**128 - 2**74, 2**128 + 2**75, 2**512 + 1,
-                  2**1023, 2**1024 - 2**971]
+                  2**1023, 2**1024 - 2**971, 2**1024 - 2**971 + 1,
+                  2**1024 - 2**970 - 1]
         for name, kind in [("float", c.c_float), ("double", c.c_double)]:
             class Record(c.Structure):
                 _fields_ = [("value", kind)]
@@ -233,7 +234,8 @@ class TestPrimitiveConversions(unittest.TestCase):
             function = getattr(self.library, f"fixture_scalar_{name}")
             function.argtypes = [kind]
             function.restype = kind
-            for value in [2**1024 - 2**970, 2**1024, -(2**1024 - 2**970), -(2**1024)]:
+            for value in [2**1024 - 2**970, 2**1024 - 2**970 + 1, 2**1024,
+                          -(2**1024 - 2**970), -(2**1024 - 2**970 + 1), -(2**1024)]:
                 with self.assertRaisesRegex(OverflowError, "int too large to convert to float"):
                     kind(value)
                 with self.assertRaises(OverflowError):

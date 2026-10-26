@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Portable CI validation**: large BigInt-to-float conversion no longer requires
+  the floating-point `from_chars` overload introduced in macOS 26, preserving
+  the macOS 13.5 deployment target and integer rounding/overflow checks. Paired
+  Linux lookup tests accept musl's `libm` alias to `libc` and verify the resolved
+  libraries by calling their correctly declared functions. Windows references
+  resolve the explicit `msvcrt` library and accept absolute DLL paths instead of
+  assuming CPython implements Node's `"c"` alias or returns bare file names.
+
 ### Changed
 
 - **Parity tests**: migrate the complete former `common/` and `windows/`

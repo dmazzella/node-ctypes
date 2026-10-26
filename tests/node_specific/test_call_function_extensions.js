@@ -331,8 +331,12 @@ describe("find_library", function () {
   });
 
   it("CDLL(find_library('c')) supports explicit close", function () {
-    const lib = new CDLL(find_library("c"));
+    const name = find_library("c");
+    if (process.platform === "win32") assert.strictEqual(name, "msvcrt.dll");
+    const lib = new CDLL(name);
     assert.ok(lib);
+    const absolute = lib.func("abs", ctypes.c_int, [ctypes.c_int]);
+    assert.strictEqual(absolute(-3), 3);
     lib.close();
     assert.strictEqual(lib.loaded, false);
   });

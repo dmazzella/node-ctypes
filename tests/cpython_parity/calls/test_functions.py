@@ -2,6 +2,7 @@
 
 import ctypes as c
 from ctypes.util import find_library
+from pathlib import PureWindowsPath
 import platform
 import sys
 import unittest
@@ -247,10 +248,15 @@ class TestLibraryLoader(unittest.TestCase):
         self.assertIs(getattr(c.cdll, LIBC), library)
 
     def test_find_library_opens_libc(self):
-        name = find_library("c")
+        name = find_library("msvcrt" if sys.platform == "win32" else "c")
         self.assertIsInstance(name, str)
         self.assertTrue(name)
-        self.assertIsInstance(c.CDLL(name), c.CDLL)
+        library = c.CDLL(name)
+        self.assertIsInstance(library, c.CDLL)
+        absolute = library.abs
+        absolute.argtypes = [c.c_int]
+        absolute.restype = c.c_int
+        self.assertEqual(absolute(-3), 3)
 
 
 @unittest.skipUnless(sys.platform == "darwin", "macOS only")
@@ -267,17 +273,42 @@ class TestFindLibraryDarwin(unittest.TestCase):
 @unittest.skipUnless(sys.platform == "linux", "Linux only")
 class TestFindLibraryLinux(unittest.TestCase):
     def test_sonames(self):
-        self.assertRegex(find_library("c"), r"(^|/)libc\.so(\.\d+)*$")
-        self.assertRegex(find_library("m"), r"(^|/)libm\.so(\.\d+)*$")
+        for name, pattern, symbol, kind, value, expected in [
+            ("c", r"(^|/)libc\.so(\.\d+)*$", "abs", c.c_int, -3, 3),
+            ("m", r"(^|/)lib[cm]\.so(\.\d+)*$", "fabs", c.c_double, -1.5, 1.5),
+        ]:
+            with self.subTest(name=name):
+                resolved = find_library(name)
+                self.assertIsInstance(resolved, str)
+                self.assertRegex(resolved, pattern)
+                library = c.CDLL(resolved)
+                function = getattr(library, symbol)
+                function.argtypes = [kind]
+                function.restype = kind
+                self.assertEqual(function(value), expected)
 
 
 @unittest.skipUnless(sys.platform == "win32", "Windows only")
 class TestFindLibraryWindows(unittest.TestCase):
     def test_kernel32(self):
-        self.assertEqual(find_library("kernel32"), "kernel32.dll")
+        name = find_library("kernel32")
+        self.assertIsInstance(name, str)
+        self.assertEqual(PureWindowsPath(name).name.lower(), "kernel32.dll")
+        library = c.WinDLL(name)
+        get_process_id = library.GetCurrentProcessId
+        get_process_id.argtypes = []
+        get_process_id.restype = c.c_uint32
+        self.assertGreater(get_process_id(), 0)
 
     def test_c_runtime(self):
-        self.assertEqual(find_library("c"), "msvcrt.dll")
+        name = find_library("msvcrt")
+        self.assertIsInstance(name, str)
+        self.assertEqual(PureWindowsPath(name).name.lower(), "msvcrt.dll")
+        library = c.CDLL(name)
+        absolute = library.abs
+        absolute.argtypes = [c.c_int]
+        absolute.restype = c.c_int
+        self.assertEqual(absolute(-7), 7)
 
     def test_windll_namespace(self):
         get_tick_count = c.windll.kernel32.GetTickCount

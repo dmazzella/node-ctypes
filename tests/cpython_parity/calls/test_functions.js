@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import { beforeEach, describe, it } from "node:test";
 import * as c from "node-ctypes";
 import { LIBC } from "../_support.js";
@@ -267,10 +268,19 @@ describe("TestLibraryLoader", function () {
   });
 
   it("test_find_library_opens_libc", function () {
-    const name = c.find_library("c");
+    const name = c.find_library(process.platform === "win32" ? "msvcrt" : "c");
     assert.equal(typeof name, "string");
     assert.ok(name);
-    assert.ok(new c.CDLL(name) instanceof c.CDLL);
+    const library = new c.CDLL(name);
+    try {
+      assert.ok(library instanceof c.CDLL);
+      const absolute = library.abs;
+      absolute.argtypes = [c.c_int];
+      absolute.restype = c.c_int;
+      assert.equal(absolute(-3), 3);
+    } finally {
+      library.close();
+    }
   });
 });
 
@@ -284,18 +294,55 @@ describe("TestFindLibraryDarwin", { skip: process.platform !== "darwin" && "macO
 
 describe("TestFindLibraryLinux", { skip: process.platform !== "linux" && "Linux only" }, function () {
   it("test_sonames", function () {
-    assert.match(c.find_library("c"), /(^|\/)libc\.so(\.\d+)*$/);
-    assert.match(c.find_library("m"), /(^|\/)libm\.so(\.\d+)*$/);
+    for (const [name, pattern, symbol, kind, value, expected] of [
+      ["c", /(^|\/)libc\.so(\.\d+)*$/, "abs", c.c_int, -3, 3],
+      ["m", /(^|\/)lib[cm]\.so(\.\d+)*$/, "fabs", c.c_double, -1.5, 1.5],
+    ]) {
+      const resolved = c.find_library(name);
+      assert.equal(typeof resolved, "string");
+      assert.match(resolved, pattern);
+      const library = new c.CDLL(resolved);
+      try {
+        const fn = library[symbol];
+        fn.argtypes = [kind];
+        fn.restype = kind;
+        assert.equal(fn(value), expected);
+      } finally {
+        library.close();
+      }
+    }
   });
 });
 
 describe("TestFindLibraryWindows", { skip: process.platform !== "win32" && "Windows only" }, function () {
   it("test_kernel32", function () {
-    assert.equal(c.find_library("kernel32"), "kernel32.dll");
+    const name = c.find_library("kernel32");
+    assert.equal(typeof name, "string");
+    assert.equal(path.win32.basename(name).toLowerCase(), "kernel32.dll");
+    const library = new c.WinDLL(name);
+    try {
+      const get_process_id = library.GetCurrentProcessId;
+      get_process_id.argtypes = [];
+      get_process_id.restype = c.c_uint32;
+      assert.ok(get_process_id() > 0);
+    } finally {
+      library.close();
+    }
   });
 
   it("test_c_runtime", function () {
-    assert.equal(c.find_library("c"), "msvcrt.dll");
+    const name = c.find_library("msvcrt");
+    assert.equal(typeof name, "string");
+    assert.equal(path.win32.basename(name).toLowerCase(), "msvcrt.dll");
+    const library = new c.CDLL(name);
+    try {
+      const absolute = library.abs;
+      absolute.argtypes = [c.c_int];
+      absolute.restype = c.c_int;
+      assert.equal(absolute(-7), 7);
+    } finally {
+      library.close();
+    }
   });
 
   it("test_windll_namespace", function () {

@@ -290,6 +290,8 @@ describe("TestPrimitiveConversions", function () {
       2n ** 512n + 1n,
       2n ** 1023n,
       2n ** 1024n - 2n ** 971n,
+      2n ** 1024n - 2n ** 971n + 1n,
+      2n ** 1024n - 2n ** 970n - 1n,
     ];
     for (const [name, Type] of [
       ["float", c.c_float],
@@ -334,7 +336,7 @@ describe("TestPrimitiveConversions", function () {
       const fn = library[`fixture_scalar_${name}`];
       fn.argtypes = [Type];
       fn.restype = Type;
-      for (const value of [2n ** 1024n - 2n ** 970n, 2n ** 1024n, -(2n ** 1024n - 2n ** 970n), -(2n ** 1024n)]) {
+      for (const value of [2n ** 1024n - 2n ** 970n, 2n ** 1024n - 2n ** 970n + 1n, 2n ** 1024n, -(2n ** 1024n - 2n ** 970n), -(2n ** 1024n - 2n ** 970n + 1n), -(2n ** 1024n)]) {
         assert.throws(() => new Type(value), { name: "RangeError", message: "int too large to convert to float" });
         assert.throws(() => {
           scalar.value = value;
