@@ -236,6 +236,9 @@ that cannot be converted (a plain JS function, an object) raise
 Declared `POINTER(T)` parameters reject incompatible ctypes instances,
 arrays and pointer types before entering C. Compatible subclasses and arrays
 are accepted, and a matching scalar/structure is passed by reference.
+These implicit scalar/array/NULL conversions apply to direct arguments only.
+To adapt one of these values through `_as_parameter_`, return an explicit
+compatible pointer or `byref` value instead, as in CPython.
 An explicit `cast()` changes the pointer type. Raw addresses and raw
 Buffer/TypedArray/ArrayBuffer memory remain node-ctypes extensions; use
 `c_void_p` for portable raw-address code.
@@ -718,6 +721,11 @@ Plus the Win32 types, structures and pointer types of `ctypes.wintypes` under `w
 - `create_string_buffer(init, size?)` / `c_buffer` / `create_unicode_buffer(init, size?)` — with `.value` (and `.raw`)
 - `string_at(addr, size?)` / `wstring_at(addr, size?)` — exactly `size` units, or up to the NUL
 
+With an explicit byte count, `string_at` returns a lossless Latin1 string:
+`Buffer.from(string_at(addr, n), "latin1")` recovers all `n` original bytes,
+including embedded NUL and invalid UTF-8. Without a count it retains the
+UTF-8 text representation. `wstring_at` counts native wide-character units.
+
 ### Error slots
 
 - `get_errno()` / `set_errno(v)`
@@ -849,8 +857,18 @@ Each example in `examples/` has its own README; see the [index](examples/README.
 
 From the repository root, `npm --prefix tests test` first builds a small C library (`tests/fixtures/`, into
 `build/fixture/`) used by the tests of structures by value, array parameters
-and reentrant calls; `npm run build:test-fixture` builds it alone. Python
-twins of the tests (`tests/common/*.py`) load the same library.
+and reentrant calls; `npm run build:test-fixture` builds it alone. Matched
+Python/JavaScript contracts live under `tests/cpython_parity/`, divided by domain,
+and load the same library. Node-specific async, representation and GC checks
+live under `tests/node_specific/`; genuine Python-only scheduling checks live
+under `tests/python_specific/`. The former `common/` and `windows/` suites have
+been migrated into these domains.
+
+Paired JavaScript uses the Python-shaped API: `Structure`/`Union` classes,
+`ARRAY`, library attributes with `argtypes`/`restype`, and `CFUNCTYPE` bindings.
+The structural guard checks neighboring files and matching class/method IDs
+using the existing TypeScript parser and Python AST; runtime assertions remain
+independent checks against CPython, not a claim based on file names alone.
 
 ```bash
 npm install
@@ -858,13 +876,16 @@ npm run build
 npm --prefix tests install
 npm --prefix tests test                              # functional/parity tests
 NODE_CTYPES_NO_EXTERNAL_BUFFERS=1 npm --prefix tests test  # mirrored native memory
+npm --prefix tests run test:parity                    # matched CPython and JS contracts
+npm --prefix tests run test:parity:check              # paired file/case/discovery/style guard
+npm --prefix tests run test:python                    # all Python references
 npm run test:types                                   # TypeScript declarations
 npm run docs                                         # TypeDoc API site in docs/
 npm run docs:serve                                   # preview
 ```
 
-See [tests/common/](https://github.com/dmazzella/node-ctypes/tree/main/tests/common) for runnable examples alongside
-parallel Python ctypes implementations.
+See the [test suite guide](tests/README.md) for paired-case conventions,
+runtime differences and focused commands.
 
 ### Performance comparisons
 

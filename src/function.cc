@@ -802,8 +802,7 @@ CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalPrimitive(const Napi::Value& val, 
     case CType::CTYPES_UINT64:
     case CType::CTYPES_SIZE_T:
     case CType::CTYPES_SSIZE_T: {
-      // number con una sola chiamata; poi una sola Value::Type() invece di
-      // IsBigInt/IsNull/IsUndefined in cascata (ognuna è una napi_typeof).
+      // number con una sola chiamata; poi una sola Value::Type() per gli altri.
       int64_t v = 0;
       if (TryInt64Number(val, v)) [[likely]] {
         memcpy(slot, &v, sizeof(v));
@@ -818,12 +817,8 @@ CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalPrimitive(const Napi::Value& val, 
         case napi_boolean:
           v = val.As<Napi::Boolean>().Value() ? 1 : 0;
           break;
-        // Estensioni node-ctypes per gli interi a 64 bit e pointer-sized:
-        // null/undefined valgono 0, Buffer/ArrayBuffer il loro indirizzo.
-        case napi_null:
-        case napi_undefined:
-          break;
         case napi_object:
+          // Estensione node-ctypes: Buffer/ArrayBuffer passano il loro indirizzo.
           if (val.IsBuffer()) {
             v = static_cast<int64_t>(reinterpret_cast<intptr_t>(val.As<Napi::Buffer<uint8_t>>().Data()));
             break;

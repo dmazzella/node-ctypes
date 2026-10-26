@@ -51,6 +51,7 @@ import {
   callback,
   type ErrcheckCallback,
   type PointerInstance,
+  type PointerTypeDef,
   type SimpleCDataInstance,
   wintypes,
 } from "../../lib/index.js";
@@ -138,12 +139,26 @@ check(expectType<bigint>()(pointerThreadCallback._callback.getPointer()));
 pointerThreadCallback.release();
 const callbackFactory = CFUNCTYPE(c_int32, POINTER(c_int32));
 const factoryCallback = callbackFactory((value) => (value === null ? 0 : value[0]));
+check(expectType<number>()(factoryCallback(null)));
+check(expectType<bigint>()(factoryCallback.pointer));
+check(expectType<ErrcheckCallback | null>()(factoryCallback.errcheck));
+// @ts-expect-error callable callbacks preserve their declared pointer arguments
+factoryCallback("bad");
+const castCallback = cast(factoryCallback, callbackFactory);
+check(expectType<number>()(castCallback(null)));
+check(expectType<bigint | null>()(cast(factoryCallback, c_void_p).value));
 factoryCallback.release();
 const typedPrototype = callbackFactory(1n);
 check(expectType<number>()(typedPrototype(null)));
 check(expectType<Promise<number>>()(typedPrototype.callAsync(null)));
 // @ts-expect-error typed prototype arguments are not strings
 typedPrototype("bad");
+const castNative = cast(abs, CFUNCTYPE(c_int32, c_int32));
+check(expectType<number>()(castNative(-7)));
+check(expectType<Promise<number>>()(castNative.callAsync(-7)));
+check(expectType<bigint | null>()(cast(abs, c_void_p).value));
+// @ts-expect-error casting preserves the target prototype's declared arguments
+castNative("bad");
 // @ts-expect-error scalar callbacks cannot return strings
 callback(() => "bad", c_int32, []);
 // @ts-expect-error aggregate returns are unsupported by callbacks
@@ -157,6 +172,23 @@ check(expectType<Buffer>()(byref(new c_int32())));
 const offsetReference = byref(new c_int32(), 4);
 void offsetReference;
 check(expectType<PointerInstance<typeof c_int32>>()(cast(offsetReference, POINTER(c_int32))));
+const typedDoublePointer = pointer(POINTER(c_int32).fromBuffer(Buffer.alloc(4)));
+check(expectType<PointerInstance<PointerTypeDef<typeof c_int32>>>()(typedDoublePointer));
+check(expectType<PointerInstance<typeof c_int32> | null>()(typedDoublePointer[0]));
+check(expectType<PointerTypeDef<typeof c_int32>>()(typedDoublePointer._pointerType._pointerTo));
+check(expectType<typeof c_int32>()(typedDoublePointer._pointerType._type_._type_));
+const scalarPointerType = POINTER(c_int32);
+check(expectType<typeof c_int32>()(scalarPointerType._pointerTo));
+check(expectType<typeof c_int32>()(scalarPointerType._type_));
+const lazyScalarPointerType = POINTER(() => c_int32);
+check(expectType<PointerTypeDef<typeof c_int32>>()(lazyScalarPointerType));
+check(expectType<typeof c_int32>()(lazyScalarPointerType._type_));
+const lazyStructurePointerType = POINTER(() => Point);
+check(expectType<PointerTypeDef<typeof Point>>()(lazyStructurePointerType));
+check(expectType<typeof Point>()(lazyStructurePointerType._pointerTo));
+check(expectType<typeof Point>()(lazyStructurePointerType._type_));
+// @ts-expect-error the resolved pointee alias remains readonly
+scalarPointerType._type_ = c_int32;
 const nativeType = new StructType({ union: false, alignment: 4 }).addField("value", CType.INT32);
 check(expectType<Buffer>()(nativeType.create({ value: 1 })._buffer));
 new ArrayType(nativeType, 2);

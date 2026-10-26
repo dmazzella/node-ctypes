@@ -7,7 +7,7 @@
 .claude
 /node_modules
 /tests/python
-/tests/.pytest_cache
+.pytest_cache/
 /tests/node_modules
 /tests/benchmarks/results/
 /tests/common/__pycache__

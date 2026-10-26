@@ -117,8 +117,8 @@ jobs:
           cd tests
           npm test
 
-      # The Python twins (tests/**/test_*.py) check the reference behavior with
-      # Python ctypes; their error messages are those of Python 3.14+.
+      # Run paired parity cases and existing references with Python ctypes.
+      # Version-specific contracts use Python 3.14+.
       - name: Setup Python
         if: ${{ !matrix.container }}
         uses: actions/setup-python@v6
@@ -257,10 +257,9 @@ jobs:
         with:
           python-version: "3.15"
 
-      - name: Run focused Python 3.15 reference tests
+      - name: Run Python 3.15 parity cases and reference tests
         if: matrix.artifact == 'linux-x64'
-        working-directory: tests/common
-        run: python -B -m unittest test_primitive_conversions test_result_lifetime test_scalar_protocols test_descriptor_finalization test_callbacks
+        run: npm --prefix tests run test:python
 
   publish:
     needs: [package, runtime]

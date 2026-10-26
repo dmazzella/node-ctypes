@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Parity tests**: migrate the complete former `common/` and `windows/`
+  suites into domain-based `cpython_parity/` pairs, `node_specific/` regressions
+  and genuine `python_specific/` scheduling checks. Paired JS uses Python-shaped
+  classes, `ARRAY`, attribute bindings and `CFUNCTYPE`, with corresponding
+  class/method IDs, input matrices and actual C signatures. A structural AST
+  guard rejects one-sided files/cases, missing discovery markers and convenience
+  APIs in the canonical pairs without adding dependencies or replacing either
+  test runner. Python 3.15 CI now runs all references.
+- **Pointer definitions**: expose Python's `_type_` metadata and defer incomplete
+  aggregate pointee layout until an actual memory access, so forward-bound
+  `_fields_` and self-referential types do not need manual cache invalidation.
+- **Scalar and field conversion**: accept legitimate empty/whitespace field
+  names without corrupting constructor/prototype metadata, and convert full-width
+  BigInts to floating-point values with CPython rounding and overflow behavior
+  rather than an artificial 64-bit integer limit.
+- **Function protocols**: `CFUNCTYPE` callbacks are callable, native functions
+  can be cast through the public API, and cached prototype conversion/retval
+  hooks are captured at type creation. Pointer-to-pointer values use the pointer
+  slot rather than the pointee bytes. Declared integer arguments reject nullish
+  values, and string-pointer arguments require strings, compatible C-data or an
+  explicit cast instead of an untyped integer address.
+- **Raw memory and finalization**: explicitly sized `string_at` preserves all
+  bytes, including invalid UTF-8 and embedded NUL, as a Latin1 string; unsized
+  textual reads retain their UTF-8 representation. Address conversion errors
+  retain their causes through `ArgumentError`. Materialized aggregate layouts
+  reject `_fields_` reassignment, including previously incomplete types.
+- **Typed pointer adapters**: match CPython's distinction between direct and
+  adapted arguments. Automatic by-reference conversion, array decay and NULL
+  acceptance no longer apply to scalar/array/null `_as_parameter_` results for
+  `POINTER(T)`; explicit compatible pointers and `byref` results remain accepted.
 - **Parameter resolution**: terminal primitive `_as_parameter_` results avoid
   allocating a cycle-detection Set. Recursive conversion follows CPython:
   stateful getters may revisit an object before terminating, and the fixed

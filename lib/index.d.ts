@@ -639,6 +639,12 @@ export interface ThreadSafeCallbackWrapper extends CallbackWrapper {
 }
 
 /**
+ * A CFUNCTYPE/WINFUNCTYPE callback that is also a typed native caller.
+ * @category Callbacks
+ */
+export type CallableCallback<TArgs extends readonly FFIType[], TRet extends FFIType | null> = TypedFFIFunction<TArgs, TRet> & CallbackWrapper;
+
+/**
  * Native callback class for main-thread callbacks.
  * @category Callbacks
  */
@@ -1197,8 +1203,10 @@ export interface PointerInstance<T = any> {
  * @category Pointers
  */
 export interface PointerTypeDef<T = any> {
-  /** The type this pointer points to. */
-  readonly _pointerTo: AnyType | StructDef | StructureClass | PointerTypeDef;
+  /** The resolved base type, including for lazy pointer declarations. */
+  readonly _pointerTo: T;
+  /** Python ctypes alias for the resolved base type. */
+  readonly _type_: T;
   /** Size of the pointed-to type. */
   readonly _baseSize: number;
   /** Pointer size (always 8 on 64-bit). */
@@ -1640,12 +1648,12 @@ export interface FuncPtrFactory<TRet extends FFIType | null = FFIType | null, TA
   (address: bigint | number): TypedFFIFunction<TArgs, TRet>;
   new (address: bigint | number): TypedFFIFunction<TArgs, TRet>;
   /**
-   * Call with a JS function to produce a C-callable callback closure, usable
-   * as argument or struct field of this type. Keep it referenced while C may
+   * Call with a JS function to produce a directly callable, typed C callback,
+   * usable as an argument or struct field. Keep it referenced while C may
    * call it; `release()` frees it.
    */
-  (fn: (...args: CallbackArgs<TArgs>) => CallbackResult<TRet>): CallbackWrapper;
-  new (fn: (...args: CallbackArgs<TArgs>) => CallbackResult<TRet>): CallbackWrapper;
+  (fn: (...args: CallbackArgs<TArgs>) => CallbackResult<TRet>): CallableCallback<TArgs, TRet>;
+  new (fn: (...args: CallbackArgs<TArgs>) => CallbackResult<TRet>): CallableCallback<TArgs, TRet>;
   /**
    * Bind an exported function of a library, optionally with paramflags.
    * Python: `prototype((name, dll))` / `prototype((name, dll), paramflags)`.
@@ -2011,9 +2019,10 @@ export function byref(obj: Buffer | SimpleCDataInstance | { _buffer: Buffer }, o
  * When the target is a {@link PointerTypeDef}, returns a {@link PointerInstance} with
  * `.contents` and `[index]` access — equivalent to Python's
  * `cast(c_void_p(addr), POINTER(MyStruct))`.
+ * A {@link FuncPtrFactory} target returns a caller with that prototype.
  *
- * @param ptr - Buffer, BigInt address, number, or SimpleCData instance (e.g., `c_void_p`)
- * @param targetType - The target type (primitive, struct, or POINTER type)
+ * @param ptr - Memory, a pointer/address, or a native function/callback
+ * @param targetType - The target type (primitive, struct, POINTER or CFUNCTYPE)
  *
  * @example Cast to POINTER for typed array access
  * ```javascript
@@ -2031,8 +2040,11 @@ export function byref(obj: Buffer | SimpleCDataInstance | { _buffer: Buffer }, o
  *
  * @category Pointers
  */
-export function cast<T>(ptr: MemorySource | ArrayBuffer | ByRefAddress | null, targetType: PointerTypeDef<T>): PointerInstance<T>;
-export function cast(ptr: MemorySource | ArrayBuffer | ByRefAddress | null, targetType: AnyType | StructDef | StructureClass): any;
+type CastSource = MemorySource | ArrayBuffer | ByRefAddress | FFIFunction | CallbackWrapper | null;
+export function cast<T>(ptr: CastSource, targetType: PointerTypeDef<T>): PointerInstance<T>;
+export function cast<TRet extends FFIType | null, TArgs extends readonly FFIType[]>(ptr: CastSource, targetType: FuncPtrFactory<TRet, TArgs>): TypedFFIFunction<TArgs, TRet>;
+export function cast<T extends SimpleCDataConstructor<"pointer"> | SimpleCDataConstructor<"string"> | SimpleCDataConstructor<"wstring">>(ptr: CastSource, targetType: T): InstanceType<T>;
+export function cast(ptr: CastSource, targetType: AnyType | StructDef | StructureClass): any;
 
 /**
  * Create a pointer type for a given base type.
@@ -2091,6 +2103,7 @@ export function POINTER<T extends AnyType | StructureClass>(baseType: () => T): 
  *
  * @category Pointers
  */
+export function pointer<T>(obj: PointerInstance<T>): PointerInstance<PointerTypeDef<T>>;
 export function pointer<T extends Structure<any>>(obj: T): PointerInstance<new (...args: any[]) => T>;
 export function pointer<V>(obj: SimpleCDataInstance<V>): PointerInstance;
 export function pointer(obj: Buffer | { _buffer: Buffer }): PointerInstance;
@@ -2238,7 +2251,7 @@ export type JsFromTag<Tag extends string> = Tag extends "void"
             : Tag extends "wstring"
               ? string | null
               : Tag extends "pointer"
-                ? bigint | Buffer | null
+                ? bigint | null
                 : any;
 
 /**

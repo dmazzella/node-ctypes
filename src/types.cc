@@ -1,5 +1,7 @@
 #include "types.h"
 
+#include <charconv>
+
 namespace ctypes {
 CType CTypeFromJS(const Napi::Value& value) {
   if (!value.IsNumber()) {
@@ -103,7 +105,16 @@ double RealFromJS(const Napi::Value& value) {
       if (lossless) {
         return static_cast<double>(unsigned_value);
       }
-      throw Napi::RangeError::New(value.Env(), "BigInt out of range for a floating point argument");
+      const std::string digits = value.ToString().Utf8Value();
+      double result;
+      const auto [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), result);
+      if (error == std::errc::result_out_of_range) {
+        throw Napi::RangeError::New(value.Env(), "int too large to convert to float");
+      }
+      if (error != std::errc{} || end != digits.data() + digits.size()) {
+        throw Napi::TypeError::New(value.Env(), "cannot convert bigint to float");
+      }
+      return result;
     }
     default:
       throw Napi::TypeError::New(value.Env(), std::format("must be real number, not {}", JSTypeName(value)));
