@@ -22,6 +22,69 @@ class TestApiCompatibility(unittest.TestCase):
                 self._as_parameter_ = value
         c.c_int32.from_param(Adapter(Adapter(c.c_int32(7))))
 
+    def test_recursive_adapter_chains_above_128(self):
+        class Adapter:
+            def __init__(self, value):
+                self._as_parameter_ = value
+
+        identity = c.CFUNCTYPE(c.c_int32, c.c_int32)(lambda value: value)
+        for count in [128, 129, 256]:
+            value = 7
+            for _ in range(count):
+                value = Adapter(value)
+            with self.subTest(count=count):
+                self.assertEqual(identity(value), 7)
+
+    def test_recursive_adapter_getter_can_change(self):
+        class Adapter:
+            def __init__(self, count):
+                self.count = count
+                self.reads = 0
+
+            @property
+            def _as_parameter_(self):
+                self.reads += 1
+                return 7 if self.reads >= self.count else self
+
+        identity = c.CFUNCTYPE(c.c_int32, c.c_int32)(lambda value: value)
+        for count in [2, 3, 32, 129]:
+            value = Adapter(count)
+            with self.subTest(count=count):
+                self.assertEqual(identity(value), 7)
+                self.assertEqual(value.reads, count)
+
+    def test_unbounded_adapter_recursion_reports_an_error(self):
+        class Adapter:
+            pass
+
+        first, second = Adapter(), Adapter()
+        first._as_parameter_ = second
+        second._as_parameter_ = first
+        with self.assertRaises(RecursionError):
+            c.c_int32.from_param(first)
+        identity = c.CFUNCTYPE(c.c_int32, c.c_int32)(lambda value: value)
+        with self.assertRaises(c.ArgumentError) as raised:
+            identity(first)
+        self.assertIn("RecursionError", str(raised.exception))
+
+    def test_recursive_adapter_getter_errors(self):
+        class Adapter:
+            reads = 0
+
+            @property
+            def _as_parameter_(self):
+                self.reads += 1
+                if self.reads == 3:
+                    raise ValueError("adapter sentinel")
+                return self
+
+        identity = c.CFUNCTYPE(c.c_int32, c.c_int32)(lambda value: value)
+        value = Adapter()
+        with self.assertRaises(c.ArgumentError) as raised:
+            identity(value)
+        self.assertIn("adapter sentinel", str(raised.exception))
+        self.assertEqual(value.reads, 3)
+
     def test_scalar_buffer_bounds(self):
         for kind in [c.c_int32, c.c_uint64, c.c_double, c.c_void_p]:
             for method in ["from_buffer", "from_buffer_copy"]:

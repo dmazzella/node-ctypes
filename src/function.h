@@ -23,7 +23,6 @@ static constexpr size_t RETURN_BUFFER_SIZE = 64;
 static constexpr size_t MAX_VARIADIC_EXTRA_ARGS = 8;    // Per stack allocation
 static constexpr size_t MAX_CACHED_VARIADIC_CIFS = 16;  // Cache per pattern comuni
 static constexpr size_t SMALL_STRING_BUFFER = 1024;     // Stack buffer per stringhe piccole
-static constexpr int MAX_AS_PARAMETER_DEPTH = 100;      // Ricorsione _as_parameter_ (come CPython)
 
 // Valore restituito da libffi o dal direct invoker: byte grezzi, letti con
 // LoadAs<T> (leggere un membro non attivo di una union è indefinito in C++).

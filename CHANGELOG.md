@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Parameter resolution**: terminal primitive `_as_parameter_` results avoid
+  allocating a cycle-detection Set. Recursive conversion follows CPython:
+  stateful getters may revisit an object before terminating, and the fixed
+  128-step rejection is removed. Non-terminating recursion uses the host runtime
+  stack guard; intermediate owners stay alive and getter errors propagate unchanged.
 - **Prototype callers**: eligible synchronous prototype bindings reuse the
   fixed-arity JavaScript wrappers used by library functions. Calls needing
   owners, custom adapters, result conversion or argument-count fallback keep

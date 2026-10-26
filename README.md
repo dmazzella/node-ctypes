@@ -585,9 +585,12 @@ memory passed by value or as an integer address, including values materialized
 by getters.
 
 `_as_parameter_` chains are resolved recursively, including results of
-`from_param`, with intermediate owners retained. Cycles and chains exceeding
-128 adapter steps raise explicit argument errors, rather than overflowing
-the stack or silently passing an incorrect pointer.
+`from_param`, with intermediate owners retained. As in CPython, an adapter may
+be visited again when a stateful getter eventually returns a usable value;
+object identity alone is not rejected as a cycle, and there is no fixed
+128-step limit. Non-terminating recursion raises an argument conversion error.
+The available recursion depth and stack-error wording follow the JavaScript
+runtime, rather than CPython's runtime-specific recursion guard.
 
 This only covers the call: if C stores a pointer for later use, or returns a
 pointer into an argument's memory, keep the source object referenced for as
@@ -734,7 +737,7 @@ Plus the Win32 types, structures and pointer types of `ctypes.wintypes` under `w
 
 ## Python ctypes parity & differences
 
-### What works identically
+### Supported Python ctypes behavior
 
 Structs, unions, bit fields (`_layout_` `"gcc-sysv"` / `"ms"`), anonymous
 fields, `_pack_`, `_align_`, subclasses of structures and unions, nested layouts,

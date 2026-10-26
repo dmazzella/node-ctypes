@@ -43,7 +43,7 @@ describe("API conversion compatibility", { skip: !existsSync(fixture) && `${fixt
       assert.equal(await invoke(c.addressof(value)), c.addressof(value));
     });
 
-    it(`recursive adapters resolve ctypes and report cycles for ${async ? "async" : "sync"}`, async function () {
+    it(`recursive adapters resolve ctypes and reject unbounded recursion for ${async ? "async" : "sync"}`, async function () {
       const fn = lib.func("fixture_scalar_i32", c.c_int32, [c.c_int32]);
       const pointer = lib.func("fixture_address", c.c_size_t, [c.POINTER(c.c_int32)]);
       const invoke = (fn, value) => (async ? fn.callAsync(value) : fn(value));
@@ -66,20 +66,137 @@ describe("API conversion compatibility", { skip: !existsSync(fixture) && `${fixt
       second._as_parameter_ = first;
       let deep = 7;
       for (let i = 0; i < 256; i++) deep = { _as_parameter_: deep };
-      for (const bad of [self, first, deep]) {
+      assert.equal(await invoke(fn, deep), 7);
+      for (const bad of [self, first]) {
         if (async)
           await assert.rejects(
             async () => invoke(fn, bad),
-            (error) => error instanceof c.ArgumentError && /cycle|depth|recursive/i.test(error.message),
+            (error) => error instanceof c.ArgumentError && /recurs|stack/i.test(error.message),
           );
         else
           assert.throws(
             () => invoke(fn, bad),
-            (error) => error instanceof c.ArgumentError && /cycle|depth|recursive/i.test(error.message),
+            (error) => error instanceof c.ArgumentError && /recurs|stack/i.test(error.message),
           );
       }
     });
+
+    it(`terminal adapters preserve primitive values and getter order for ${async ? "async" : "sync"}`, async function () {
+      const integer = lib.func("fixture_scalar_i32", c.c_int32, [c.c_int32]);
+      const length = lib.func("fixture_string_length", c.c_size_t, [c.c_char_p]);
+      const address = lib.func("fixture_address", c.c_size_t, [c.c_void_p]);
+      const invoke = (fn, value) => (async ? fn.callAsync(value) : fn(value));
+      for (const [value, expected] of [
+        [-7, -7],
+        [-7n, -7],
+        [true, 1],
+        [false, 0],
+      ]) {
+        const reads = [];
+        const adapter = {
+          get _as_parameter_() {
+            reads.push("parameter");
+            return value;
+          },
+        };
+        assert.equal(await invoke(integer, adapter), expected);
+        assert.deepEqual(reads, ["parameter"]);
+      }
+      assert.equal(await invoke(length, { _as_parameter_: "é" }), 2n);
+      assert.equal(await invoke(address, { _as_parameter_: null }), 0n);
+      const invalid = { _as_parameter_: Symbol("not an integer") };
+      if (async) await assert.rejects(async () => invoke(integer, invalid), c.ArgumentError);
+      else assert.throws(() => invoke(integer, invalid), c.ArgumentError);
+    });
+
+    it(`finite adapter chains and changing getters follow CPython for ${async ? "async" : "sync"}`, async function () {
+      const fn = lib.func("fixture_scalar_i32", c.c_int32, [c.c_int32]);
+      const invoke = (value) => (async ? fn.callAsync(value) : fn(value));
+      const chain = (count) => {
+        let value = 7;
+        for (let i = 0; i < count; i++) value = { _as_parameter_: value };
+        return value;
+      };
+      for (const count of [128, 129, 256]) assert.equal(await invoke(chain(count)), 7);
+      for (const count of [2, 3, 32, 129]) {
+        let reads = 0;
+        const repeated = {
+          get _as_parameter_() {
+            return ++reads >= count ? 7 : repeated;
+          },
+        };
+        assert.equal(await invoke(repeated), 7);
+        assert.equal(reads, count);
+      }
+    });
+
+    it(`recursive adapter getter errors preserve their cause for ${async ? "async" : "sync"}`, async function () {
+      const fn = lib.func("fixture_scalar_i32", c.c_int32, [c.c_int32]);
+      const sentinel = new RangeError("adapter sentinel");
+      let reads = 0;
+      const adapter = {
+        get _as_parameter_() {
+          if (++reads === 3) throw sentinel;
+          return adapter;
+        },
+      };
+      const check = (error) => error instanceof c.ArgumentError && error.cause === sentinel && /adapter sentinel/.test(error.message);
+      if (async) await assert.rejects(async () => fn.callAsync(adapter), check);
+      else assert.throws(() => fn(adapter), check);
+      assert.equal(reads, 3);
+    });
+
+    it(`undefined terminal getters keep the original object for ${async ? "async" : "sync"}`, async function () {
+      const fn = lib.func("fixture_scalar_i32", c.c_int32, [c.c_int32]);
+      let reads = 0;
+      const adapter = {
+        get _as_parameter_() {
+          return ++reads === 1 ? adapter : undefined;
+        },
+      };
+      const check = (error) => error instanceof c.ArgumentError && !/cycle|maximum depth/i.test(error.message);
+      if (async) await assert.rejects(async () => fn.callAsync(adapter), check);
+      else assert.throws(() => fn(adapter), check);
+      assert.ok(reads >= 2);
+    });
   }
+
+  it("recursive memory adapters retain parents and release recursion failures", async function () {
+    const bytes = Buffer.alloc(4);
+    let parentReference;
+    const terminal = {
+      get _as_parameter_() {
+        gc();
+        assert.ok(parentReference.deref(), "the parent adapter must survive nested getter collection");
+        return bytes;
+      },
+    };
+    let adapter = { _as_parameter_: terminal };
+    parentReference = new WeakRef(adapter);
+    await new Promise(setImmediate);
+    c.memset(adapter, 0x5a, bytes.length);
+    assert.deepEqual([...bytes], [0x5a, 0x5a, 0x5a, 0x5a]);
+    adapter = null;
+    for (let i = 0; i < 12; i++) {
+      gc();
+      await new Promise(setImmediate);
+    }
+    assert.equal(parentReference.deref(), undefined);
+
+    function fail() {
+      const cyclic = {};
+      cyclic._as_parameter_ = cyclic;
+      const reference = new WeakRef(cyclic);
+      assert.throws(() => c.memset(cyclic, 0, 1), RangeError);
+      return reference;
+    }
+    const failed = fail();
+    for (let i = 0; i < 12; i++) {
+      gc();
+      await new Promise(setImmediate);
+    }
+    assert.equal(failed.deref(), undefined, "a failed recursive conversion must not leak its owners");
+  });
 
   it("structure pointer covariance preserves the original allocation", function () {
     class Base extends c.Structure {
