@@ -1,0 +1,4516 @@
+/*
+ * Adapted from the OASIS PKCS #11 3.2 Standard headers:
+ * https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.2/os/include/pkcs11-v3.2/
+ * Copyright (c) OASIS Open 2016, 2019, 2024. All Rights Reserved.
+ * Distributed under the terms of the OASIS IPR Policy,
+ * [http://www.oasis-open.org/policies-guidelines/ipr], AS-IS, WITHOUT ANY
+ * IMPLIED OR EXPRESS WARRANTY; there is no warranty of MERCHANTABILITY, FITNESS FOR A
+ * PARTICULAR PURPOSE or NONINFRINGEMENT of the rights of others.
+ */
+
+import * as ctypes from "node-ctypes";
+
+export const CRYPTOKI_VERSION_MAJOR = 3;
+export const CRYPTOKI_VERSION_MINOR = 2;
+export const CRYPTOKI_VERSION_AMENDMENT = 0;
+export const CK_TRUE = 1;
+export const CK_FALSE = 0;
+export const CK_UNAVAILABLE_INFORMATION = BigInt.asUintN(ctypes.sizeof(ctypes.c_ulong) * 8, ~0n);
+export const CK_EFFECTIVELY_INFINITE = 0n;
+export const CK_INVALID_HANDLE = 0n;
+export const CKN_SURRENDER = 0n;
+export const CKN_OTP_CHANGED = 1n;
+export const CKF_TOKEN_PRESENT = 0x00000001n;
+export const CKF_REMOVABLE_DEVICE = 0x00000002n;
+export const CKF_HW_SLOT = 0x00000004n;
+export const CKF_RNG = 0x00000001n;
+export const CKF_WRITE_PROTECTED = 0x00000002n;
+export const CKF_LOGIN_REQUIRED = 0x00000004n;
+export const CKF_USER_PIN_INITIALIZED = 0x00000008n;
+export const CKF_RESTORE_KEY_NOT_NEEDED = 0x00000020n;
+export const CKF_CLOCK_ON_TOKEN = 0x00000040n;
+export const CKF_PROTECTED_AUTHENTICATION_PATH = 0x00000100n;
+export const CKF_DUAL_CRYPTO_OPERATIONS = 0x00000200n;
+export const CKF_TOKEN_INITIALIZED = 0x00000400n;
+export const CKF_SECONDARY_AUTHENTICATION = 0x00000800n;
+export const CKF_USER_PIN_COUNT_LOW = 0x00010000n;
+export const CKF_USER_PIN_FINAL_TRY = 0x00020000n;
+export const CKF_USER_PIN_LOCKED = 0x00040000n;
+export const CKF_USER_PIN_TO_BE_CHANGED = 0x00080000n;
+export const CKF_SO_PIN_COUNT_LOW = 0x00100000n;
+export const CKF_SO_PIN_FINAL_TRY = 0x00200000n;
+export const CKF_SO_PIN_LOCKED = 0x00400000n;
+export const CKF_SO_PIN_TO_BE_CHANGED = 0x00800000n;
+export const CKF_ERROR_STATE = 0x01000000n;
+export const CKF_SEED_RANDOM_REQUIRED = 0x02000000n;
+export const CKF_ASYNC_SESSION_SUPPORTED = 0x04000000n;
+export const CKU_SO = 0n;
+export const CKU_USER = 1n;
+export const CKU_CONTEXT_SPECIFIC = 2n;
+export const CKS_RO_PUBLIC_SESSION = 0n;
+export const CKS_RO_USER_FUNCTIONS = 1n;
+export const CKS_RW_PUBLIC_SESSION = 2n;
+export const CKS_RW_USER_FUNCTIONS = 3n;
+export const CKS_RW_SO_FUNCTIONS = 4n;
+export const CKF_RW_SESSION = 0x00000002n;
+export const CKF_SERIAL_SESSION = 0x00000004n;
+export const CKF_ASYNC_SESSION = 0x00000008n;
+export const CKO_DATA = 0x00000000n;
+export const CKO_CERTIFICATE = 0x00000001n;
+export const CKO_PUBLIC_KEY = 0x00000002n;
+export const CKO_PRIVATE_KEY = 0x00000003n;
+export const CKO_SECRET_KEY = 0x00000004n;
+export const CKO_HW_FEATURE = 0x00000005n;
+export const CKO_DOMAIN_PARAMETERS = 0x00000006n;
+export const CKO_MECHANISM = 0x00000007n;
+export const CKO_OTP_KEY = 0x00000008n;
+export const CKO_PROFILE = 0x00000009n;
+export const CKO_VALIDATION = 0x0000000an;
+export const CKO_TRUST = 0x0000000bn;
+export const CKO_VENDOR_DEFINED = 0x80000000n;
+export const CKP_INVALID_ID = 0x00000000n;
+export const CKP_BASELINE_PROVIDER = 0x00000001n;
+export const CKP_EXTENDED_PROVIDER = 0x00000002n;
+export const CKP_AUTHENTICATION_TOKEN = 0x00000003n;
+export const CKP_PUBLIC_CERTIFICATES_TOKEN = 0x00000004n;
+export const CKP_COMPLETE_PROVIDER = 0x00000005n;
+export const CKP_HKDF_TLS_TOKEN = 0x00000006n;
+export const CKP_VENDOR_DEFINED = 0x80000000n;
+export const CKH_MONOTONIC_COUNTER = 0x00000001n;
+export const CKH_CLOCK = 0x00000002n;
+export const CKH_USER_INTERFACE = 0x00000003n;
+export const CKH_VENDOR_DEFINED = 0x80000000n;
+export const CKK_RSA = 0x00000000n;
+export const CKK_DSA = 0x00000001n;
+export const CKK_DH = 0x00000002n;
+export const CKK_ECDSA = 0x00000003n;
+export const CKK_EC = 0x00000003n;
+export const CKK_X9_42_DH = 0x00000004n;
+export const CKK_KEA = 0x00000005n;
+export const CKK_GENERIC_SECRET = 0x00000010n;
+export const CKK_RC2 = 0x00000011n;
+export const CKK_RC4 = 0x00000012n;
+export const CKK_DES = 0x00000013n;
+export const CKK_DES2 = 0x00000014n;
+export const CKK_DES3 = 0x00000015n;
+export const CKK_CAST = 0x00000016n;
+export const CKK_CAST3 = 0x00000017n;
+export const CKK_CAST5 = 0x00000018n;
+export const CKK_CAST128 = 0x00000018n;
+export const CKK_RC5 = 0x00000019n;
+export const CKK_IDEA = 0x0000001an;
+export const CKK_SKIPJACK = 0x0000001bn;
+export const CKK_BATON = 0x0000001cn;
+export const CKK_JUNIPER = 0x0000001dn;
+export const CKK_CDMF = 0x0000001en;
+export const CKK_AES = 0x0000001fn;
+export const CKK_BLOWFISH = 0x00000020n;
+export const CKK_TWOFISH = 0x00000021n;
+export const CKK_SECURID = 0x00000022n;
+export const CKK_HOTP = 0x00000023n;
+export const CKK_ACTI = 0x00000024n;
+export const CKK_CAMELLIA = 0x00000025n;
+export const CKK_ARIA = 0x00000026n;
+export const CKK_MD5_HMAC = 0x00000027n;
+export const CKK_SHA_1_HMAC = 0x00000028n;
+export const CKK_RIPEMD128_HMAC = 0x00000029n;
+export const CKK_RIPEMD160_HMAC = 0x0000002an;
+export const CKK_SHA256_HMAC = 0x0000002bn;
+export const CKK_SHA384_HMAC = 0x0000002cn;
+export const CKK_SHA512_HMAC = 0x0000002dn;
+export const CKK_SHA224_HMAC = 0x0000002en;
+export const CKK_SEED = 0x0000002fn;
+export const CKK_GOSTR3410 = 0x00000030n;
+export const CKK_GOSTR3411 = 0x00000031n;
+export const CKK_GOST28147 = 0x00000032n;
+export const CKK_CHACHA20 = 0x00000033n;
+export const CKK_POLY1305 = 0x00000034n;
+export const CKK_AES_XTS = 0x00000035n;
+export const CKK_SHA3_224_HMAC = 0x00000036n;
+export const CKK_SHA3_256_HMAC = 0x00000037n;
+export const CKK_SHA3_384_HMAC = 0x00000038n;
+export const CKK_SHA3_512_HMAC = 0x00000039n;
+export const CKK_BLAKE2B_160_HMAC = 0x0000003an;
+export const CKK_BLAKE2B_256_HMAC = 0x0000003bn;
+export const CKK_BLAKE2B_384_HMAC = 0x0000003cn;
+export const CKK_BLAKE2B_512_HMAC = 0x0000003dn;
+export const CKK_SALSA20 = 0x0000003en;
+export const CKK_X2RATCHET = 0x0000003fn;
+export const CKK_EC_EDWARDS = 0x00000040n;
+export const CKK_EC_MONTGOMERY = 0x00000041n;
+export const CKK_HKDF = 0x00000042n;
+export const CKK_SHA512_224_HMAC = 0x00000043n;
+export const CKK_SHA512_256_HMAC = 0x00000044n;
+export const CKK_SHA512_T_HMAC = 0x00000045n;
+export const CKK_HSS = 0x00000046n;
+export const CKK_XMSS = 0x00000047n;
+export const CKK_XMSSMT = 0x00000048n;
+export const CKK_ML_KEM = 0x00000049n;
+export const CKK_ML_DSA = 0x0000004an;
+export const CKK_SLH_DSA = 0x0000004bn;
+export const CKK_VENDOR_DEFINED = 0x80000000n;
+export const CK_CERTIFICATE_CATEGORY_UNSPECIFIED = 0n;
+export const CK_CERTIFICATE_CATEGORY_TOKEN_USER = 1n;
+export const CK_CERTIFICATE_CATEGORY_AUTHORITY = 2n;
+export const CK_CERTIFICATE_CATEGORY_OTHER_ENTITY = 3n;
+export const CK_SECURITY_DOMAIN_UNSPECIFIED = 0n;
+export const CK_SECURITY_DOMAIN_MANUFACTURER = 1n;
+export const CK_SECURITY_DOMAIN_OPERATOR = 2n;
+export const CK_SECURITY_DOMAIN_THIRD_PARTY = 3n;
+export const CKC_X_509 = 0x00000000n;
+export const CKC_X_509_ATTR_CERT = 0x00000001n;
+export const CKC_WTLS = 0x00000002n;
+export const CKC_VENDOR_DEFINED = 0x80000000n;
+export const CKF_ARRAY_ATTRIBUTE = 0x40000000n;
+export const CK_OTP_FORMAT_DECIMAL = 0n;
+export const CK_OTP_FORMAT_HEXADECIMAL = 1n;
+export const CK_OTP_FORMAT_ALPHANUMERIC = 2n;
+export const CK_OTP_FORMAT_BINARY = 3n;
+export const CK_OTP_PARAM_IGNORED = 0n;
+export const CK_OTP_PARAM_OPTIONAL = 1n;
+export const CK_OTP_PARAM_MANDATORY = 2n;
+export const CKA_CLASS = 0x00000000n;
+export const CKA_TOKEN = 0x00000001n;
+export const CKA_PRIVATE = 0x00000002n;
+export const CKA_LABEL = 0x00000003n;
+export const CKA_UNIQUE_ID = 0x00000004n;
+export const CKA_APPLICATION = 0x00000010n;
+export const CKA_VALUE = 0x00000011n;
+export const CKA_OBJECT_ID = 0x00000012n;
+export const CKA_CERTIFICATE_TYPE = 0x00000080n;
+export const CKA_ISSUER = 0x00000081n;
+export const CKA_SERIAL_NUMBER = 0x00000082n;
+export const CKA_AC_ISSUER = 0x00000083n;
+export const CKA_OWNER = 0x00000084n;
+export const CKA_ATTR_TYPES = 0x00000085n;
+export const CKA_TRUSTED = 0x00000086n;
+export const CKA_CERTIFICATE_CATEGORY = 0x00000087n;
+export const CKA_JAVA_MIDP_SECURITY_DOMAIN = 0x00000088n;
+export const CKA_URL = 0x00000089n;
+export const CKA_HASH_OF_SUBJECT_PUBLIC_KEY = 0x0000008an;
+export const CKA_HASH_OF_ISSUER_PUBLIC_KEY = 0x0000008bn;
+export const CKA_NAME_HASH_ALGORITHM = 0x0000008cn;
+export const CKA_CHECK_VALUE = 0x00000090n;
+export const CKA_KEY_TYPE = 0x00000100n;
+export const CKA_SUBJECT = 0x00000101n;
+export const CKA_ID = 0x00000102n;
+export const CKA_SENSITIVE = 0x00000103n;
+export const CKA_ENCRYPT = 0x00000104n;
+export const CKA_DECRYPT = 0x00000105n;
+export const CKA_WRAP = 0x00000106n;
+export const CKA_UNWRAP = 0x00000107n;
+export const CKA_SIGN = 0x00000108n;
+export const CKA_SIGN_RECOVER = 0x00000109n;
+export const CKA_VERIFY = 0x0000010an;
+export const CKA_VERIFY_RECOVER = 0x0000010bn;
+export const CKA_DERIVE = 0x0000010cn;
+export const CKA_START_DATE = 0x00000110n;
+export const CKA_END_DATE = 0x00000111n;
+export const CKA_MODULUS = 0x00000120n;
+export const CKA_MODULUS_BITS = 0x00000121n;
+export const CKA_PUBLIC_EXPONENT = 0x00000122n;
+export const CKA_PRIVATE_EXPONENT = 0x00000123n;
+export const CKA_PRIME_1 = 0x00000124n;
+export const CKA_PRIME_2 = 0x00000125n;
+export const CKA_EXPONENT_1 = 0x00000126n;
+export const CKA_EXPONENT_2 = 0x00000127n;
+export const CKA_COEFFICIENT = 0x00000128n;
+export const CKA_PUBLIC_KEY_INFO = 0x00000129n;
+export const CKA_PRIME = 0x00000130n;
+export const CKA_SUBPRIME = 0x00000131n;
+export const CKA_BASE = 0x00000132n;
+export const CKA_PRIME_BITS = 0x00000133n;
+export const CKA_SUBPRIME_BITS = 0x00000134n;
+export const CKA_SUB_PRIME_BITS = CKA_SUBPRIME_BITS;
+export const CKA_VALUE_BITS = 0x00000160n;
+export const CKA_VALUE_LEN = 0x00000161n;
+export const CKA_EXTRACTABLE = 0x00000162n;
+export const CKA_LOCAL = 0x00000163n;
+export const CKA_NEVER_EXTRACTABLE = 0x00000164n;
+export const CKA_ALWAYS_SENSITIVE = 0x00000165n;
+export const CKA_KEY_GEN_MECHANISM = 0x00000166n;
+export const CKA_MODIFIABLE = 0x00000170n;
+export const CKA_COPYABLE = 0x00000171n;
+export const CKA_DESTROYABLE = 0x00000172n;
+export const CKA_ECDSA_PARAMS = 0x00000180n;
+export const CKA_EC_PARAMS = 0x00000180n;
+export const CKA_EC_POINT = 0x00000181n;
+export const CKA_SECONDARY_AUTH = 0x00000200n;
+export const CKA_AUTH_PIN_FLAGS = 0x00000201n;
+export const CKA_ALWAYS_AUTHENTICATE = 0x00000202n;
+export const CKA_WRAP_WITH_TRUSTED = 0x00000210n;
+export const CKA_WRAP_TEMPLATE = CKF_ARRAY_ATTRIBUTE | 0x00000211n;
+export const CKA_UNWRAP_TEMPLATE = CKF_ARRAY_ATTRIBUTE | 0x00000212n;
+export const CKA_DERIVE_TEMPLATE = CKF_ARRAY_ATTRIBUTE | 0x00000213n;
+export const CKA_OTP_FORMAT = 0x00000220n;
+export const CKA_OTP_LENGTH = 0x00000221n;
+export const CKA_OTP_TIME_INTERVAL = 0x00000222n;
+export const CKA_OTP_USER_FRIENDLY_MODE = 0x00000223n;
+export const CKA_OTP_CHALLENGE_REQUIREMENT = 0x00000224n;
+export const CKA_OTP_TIME_REQUIREMENT = 0x00000225n;
+export const CKA_OTP_COUNTER_REQUIREMENT = 0x00000226n;
+export const CKA_OTP_PIN_REQUIREMENT = 0x00000227n;
+export const CKA_OTP_COUNTER = 0x0000022en;
+export const CKA_OTP_TIME = 0x0000022fn;
+export const CKA_OTP_USER_IDENTIFIER = 0x0000022an;
+export const CKA_OTP_SERVICE_IDENTIFIER = 0x0000022bn;
+export const CKA_OTP_SERVICE_LOGO = 0x0000022cn;
+export const CKA_OTP_SERVICE_LOGO_TYPE = 0x0000022dn;
+export const CKA_GOSTR3410_PARAMS = 0x00000250n;
+export const CKA_GOSTR3411_PARAMS = 0x00000251n;
+export const CKA_GOST28147_PARAMS = 0x00000252n;
+export const CKA_HW_FEATURE_TYPE = 0x00000300n;
+export const CKA_RESET_ON_INIT = 0x00000301n;
+export const CKA_HAS_RESET = 0x00000302n;
+export const CKA_PIXEL_X = 0x00000400n;
+export const CKA_PIXEL_Y = 0x00000401n;
+export const CKA_RESOLUTION = 0x00000402n;
+export const CKA_CHAR_ROWS = 0x00000403n;
+export const CKA_CHAR_COLUMNS = 0x00000404n;
+export const CKA_COLOR = 0x00000405n;
+export const CKA_BITS_PER_PIXEL = 0x00000406n;
+export const CKA_CHAR_SETS = 0x00000480n;
+export const CKA_ENCODING_METHODS = 0x00000481n;
+export const CKA_MIME_TYPES = 0x00000482n;
+export const CKA_MECHANISM_TYPE = 0x00000500n;
+export const CKA_REQUIRED_CMS_ATTRIBUTES = 0x00000501n;
+export const CKA_DEFAULT_CMS_ATTRIBUTES = 0x00000502n;
+export const CKA_SUPPORTED_CMS_ATTRIBUTES = 0x00000503n;
+export const CKA_ALLOWED_MECHANISMS = CKF_ARRAY_ATTRIBUTE | 0x00000600n;
+export const CKA_PROFILE_ID = 0x00000601n;
+export const CKA_X2RATCHET_BAG = 0x00000602n;
+export const CKA_X2RATCHET_BAGSIZE = 0x00000603n;
+export const CKA_X2RATCHET_BOBS1STMSG = 0x00000604n;
+export const CKA_X2RATCHET_CKR = 0x00000605n;
+export const CKA_X2RATCHET_CKS = 0x00000606n;
+export const CKA_X2RATCHET_DHP = 0x00000607n;
+export const CKA_X2RATCHET_DHR = 0x00000608n;
+export const CKA_X2RATCHET_DHS = 0x00000609n;
+export const CKA_X2RATCHET_HKR = 0x0000060an;
+export const CKA_X2RATCHET_HKS = 0x0000060bn;
+export const CKA_X2RATCHET_ISALICE = 0x0000060cn;
+export const CKA_X2RATCHET_NHKR = 0x0000060dn;
+export const CKA_X2RATCHET_NHKS = 0x0000060en;
+export const CKA_X2RATCHET_NR = 0x0000060fn;
+export const CKA_X2RATCHET_NS = 0x00000610n;
+export const CKA_X2RATCHET_PNS = 0x00000611n;
+export const CKA_X2RATCHET_RK = 0x00000612n;
+export const CKA_HSS_LEVELS = 0x00000617n;
+export const CKA_HSS_LMS_TYPE = 0x00000618n;
+export const CKA_HSS_LMOTS_TYPE = 0x00000619n;
+export const CKA_HSS_LMS_TYPES = 0x0000061an;
+export const CKA_HSS_LMOTS_TYPES = 0x0000061bn;
+export const CKA_HSS_KEYS_REMAINING = 0x0000061cn;
+export const CKA_PARAMETER_SET = 0x0000061dn;
+export const CKA_OBJECT_VALIDATION_FLAGS = 0x0000061en;
+export const CKA_VALIDATION_TYPE = 0x0000061fn;
+export const CKA_VALIDATION_VERSION = 0x00000620n;
+export const CKA_VALIDATION_LEVEL = 0x00000621n;
+export const CKA_VALIDATION_MODULE_ID = 0x00000622n;
+export const CKA_VALIDATION_FLAG = 0x00000623n;
+export const CKA_VALIDATION_AUTHORITY_TYPE = 0x00000624n;
+export const CKA_VALIDATION_COUNTRY = 0x00000625n;
+export const CKA_VALIDATION_CERTIFICATE_IDENTIFIER = 0x00000626n;
+export const CKA_VALIDATION_CERTIFICATE_URI = 0x00000627n;
+export const CKA_VALIDATION_VENDOR_URI = 0x00000628n;
+export const CKA_VALIDATION_PROFILE = 0x00000629n;
+export const CKA_ENCAPSULATE_TEMPLATE = 0x0000062an;
+export const CKA_DECAPSULATE_TEMPLATE = 0x0000062bn;
+export const CKA_TRUST_SERVER_AUTH = 0x0000062cn;
+export const CKA_TRUST_CLIENT_AUTH = 0x0000062dn;
+export const CKA_TRUST_CODE_SIGNING = 0x0000062en;
+export const CKA_TRUST_EMAIL_PROTECTION = 0x0000062fn;
+export const CKA_TRUST_IPSEC_IKE = 0x00000630n;
+export const CKA_TRUST_TIME_STAMPING = 0x00000631n;
+export const CKA_TRUST_OCSP_SIGNING = 0x00000632n;
+export const CKA_ENCAPSULATE = 0x00000633n;
+export const CKA_DECAPSULATE = 0x00000634n;
+export const CKA_HASH_OF_CERTIFICATE = 0x00000635n;
+export const CKA_PUBLIC_CRC64_VALUE = 0x00000636n;
+export const CKA_SEED = 0x00000637n;
+export const CKA_VENDOR_DEFINED = 0x80000000n;
+export const CKM_RSA_PKCS_KEY_PAIR_GEN = 0x00000000n;
+export const CKM_RSA_PKCS = 0x00000001n;
+export const CKM_RSA_9796 = 0x00000002n;
+export const CKM_RSA_X_509 = 0x00000003n;
+export const CKM_MD2_RSA_PKCS = 0x00000004n;
+export const CKM_MD5_RSA_PKCS = 0x00000005n;
+export const CKM_SHA1_RSA_PKCS = 0x00000006n;
+export const CKM_RIPEMD128_RSA_PKCS = 0x00000007n;
+export const CKM_RIPEMD160_RSA_PKCS = 0x00000008n;
+export const CKM_RSA_PKCS_OAEP = 0x00000009n;
+export const CKM_RSA_X9_31_KEY_PAIR_GEN = 0x0000000an;
+export const CKM_RSA_X9_31 = 0x0000000bn;
+export const CKM_SHA1_RSA_X9_31 = 0x0000000cn;
+export const CKM_RSA_PKCS_PSS = 0x0000000dn;
+export const CKM_SHA1_RSA_PKCS_PSS = 0x0000000en;
+export const CKM_DSA_KEY_PAIR_GEN = 0x00000010n;
+export const CKM_DSA = 0x00000011n;
+export const CKM_DSA_SHA1 = 0x00000012n;
+export const CKM_DSA_SHA224 = 0x00000013n;
+export const CKM_DSA_SHA256 = 0x00000014n;
+export const CKM_DSA_SHA384 = 0x00000015n;
+export const CKM_DSA_SHA512 = 0x00000016n;
+export const CKM_DSA_SHA3_224 = 0x00000018n;
+export const CKM_DSA_SHA3_256 = 0x00000019n;
+export const CKM_DSA_SHA3_384 = 0x0000001an;
+export const CKM_DSA_SHA3_512 = 0x0000001bn;
+export const CKM_DH_PKCS_KEY_PAIR_GEN = 0x00000020n;
+export const CKM_DH_PKCS_DERIVE = 0x00000021n;
+export const CKM_X9_42_DH_KEY_PAIR_GEN = 0x00000030n;
+export const CKM_X9_42_DH_DERIVE = 0x00000031n;
+export const CKM_X9_42_DH_HYBRID_DERIVE = 0x00000032n;
+export const CKM_X9_42_MQV_DERIVE = 0x00000033n;
+export const CKM_SHA256_RSA_PKCS = 0x00000040n;
+export const CKM_SHA384_RSA_PKCS = 0x00000041n;
+export const CKM_SHA512_RSA_PKCS = 0x00000042n;
+export const CKM_SHA256_RSA_PKCS_PSS = 0x00000043n;
+export const CKM_SHA384_RSA_PKCS_PSS = 0x00000044n;
+export const CKM_SHA512_RSA_PKCS_PSS = 0x00000045n;
+export const CKM_SHA224_RSA_PKCS = 0x00000046n;
+export const CKM_SHA224_RSA_PKCS_PSS = 0x00000047n;
+export const CKM_SHA512_224 = 0x00000048n;
+export const CKM_SHA512_224_HMAC = 0x00000049n;
+export const CKM_SHA512_224_HMAC_GENERAL = 0x0000004an;
+export const CKM_SHA512_224_KEY_DERIVATION = 0x0000004bn;
+export const CKM_SHA512_256 = 0x0000004cn;
+export const CKM_SHA512_256_HMAC = 0x0000004dn;
+export const CKM_SHA512_256_HMAC_GENERAL = 0x0000004en;
+export const CKM_SHA512_256_KEY_DERIVATION = 0x0000004fn;
+export const CKM_SHA512_T = 0x00000050n;
+export const CKM_SHA512_T_HMAC = 0x00000051n;
+export const CKM_SHA512_T_HMAC_GENERAL = 0x00000052n;
+export const CKM_SHA512_T_KEY_DERIVATION = 0x00000053n;
+export const CKM_SHA3_256_RSA_PKCS = 0x00000060n;
+export const CKM_SHA3_384_RSA_PKCS = 0x00000061n;
+export const CKM_SHA3_512_RSA_PKCS = 0x00000062n;
+export const CKM_SHA3_256_RSA_PKCS_PSS = 0x00000063n;
+export const CKM_SHA3_384_RSA_PKCS_PSS = 0x00000064n;
+export const CKM_SHA3_512_RSA_PKCS_PSS = 0x00000065n;
+export const CKM_SHA3_224_RSA_PKCS = 0x00000066n;
+export const CKM_SHA3_224_RSA_PKCS_PSS = 0x00000067n;
+export const CKM_RC2_KEY_GEN = 0x00000100n;
+export const CKM_RC2_ECB = 0x00000101n;
+export const CKM_RC2_CBC = 0x00000102n;
+export const CKM_RC2_MAC = 0x00000103n;
+export const CKM_RC2_MAC_GENERAL = 0x00000104n;
+export const CKM_RC2_CBC_PAD = 0x00000105n;
+export const CKM_RC4_KEY_GEN = 0x00000110n;
+export const CKM_RC4 = 0x00000111n;
+export const CKM_DES_KEY_GEN = 0x00000120n;
+export const CKM_DES_ECB = 0x00000121n;
+export const CKM_DES_CBC = 0x00000122n;
+export const CKM_DES_MAC = 0x00000123n;
+export const CKM_DES_MAC_GENERAL = 0x00000124n;
+export const CKM_DES_CBC_PAD = 0x00000125n;
+export const CKM_DES2_KEY_GEN = 0x00000130n;
+export const CKM_DES3_KEY_GEN = 0x00000131n;
+export const CKM_DES3_ECB = 0x00000132n;
+export const CKM_DES3_CBC = 0x00000133n;
+export const CKM_DES3_MAC = 0x00000134n;
+export const CKM_DES3_MAC_GENERAL = 0x00000135n;
+export const CKM_DES3_CBC_PAD = 0x00000136n;
+export const CKM_DES3_CMAC_GENERAL = 0x00000137n;
+export const CKM_DES3_CMAC = 0x00000138n;
+export const CKM_CDMF_KEY_GEN = 0x00000140n;
+export const CKM_CDMF_ECB = 0x00000141n;
+export const CKM_CDMF_CBC = 0x00000142n;
+export const CKM_CDMF_MAC = 0x00000143n;
+export const CKM_CDMF_MAC_GENERAL = 0x00000144n;
+export const CKM_CDMF_CBC_PAD = 0x00000145n;
+export const CKM_DES_OFB64 = 0x00000150n;
+export const CKM_DES_OFB8 = 0x00000151n;
+export const CKM_DES_CFB64 = 0x00000152n;
+export const CKM_DES_CFB8 = 0x00000153n;
+export const CKM_MD2 = 0x00000200n;
+export const CKM_MD2_HMAC = 0x00000201n;
+export const CKM_MD2_HMAC_GENERAL = 0x00000202n;
+export const CKM_MD5 = 0x00000210n;
+export const CKM_MD5_HMAC = 0x00000211n;
+export const CKM_MD5_HMAC_GENERAL = 0x00000212n;
+export const CKM_SHA_1 = 0x00000220n;
+export const CKM_SHA_1_HMAC = 0x00000221n;
+export const CKM_SHA_1_HMAC_GENERAL = 0x00000222n;
+export const CKM_RIPEMD128 = 0x00000230n;
+export const CKM_RIPEMD128_HMAC = 0x00000231n;
+export const CKM_RIPEMD128_HMAC_GENERAL = 0x00000232n;
+export const CKM_RIPEMD160 = 0x00000240n;
+export const CKM_RIPEMD160_HMAC = 0x00000241n;
+export const CKM_RIPEMD160_HMAC_GENERAL = 0x00000242n;
+export const CKM_SHA256 = 0x00000250n;
+export const CKM_SHA256_HMAC = 0x00000251n;
+export const CKM_SHA256_HMAC_GENERAL = 0x00000252n;
+export const CKM_SHA224 = 0x00000255n;
+export const CKM_SHA224_HMAC = 0x00000256n;
+export const CKM_SHA224_HMAC_GENERAL = 0x00000257n;
+export const CKM_SHA384 = 0x00000260n;
+export const CKM_SHA384_HMAC = 0x00000261n;
+export const CKM_SHA384_HMAC_GENERAL = 0x00000262n;
+export const CKM_SHA512 = 0x00000270n;
+export const CKM_SHA512_HMAC = 0x00000271n;
+export const CKM_SHA512_HMAC_GENERAL = 0x00000272n;
+export const CKM_SECURID_KEY_GEN = 0x00000280n;
+export const CKM_SECURID = 0x00000282n;
+export const CKM_HOTP_KEY_GEN = 0x00000290n;
+export const CKM_HOTP = 0x00000291n;
+export const CKM_ACTI = 0x000002a0n;
+export const CKM_ACTI_KEY_GEN = 0x000002a1n;
+export const CKM_SHA3_256 = 0x000002b0n;
+export const CKM_SHA3_256_HMAC = 0x000002b1n;
+export const CKM_SHA3_256_HMAC_GENERAL = 0x000002b2n;
+export const CKM_SHA3_256_KEY_GEN = 0x000002b3n;
+export const CKM_SHA3_224 = 0x000002b5n;
+export const CKM_SHA3_224_HMAC = 0x000002b6n;
+export const CKM_SHA3_224_HMAC_GENERAL = 0x000002b7n;
+export const CKM_SHA3_224_KEY_GEN = 0x000002b8n;
+export const CKM_SHA3_384 = 0x000002c0n;
+export const CKM_SHA3_384_HMAC = 0x000002c1n;
+export const CKM_SHA3_384_HMAC_GENERAL = 0x000002c2n;
+export const CKM_SHA3_384_KEY_GEN = 0x000002c3n;
+export const CKM_SHA3_512 = 0x000002d0n;
+export const CKM_SHA3_512_HMAC = 0x000002d1n;
+export const CKM_SHA3_512_HMAC_GENERAL = 0x000002d2n;
+export const CKM_SHA3_512_KEY_GEN = 0x000002d3n;
+export const CKM_CAST_KEY_GEN = 0x00000300n;
+export const CKM_CAST_ECB = 0x00000301n;
+export const CKM_CAST_CBC = 0x00000302n;
+export const CKM_CAST_MAC = 0x00000303n;
+export const CKM_CAST_MAC_GENERAL = 0x00000304n;
+export const CKM_CAST_CBC_PAD = 0x00000305n;
+export const CKM_CAST3_KEY_GEN = 0x00000310n;
+export const CKM_CAST3_ECB = 0x00000311n;
+export const CKM_CAST3_CBC = 0x00000312n;
+export const CKM_CAST3_MAC = 0x00000313n;
+export const CKM_CAST3_MAC_GENERAL = 0x00000314n;
+export const CKM_CAST3_CBC_PAD = 0x00000315n;
+export const CKM_CAST5_KEY_GEN = 0x00000320n;
+export const CKM_CAST128_KEY_GEN = 0x00000320n;
+export const CKM_CAST5_ECB = 0x00000321n;
+export const CKM_CAST128_ECB = 0x00000321n;
+export const CKM_CAST5_CBC = 0x00000322n;
+export const CKM_CAST128_CBC = 0x00000322n;
+export const CKM_CAST5_MAC = 0x00000323n;
+export const CKM_CAST128_MAC = 0x00000323n;
+export const CKM_CAST5_MAC_GENERAL = 0x00000324n;
+export const CKM_CAST128_MAC_GENERAL = 0x00000324n;
+export const CKM_CAST5_CBC_PAD = 0x00000325n;
+export const CKM_CAST128_CBC_PAD = 0x00000325n;
+export const CKM_RC5_KEY_GEN = 0x00000330n;
+export const CKM_RC5_ECB = 0x00000331n;
+export const CKM_RC5_CBC = 0x00000332n;
+export const CKM_RC5_MAC = 0x00000333n;
+export const CKM_RC5_MAC_GENERAL = 0x00000334n;
+export const CKM_RC5_CBC_PAD = 0x00000335n;
+export const CKM_IDEA_KEY_GEN = 0x00000340n;
+export const CKM_IDEA_ECB = 0x00000341n;
+export const CKM_IDEA_CBC = 0x00000342n;
+export const CKM_IDEA_MAC = 0x00000343n;
+export const CKM_IDEA_MAC_GENERAL = 0x00000344n;
+export const CKM_IDEA_CBC_PAD = 0x00000345n;
+export const CKM_GENERIC_SECRET_KEY_GEN = 0x00000350n;
+export const CKM_CONCATENATE_BASE_AND_KEY = 0x00000360n;
+export const CKM_CONCATENATE_BASE_AND_DATA = 0x00000362n;
+export const CKM_CONCATENATE_DATA_AND_BASE = 0x00000363n;
+export const CKM_XOR_BASE_AND_DATA = 0x00000364n;
+export const CKM_EXTRACT_KEY_FROM_KEY = 0x00000365n;
+export const CKM_SSL3_PRE_MASTER_KEY_GEN = 0x00000370n;
+export const CKM_SSL3_MASTER_KEY_DERIVE = 0x00000371n;
+export const CKM_SSL3_KEY_AND_MAC_DERIVE = 0x00000372n;
+export const CKM_SSL3_MASTER_KEY_DERIVE_DH = 0x00000373n;
+export const CKM_TLS_PRE_MASTER_KEY_GEN = 0x00000374n;
+export const CKM_TLS_MASTER_KEY_DERIVE = 0x00000375n;
+export const CKM_TLS_KEY_AND_MAC_DERIVE = 0x00000376n;
+export const CKM_TLS_MASTER_KEY_DERIVE_DH = 0x00000377n;
+export const CKM_TLS_PRF = 0x00000378n;
+export const CKM_SSL3_MD5_MAC = 0x00000380n;
+export const CKM_SSL3_SHA1_MAC = 0x00000381n;
+export const CKM_MD5_KEY_DERIVATION = 0x00000390n;
+export const CKM_MD2_KEY_DERIVATION = 0x00000391n;
+export const CKM_SHA1_KEY_DERIVATION = 0x00000392n;
+export const CKM_SHA256_KEY_DERIVATION = 0x00000393n;
+export const CKM_SHA384_KEY_DERIVATION = 0x00000394n;
+export const CKM_SHA512_KEY_DERIVATION = 0x00000395n;
+export const CKM_SHA224_KEY_DERIVATION = 0x00000396n;
+export const CKM_SHA3_256_KEY_DERIVATION = 0x00000397n;
+export const CKM_SHA3_224_KEY_DERIVATION = 0x00000398n;
+export const CKM_SHA3_384_KEY_DERIVATION = 0x00000399n;
+export const CKM_SHA3_512_KEY_DERIVATION = 0x0000039an;
+export const CKM_SHAKE_128_KEY_DERIVATION = 0x0000039bn;
+export const CKM_SHAKE_256_KEY_DERIVATION = 0x0000039cn;
+export const CKM_SHA3_256_KEY_DERIVE = CKM_SHA3_256_KEY_DERIVATION;
+export const CKM_SHA3_224_KEY_DERIVE = CKM_SHA3_224_KEY_DERIVATION;
+export const CKM_SHA3_384_KEY_DERIVE = CKM_SHA3_384_KEY_DERIVATION;
+export const CKM_SHA3_512_KEY_DERIVE = CKM_SHA3_512_KEY_DERIVATION;
+export const CKM_SHAKE_128_KEY_DERIVE = CKM_SHAKE_128_KEY_DERIVATION;
+export const CKM_SHAKE_256_KEY_DERIVE = CKM_SHAKE_256_KEY_DERIVATION;
+export const CKM_PBE_MD2_DES_CBC = 0x000003a0n;
+export const CKM_PBE_MD5_DES_CBC = 0x000003a1n;
+export const CKM_PBE_MD5_CAST_CBC = 0x000003a2n;
+export const CKM_PBE_MD5_CAST3_CBC = 0x000003a3n;
+export const CKM_PBE_MD5_CAST5_CBC = 0x000003a4n;
+export const CKM_PBE_MD5_CAST128_CBC = 0x000003a4n;
+export const CKM_PBE_SHA1_CAST5_CBC = 0x000003a5n;
+export const CKM_PBE_SHA1_CAST128_CBC = 0x000003a5n;
+export const CKM_PBE_SHA1_RC4_128 = 0x000003a6n;
+export const CKM_PBE_SHA1_RC4_40 = 0x000003a7n;
+export const CKM_PBE_SHA1_DES3_EDE_CBC = 0x000003a8n;
+export const CKM_PBE_SHA1_DES2_EDE_CBC = 0x000003a9n;
+export const CKM_PBE_SHA1_RC2_128_CBC = 0x000003aan;
+export const CKM_PBE_SHA1_RC2_40_CBC = 0x000003abn;
+export const CKM_PKCS5_PBKD2 = 0x000003b0n;
+export const CKM_PBA_SHA1_WITH_SHA1_HMAC = 0x000003c0n;
+export const CKM_WTLS_PRE_MASTER_KEY_GEN = 0x000003d0n;
+export const CKM_WTLS_MASTER_KEY_DERIVE = 0x000003d1n;
+export const CKM_WTLS_MASTER_KEY_DERIVE_DH_ECC = 0x000003d2n;
+export const CKM_WTLS_PRF = 0x000003d3n;
+export const CKM_WTLS_SERVER_KEY_AND_MAC_DERIVE = 0x000003d4n;
+export const CKM_WTLS_CLIENT_KEY_AND_MAC_DERIVE = 0x000003d5n;
+export const CKM_TLS10_MAC_SERVER = 0x000003d6n;
+export const CKM_TLS10_MAC_CLIENT = 0x000003d7n;
+export const CKM_TLS12_MAC = 0x000003d8n;
+export const CKM_TLS12_KDF = 0x000003d9n;
+export const CKM_TLS12_MASTER_KEY_DERIVE = 0x000003e0n;
+export const CKM_TLS12_KEY_AND_MAC_DERIVE = 0x000003e1n;
+export const CKM_TLS12_MASTER_KEY_DERIVE_DH = 0x000003e2n;
+export const CKM_TLS12_KEY_SAFE_DERIVE = 0x000003e3n;
+export const CKM_TLS_MAC = 0x000003e4n;
+export const CKM_TLS_KDF = 0x000003e5n;
+export const CKM_KEY_WRAP_LYNKS = 0x00000400n;
+export const CKM_KEY_WRAP_SET_OAEP = 0x00000401n;
+export const CKM_CMS_SIG = 0x00000500n;
+export const CKM_KIP_DERIVE = 0x00000510n;
+export const CKM_KIP_WRAP = 0x00000511n;
+export const CKM_KIP_MAC = 0x00000512n;
+export const CKM_CAMELLIA_KEY_GEN = 0x00000550n;
+export const CKM_CAMELLIA_ECB = 0x00000551n;
+export const CKM_CAMELLIA_CBC = 0x00000552n;
+export const CKM_CAMELLIA_MAC = 0x00000553n;
+export const CKM_CAMELLIA_MAC_GENERAL = 0x00000554n;
+export const CKM_CAMELLIA_CBC_PAD = 0x00000555n;
+export const CKM_CAMELLIA_ECB_ENCRYPT_DATA = 0x00000556n;
+export const CKM_CAMELLIA_CBC_ENCRYPT_DATA = 0x00000557n;
+export const CKM_CAMELLIA_CTR = 0x00000558n;
+export const CKM_ARIA_KEY_GEN = 0x00000560n;
+export const CKM_ARIA_ECB = 0x00000561n;
+export const CKM_ARIA_CBC = 0x00000562n;
+export const CKM_ARIA_MAC = 0x00000563n;
+export const CKM_ARIA_MAC_GENERAL = 0x00000564n;
+export const CKM_ARIA_CBC_PAD = 0x00000565n;
+export const CKM_ARIA_ECB_ENCRYPT_DATA = 0x00000566n;
+export const CKM_ARIA_CBC_ENCRYPT_DATA = 0x00000567n;
+export const CKM_SEED_KEY_GEN = 0x00000650n;
+export const CKM_SEED_ECB = 0x00000651n;
+export const CKM_SEED_CBC = 0x00000652n;
+export const CKM_SEED_MAC = 0x00000653n;
+export const CKM_SEED_MAC_GENERAL = 0x00000654n;
+export const CKM_SEED_CBC_PAD = 0x00000655n;
+export const CKM_SEED_ECB_ENCRYPT_DATA = 0x00000656n;
+export const CKM_SEED_CBC_ENCRYPT_DATA = 0x00000657n;
+export const CKM_SKIPJACK_KEY_GEN = 0x00001000n;
+export const CKM_SKIPJACK_ECB64 = 0x00001001n;
+export const CKM_SKIPJACK_CBC64 = 0x00001002n;
+export const CKM_SKIPJACK_OFB64 = 0x00001003n;
+export const CKM_SKIPJACK_CFB64 = 0x00001004n;
+export const CKM_SKIPJACK_CFB32 = 0x00001005n;
+export const CKM_SKIPJACK_CFB16 = 0x00001006n;
+export const CKM_SKIPJACK_CFB8 = 0x00001007n;
+export const CKM_SKIPJACK_WRAP = 0x00001008n;
+export const CKM_SKIPJACK_PRIVATE_WRAP = 0x00001009n;
+export const CKM_SKIPJACK_RELAYX = 0x0000100an;
+export const CKM_KEA_KEY_PAIR_GEN = 0x00001010n;
+export const CKM_KEA_KEY_DERIVE = 0x00001011n;
+export const CKM_KEA_DERIVE = 0x00001012n;
+export const CKM_FORTEZZA_TIMESTAMP = 0x00001020n;
+export const CKM_BATON_KEY_GEN = 0x00001030n;
+export const CKM_BATON_ECB128 = 0x00001031n;
+export const CKM_BATON_ECB96 = 0x00001032n;
+export const CKM_BATON_CBC128 = 0x00001033n;
+export const CKM_BATON_COUNTER = 0x00001034n;
+export const CKM_BATON_SHUFFLE = 0x00001035n;
+export const CKM_BATON_WRAP = 0x00001036n;
+export const CKM_ECDSA_KEY_PAIR_GEN = 0x00001040n;
+export const CKM_EC_KEY_PAIR_GEN = 0x00001040n;
+export const CKM_ECDSA = 0x00001041n;
+export const CKM_ECDSA_SHA1 = 0x00001042n;
+export const CKM_ECDSA_SHA224 = 0x00001043n;
+export const CKM_ECDSA_SHA256 = 0x00001044n;
+export const CKM_ECDSA_SHA384 = 0x00001045n;
+export const CKM_ECDSA_SHA512 = 0x00001046n;
+export const CKM_EC_KEY_PAIR_GEN_W_EXTRA_BITS = 0x0000140bn;
+export const CKM_ECDH1_DERIVE = 0x00001050n;
+export const CKM_ECDH1_COFACTOR_DERIVE = 0x00001051n;
+export const CKM_ECMQV_DERIVE = 0x00001052n;
+export const CKM_ECDH_AES_KEY_WRAP = 0x00001053n;
+export const CKM_RSA_AES_KEY_WRAP = 0x00001054n;
+export const CKM_JUNIPER_KEY_GEN = 0x00001060n;
+export const CKM_JUNIPER_ECB128 = 0x00001061n;
+export const CKM_JUNIPER_CBC128 = 0x00001062n;
+export const CKM_JUNIPER_COUNTER = 0x00001063n;
+export const CKM_JUNIPER_SHUFFLE = 0x00001064n;
+export const CKM_JUNIPER_WRAP = 0x00001065n;
+export const CKM_FASTHASH = 0x00001070n;
+export const CKM_AES_XTS = 0x00001071n;
+export const CKM_AES_XTS_KEY_GEN = 0x00001072n;
+export const CKM_AES_KEY_GEN = 0x00001080n;
+export const CKM_AES_ECB = 0x00001081n;
+export const CKM_AES_CBC = 0x00001082n;
+export const CKM_AES_MAC = 0x00001083n;
+export const CKM_AES_MAC_GENERAL = 0x00001084n;
+export const CKM_AES_CBC_PAD = 0x00001085n;
+export const CKM_AES_CTR = 0x00001086n;
+export const CKM_AES_GCM = 0x00001087n;
+export const CKM_AES_CCM = 0x00001088n;
+export const CKM_AES_CTS = 0x00001089n;
+export const CKM_AES_CMAC = 0x0000108an;
+export const CKM_AES_CMAC_GENERAL = 0x0000108bn;
+export const CKM_AES_XCBC_MAC = 0x0000108cn;
+export const CKM_AES_XCBC_MAC_96 = 0x0000108dn;
+export const CKM_AES_GMAC = 0x0000108en;
+export const CKM_BLOWFISH_KEY_GEN = 0x00001090n;
+export const CKM_BLOWFISH_CBC = 0x00001091n;
+export const CKM_TWOFISH_KEY_GEN = 0x00001092n;
+export const CKM_TWOFISH_CBC = 0x00001093n;
+export const CKM_BLOWFISH_CBC_PAD = 0x00001094n;
+export const CKM_TWOFISH_CBC_PAD = 0x00001095n;
+export const CKM_DES_ECB_ENCRYPT_DATA = 0x00001100n;
+export const CKM_DES_CBC_ENCRYPT_DATA = 0x00001101n;
+export const CKM_DES3_ECB_ENCRYPT_DATA = 0x00001102n;
+export const CKM_DES3_CBC_ENCRYPT_DATA = 0x00001103n;
+export const CKM_AES_ECB_ENCRYPT_DATA = 0x00001104n;
+export const CKM_AES_CBC_ENCRYPT_DATA = 0x00001105n;
+export const CKM_GOSTR3410_KEY_PAIR_GEN = 0x00001200n;
+export const CKM_GOSTR3410 = 0x00001201n;
+export const CKM_GOSTR3410_WITH_GOSTR3411 = 0x00001202n;
+export const CKM_GOSTR3410_KEY_WRAP = 0x00001203n;
+export const CKM_GOSTR3410_DERIVE = 0x00001204n;
+export const CKM_GOSTR3411 = 0x00001210n;
+export const CKM_GOSTR3411_HMAC = 0x00001211n;
+export const CKM_GOST28147_KEY_GEN = 0x00001220n;
+export const CKM_GOST28147_ECB = 0x00001221n;
+export const CKM_GOST28147 = 0x00001222n;
+export const CKM_GOST28147_MAC = 0x00001223n;
+export const CKM_GOST28147_KEY_WRAP = 0x00001224n;
+export const CKM_CHACHA20_KEY_GEN = 0x00001225n;
+export const CKM_CHACHA20 = 0x00001226n;
+export const CKM_POLY1305_KEY_GEN = 0x00001227n;
+export const CKM_POLY1305 = 0x00001228n;
+export const CKM_DSA_PARAMETER_GEN = 0x00002000n;
+export const CKM_DH_PKCS_PARAMETER_GEN = 0x00002001n;
+export const CKM_X9_42_DH_PARAMETER_GEN = 0x00002002n;
+export const CKM_DSA_PROBABILISTIC_PARAMETER_GEN = 0x00002003n;
+export const CKM_DSA_PROBABLISTIC_PARAMETER_GEN = CKM_DSA_PROBABILISTIC_PARAMETER_GEN;
+export const CKM_DSA_SHAWE_TAYLOR_PARAMETER_GEN = 0x00002004n;
+export const CKM_DSA_FIPS_G_GEN = 0x00002005n;
+export const CKM_AES_OFB = 0x00002104n;
+export const CKM_AES_CFB64 = 0x00002105n;
+export const CKM_AES_CFB8 = 0x00002106n;
+export const CKM_AES_CFB128 = 0x00002107n;
+export const CKM_AES_CFB1 = 0x00002108n;
+export const CKM_AES_KEY_WRAP = 0x00002109n;
+export const CKM_AES_KEY_WRAP_PAD = 0x0000210an;
+export const CKM_AES_KEY_WRAP_KWP = 0x0000210bn;
+export const CKM_AES_KEY_WRAP_PKCS7 = 0x0000210cn;
+export const CKM_RSA_PKCS_TPM_1_1 = 0x00004001n;
+export const CKM_RSA_PKCS_OAEP_TPM_1_1 = 0x00004002n;
+export const CKM_SHA_1_KEY_GEN = 0x00004003n;
+export const CKM_SHA224_KEY_GEN = 0x00004004n;
+export const CKM_SHA256_KEY_GEN = 0x00004005n;
+export const CKM_SHA384_KEY_GEN = 0x00004006n;
+export const CKM_SHA512_KEY_GEN = 0x00004007n;
+export const CKM_SHA512_224_KEY_GEN = 0x00004008n;
+export const CKM_SHA512_256_KEY_GEN = 0x00004009n;
+export const CKM_SHA512_T_KEY_GEN = 0x0000400an;
+export const CKM_NULL = 0x0000400bn;
+export const CKM_BLAKE2B_160 = 0x0000400cn;
+export const CKM_BLAKE2B_160_HMAC = 0x0000400dn;
+export const CKM_BLAKE2B_160_HMAC_GENERAL = 0x0000400en;
+export const CKM_BLAKE2B_160_KEY_DERIVE = 0x0000400fn;
+export const CKM_BLAKE2B_160_KEY_GEN = 0x00004010n;
+export const CKM_BLAKE2B_256 = 0x00004011n;
+export const CKM_BLAKE2B_256_HMAC = 0x00004012n;
+export const CKM_BLAKE2B_256_HMAC_GENERAL = 0x00004013n;
+export const CKM_BLAKE2B_256_KEY_DERIVE = 0x00004014n;
+export const CKM_BLAKE2B_256_KEY_GEN = 0x00004015n;
+export const CKM_BLAKE2B_384 = 0x00004016n;
+export const CKM_BLAKE2B_384_HMAC = 0x00004017n;
+export const CKM_BLAKE2B_384_HMAC_GENERAL = 0x00004018n;
+export const CKM_BLAKE2B_384_KEY_DERIVE = 0x00004019n;
+export const CKM_BLAKE2B_384_KEY_GEN = 0x0000401an;
+export const CKM_BLAKE2B_512 = 0x0000401bn;
+export const CKM_BLAKE2B_512_HMAC = 0x0000401cn;
+export const CKM_BLAKE2B_512_HMAC_GENERAL = 0x0000401dn;
+export const CKM_BLAKE2B_512_KEY_DERIVE = 0x0000401en;
+export const CKM_BLAKE2B_512_KEY_GEN = 0x0000401fn;
+export const CKM_SALSA20 = 0x00004020n;
+export const CKM_CHACHA20_POLY1305 = 0x00004021n;
+export const CKM_SALSA20_POLY1305 = 0x00004022n;
+export const CKM_X3DH_INITIALIZE = 0x00004023n;
+export const CKM_X3DH_RESPOND = 0x00004024n;
+export const CKM_X2RATCHET_INITIALIZE = 0x00004025n;
+export const CKM_X2RATCHET_RESPOND = 0x00004026n;
+export const CKM_X2RATCHET_ENCRYPT = 0x00004027n;
+export const CKM_X2RATCHET_DECRYPT = 0x00004028n;
+export const CKM_XEDDSA = 0x00004029n;
+export const CKM_HKDF_DERIVE = 0x0000402an;
+export const CKM_HKDF_DATA = 0x0000402bn;
+export const CKM_HKDF_KEY_GEN = 0x0000402cn;
+export const CKM_SALSA20_KEY_GEN = 0x0000402dn;
+export const CKM_ECDSA_SHA3_224 = 0x00001047n;
+export const CKM_ECDSA_SHA3_256 = 0x00001048n;
+export const CKM_ECDSA_SHA3_384 = 0x00001049n;
+export const CKM_ECDSA_SHA3_512 = 0x0000104an;
+export const CKM_EC_EDWARDS_KEY_PAIR_GEN = 0x00001055n;
+export const CKM_EC_MONTGOMERY_KEY_PAIR_GEN = 0x00001056n;
+export const CKM_EDDSA = 0x00001057n;
+export const CKM_SP800_108_COUNTER_KDF = 0x000003acn;
+export const CKM_SP800_108_FEEDBACK_KDF = 0x000003adn;
+export const CKM_SP800_108_DOUBLE_PIPELINE_KDF = 0x000003aen;
+export const CKM_IKE2_PRF_PLUS_DERIVE = 0x0000402en;
+export const CKM_IKE_PRF_DERIVE = 0x0000402fn;
+export const CKM_IKE1_PRF_DERIVE = 0x00004030n;
+export const CKM_IKE1_EXTENDED_DERIVE = 0x00004031n;
+export const CKM_HSS_KEY_PAIR_GEN = 0x00004032n;
+export const CKM_HSS = 0x00004033n;
+export const CKM_XMSS_KEY_PAIR_GEN = 0x00004034n;
+export const CKM_XMSSMT_KEY_PAIR_GEN = 0x00004035n;
+export const CKM_XMSS = 0x00004036n;
+export const CKM_XMSSMT = 0x00004037n;
+export const CKM_ECDH_X_AES_KEY_WRAP = 0x00004038n;
+export const CKM_ECDH_COF_AES_KEY_WRAP = 0x00004039n;
+export const CKM_PUB_KEY_FROM_PRIV_KEY = 0x0000403an;
+export const CKM_ML_KEM_KEY_PAIR_GEN = 0x0000000fn;
+export const CKM_ML_KEM = 0x00000017n;
+export const CKM_ML_DSA_KEY_PAIR_GEN = 0x0000001cn;
+export const CKM_ML_DSA = 0x0000001dn;
+export const CKM_HASH_ML_DSA = 0x0000001fn;
+export const CKM_HASH_ML_DSA_SHA224 = 0x00000023n;
+export const CKM_HASH_ML_DSA_SHA256 = 0x00000024n;
+export const CKM_HASH_ML_DSA_SHA384 = 0x00000025n;
+export const CKM_HASH_ML_DSA_SHA512 = 0x00000026n;
+export const CKM_HASH_ML_DSA_SHA3_224 = 0x00000027n;
+export const CKM_HASH_ML_DSA_SHA3_256 = 0x00000028n;
+export const CKM_HASH_ML_DSA_SHA3_384 = 0x00000029n;
+export const CKM_HASH_ML_DSA_SHA3_512 = 0x0000002an;
+export const CKM_HASH_ML_DSA_SHAKE128 = 0x0000002bn;
+export const CKM_HASH_ML_DSA_SHAKE256 = 0x0000002cn;
+export const CKM_SLH_DSA_KEY_PAIR_GEN = 0x0000002dn;
+export const CKM_SLH_DSA = 0x0000002en;
+export const CKM_HASH_SLH_DSA = 0x00000034n;
+export const CKM_HASH_SLH_DSA_SHA224 = 0x00000036n;
+export const CKM_HASH_SLH_DSA_SHA256 = 0x00000037n;
+export const CKM_HASH_SLH_DSA_SHA384 = 0x00000038n;
+export const CKM_HASH_SLH_DSA_SHA512 = 0x00000039n;
+export const CKM_HASH_SLH_DSA_SHA3_224 = 0x0000003an;
+export const CKM_HASH_SLH_DSA_SHA3_256 = 0x0000003bn;
+export const CKM_HASH_SLH_DSA_SHA3_384 = 0x0000003cn;
+export const CKM_HASH_SLH_DSA_SHA3_512 = 0x0000003dn;
+export const CKM_HASH_SLH_DSA_SHAKE128 = 0x0000003en;
+export const CKM_HASH_SLH_DSA_SHAKE256 = 0x0000003fn;
+export const CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE = 0x00000056n;
+export const CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE_DH = 0x00000057n;
+export const CKM_VENDOR_DEFINED = 0x80000000n;
+export const CKF_HW = 0x00000001n;
+export const CKF_MESSAGE_ENCRYPT = 0x00000002n;
+export const CKF_MESSAGE_DECRYPT = 0x00000004n;
+export const CKF_MESSAGE_SIGN = 0x00000008n;
+export const CKF_MESSAGE_VERIFY = 0x00000010n;
+export const CKF_MULTI_MESSAGE = 0x00000020n;
+export const CKF_MULTI_MESSGE = CKF_MULTI_MESSAGE;
+export const CKF_FIND_OBJECTS = 0x00000040n;
+export const CKF_ENCRYPT = 0x00000100n;
+export const CKF_DECRYPT = 0x00000200n;
+export const CKF_DIGEST = 0x00000400n;
+export const CKF_SIGN = 0x00000800n;
+export const CKF_SIGN_RECOVER = 0x00001000n;
+export const CKF_VERIFY = 0x00002000n;
+export const CKF_VERIFY_RECOVER = 0x00004000n;
+export const CKF_GENERATE = 0x00008000n;
+export const CKF_GENERATE_KEY_PAIR = 0x00010000n;
+export const CKF_WRAP = 0x00020000n;
+export const CKF_UNWRAP = 0x00040000n;
+export const CKF_DERIVE = 0x00080000n;
+export const CKF_EC_F_P = 0x00100000n;
+export const CKF_EC_F_2M = 0x00200000n;
+export const CKF_EC_ECPARAMETERS = 0x00400000n;
+export const CKF_EC_OID = 0x00800000n;
+export const CKF_EC_NAMEDCURVE = CKF_EC_OID;
+export const CKF_EC_UNCOMPRESS = 0x01000000n;
+export const CKF_EC_COMPRESS = 0x02000000n;
+export const CKF_EC_CURVENAME = 0x04000000n;
+export const CKF_ENCAPSULATE = 0x10000000n;
+export const CKF_DECAPSULATE = 0x20000000n;
+export const CKF_EXTENSION = 0x80000000n;
+export const CKR_OK = 0x00000000n;
+export const CKR_CANCEL = 0x00000001n;
+export const CKR_HOST_MEMORY = 0x00000002n;
+export const CKR_SLOT_ID_INVALID = 0x00000003n;
+export const CKR_GENERAL_ERROR = 0x00000005n;
+export const CKR_FUNCTION_FAILED = 0x00000006n;
+export const CKR_ARGUMENTS_BAD = 0x00000007n;
+export const CKR_NO_EVENT = 0x00000008n;
+export const CKR_NEED_TO_CREATE_THREADS = 0x00000009n;
+export const CKR_CANT_LOCK = 0x0000000an;
+export const CKR_ATTRIBUTE_READ_ONLY = 0x00000010n;
+export const CKR_ATTRIBUTE_SENSITIVE = 0x00000011n;
+export const CKR_ATTRIBUTE_TYPE_INVALID = 0x00000012n;
+export const CKR_ATTRIBUTE_VALUE_INVALID = 0x00000013n;
+export const CKR_ACTION_PROHIBITED = 0x0000001bn;
+export const CKR_DATA_INVALID = 0x00000020n;
+export const CKR_DATA_LEN_RANGE = 0x00000021n;
+export const CKR_DEVICE_ERROR = 0x00000030n;
+export const CKR_DEVICE_MEMORY = 0x00000031n;
+export const CKR_DEVICE_REMOVED = 0x00000032n;
+export const CKR_ENCRYPTED_DATA_INVALID = 0x00000040n;
+export const CKR_ENCRYPTED_DATA_LEN_RANGE = 0x00000041n;
+export const CKR_AEAD_DECRYPT_FAILED = 0x00000042n;
+export const CKR_FUNCTION_CANCELED = 0x00000050n;
+export const CKR_FUNCTION_NOT_PARALLEL = 0x00000051n;
+export const CKR_FUNCTION_NOT_SUPPORTED = 0x00000054n;
+export const CKR_KEY_HANDLE_INVALID = 0x00000060n;
+export const CKR_KEY_SIZE_RANGE = 0x00000062n;
+export const CKR_KEY_TYPE_INCONSISTENT = 0x00000063n;
+export const CKR_KEY_NOT_NEEDED = 0x00000064n;
+export const CKR_KEY_CHANGED = 0x00000065n;
+export const CKR_KEY_NEEDED = 0x00000066n;
+export const CKR_KEY_INDIGESTIBLE = 0x00000067n;
+export const CKR_KEY_FUNCTION_NOT_PERMITTED = 0x00000068n;
+export const CKR_KEY_NOT_WRAPPABLE = 0x00000069n;
+export const CKR_KEY_UNEXTRACTABLE = 0x0000006an;
+export const CKR_MECHANISM_INVALID = 0x00000070n;
+export const CKR_MECHANISM_PARAM_INVALID = 0x00000071n;
+export const CKR_OBJECT_HANDLE_INVALID = 0x00000082n;
+export const CKR_OPERATION_ACTIVE = 0x00000090n;
+export const CKR_OPERATION_NOT_INITIALIZED = 0x00000091n;
+export const CKR_PIN_INCORRECT = 0x000000a0n;
+export const CKR_PIN_INVALID = 0x000000a1n;
+export const CKR_PIN_LEN_RANGE = 0x000000a2n;
+export const CKR_PIN_EXPIRED = 0x000000a3n;
+export const CKR_PIN_LOCKED = 0x000000a4n;
+export const CKR_SESSION_CLOSED = 0x000000b0n;
+export const CKR_SESSION_COUNT = 0x000000b1n;
+export const CKR_SESSION_HANDLE_INVALID = 0x000000b3n;
+export const CKR_SESSION_PARALLEL_NOT_SUPPORTED = 0x000000b4n;
+export const CKR_SESSION_READ_ONLY = 0x000000b5n;
+export const CKR_SESSION_EXISTS = 0x000000b6n;
+export const CKR_SESSION_READ_ONLY_EXISTS = 0x000000b7n;
+export const CKR_SESSION_READ_WRITE_SO_EXISTS = 0x000000b8n;
+export const CKR_SIGNATURE_INVALID = 0x000000c0n;
+export const CKR_SIGNATURE_LEN_RANGE = 0x000000c1n;
+export const CKR_TEMPLATE_INCOMPLETE = 0x000000d0n;
+export const CKR_TEMPLATE_INCONSISTENT = 0x000000d1n;
+export const CKR_TOKEN_NOT_PRESENT = 0x000000e0n;
+export const CKR_TOKEN_NOT_RECOGNIZED = 0x000000e1n;
+export const CKR_TOKEN_WRITE_PROTECTED = 0x000000e2n;
+export const CKR_UNWRAPPING_KEY_HANDLE_INVALID = 0x000000f0n;
+export const CKR_UNWRAPPING_KEY_SIZE_RANGE = 0x000000f1n;
+export const CKR_UNWRAPPING_KEY_TYPE_INCONSISTENT = 0x000000f2n;
+export const CKR_USER_ALREADY_LOGGED_IN = 0x00000100n;
+export const CKR_USER_NOT_LOGGED_IN = 0x00000101n;
+export const CKR_USER_PIN_NOT_INITIALIZED = 0x00000102n;
+export const CKR_USER_TYPE_INVALID = 0x00000103n;
+export const CKR_USER_ANOTHER_ALREADY_LOGGED_IN = 0x00000104n;
+export const CKR_USER_TOO_MANY_TYPES = 0x00000105n;
+export const CKR_WRAPPED_KEY_INVALID = 0x00000110n;
+export const CKR_WRAPPED_KEY_LEN_RANGE = 0x00000112n;
+export const CKR_WRAPPING_KEY_HANDLE_INVALID = 0x00000113n;
+export const CKR_WRAPPING_KEY_SIZE_RANGE = 0x00000114n;
+export const CKR_WRAPPING_KEY_TYPE_INCONSISTENT = 0x00000115n;
+export const CKR_RANDOM_SEED_NOT_SUPPORTED = 0x00000120n;
+export const CKR_RANDOM_NO_RNG = 0x00000121n;
+export const CKR_DOMAIN_PARAMS_INVALID = 0x00000130n;
+export const CKR_CURVE_NOT_SUPPORTED = 0x00000140n;
+export const CKR_BUFFER_TOO_SMALL = 0x00000150n;
+export const CKR_SAVED_STATE_INVALID = 0x00000160n;
+export const CKR_INFORMATION_SENSITIVE = 0x00000170n;
+export const CKR_STATE_UNSAVEABLE = 0x00000180n;
+export const CKR_CRYPTOKI_NOT_INITIALIZED = 0x00000190n;
+export const CKR_CRYPTOKI_ALREADY_INITIALIZED = 0x00000191n;
+export const CKR_MUTEX_BAD = 0x000001a0n;
+export const CKR_MUTEX_NOT_LOCKED = 0x000001a1n;
+export const CKR_NEW_PIN_MODE = 0x000001b0n;
+export const CKR_NEXT_OTP = 0x000001b1n;
+export const CKR_EXCEEDED_MAX_ITERATIONS = 0x000001b5n;
+export const CKR_FIPS_SELF_TEST_FAILED = 0x000001b6n;
+export const CKR_LIBRARY_LOAD_FAILED = 0x000001b7n;
+export const CKR_PIN_TOO_WEAK = 0x000001b8n;
+export const CKR_PUBLIC_KEY_INVALID = 0x000001b9n;
+export const CKR_FUNCTION_REJECTED = 0x00000200n;
+export const CKR_TOKEN_RESOURCE_EXCEEDED = 0x00000201n;
+export const CKR_OPERATION_CANCEL_FAILED = 0x00000202n;
+export const CKR_KEY_EXHAUSTED = 0x00000203n;
+export const CKR_PENDING = 0x00000204n;
+export const CKR_SESSION_ASYNC_NOT_SUPPORTED = 0x00000205n;
+export const CKR_SEED_RANDOM_REQUIRED = 0x00000206n;
+export const CKR_OPERATION_NOT_VALIDATED = 0x00000207n;
+export const CKR_TOKEN_NOT_INITIALIZED = 0x00000208n;
+export const CKR_PARAMETER_SET_NOT_SUPPORTED = 0x00000209n;
+export const CKR_VENDOR_DEFINED = 0x80000000n;
+export const CKF_END_OF_MESSAGE = 0x00000001n;
+export const CKF_INTERFACE_FORK_SAFE = 0x00000001n;
+export const CKF_LIBRARY_CANT_CREATE_OS_THREADS = 0x00000001n;
+export const CKF_OS_LOCKING_OK = 0x00000002n;
+export const CKF_DONT_BLOCK = 1n;
+export const CKG_MGF1_SHA1 = 0x00000001n;
+export const CKG_MGF1_SHA256 = 0x00000002n;
+export const CKG_MGF1_SHA384 = 0x00000003n;
+export const CKG_MGF1_SHA512 = 0x00000004n;
+export const CKG_MGF1_SHA224 = 0x00000005n;
+export const CKG_MGF1_SHA3_224 = 0x00000006n;
+export const CKG_MGF1_SHA3_256 = 0x00000007n;
+export const CKG_MGF1_SHA3_384 = 0x00000008n;
+export const CKG_MGF1_SHA3_512 = 0x00000009n;
+export const CKZ_DATA_SPECIFIED = 0x00000001n;
+export const CKD_NULL = 0x00000001n;
+export const CKD_SHA1_KDF = 0x00000002n;
+export const CKD_SHA1_KDF_ASN1 = 0x00000003n;
+export const CKD_SHA1_KDF_CONCATENATE = 0x00000004n;
+export const CKD_SHA224_KDF = 0x00000005n;
+export const CKD_SHA256_KDF = 0x00000006n;
+export const CKD_SHA384_KDF = 0x00000007n;
+export const CKD_SHA512_KDF = 0x00000008n;
+export const CKD_CPDIVERSIFY_KDF = 0x00000009n;
+export const CKD_SHA3_224_KDF = 0x0000000an;
+export const CKD_SHA3_256_KDF = 0x0000000bn;
+export const CKD_SHA3_384_KDF = 0x0000000cn;
+export const CKD_SHA3_512_KDF = 0x0000000dn;
+export const CKD_SHA1_KDF_SP800 = 0x0000000en;
+export const CKD_SHA224_KDF_SP800 = 0x0000000fn;
+export const CKD_SHA256_KDF_SP800 = 0x00000010n;
+export const CKD_SHA384_KDF_SP800 = 0x00000011n;
+export const CKD_SHA512_KDF_SP800 = 0x00000012n;
+export const CKD_SHA3_224_KDF_SP800 = 0x00000013n;
+export const CKD_SHA3_256_KDF_SP800 = 0x00000014n;
+export const CKD_SHA3_384_KDF_SP800 = 0x00000015n;
+export const CKD_SHA3_512_KDF_SP800 = 0x00000016n;
+export const CKD_BLAKE2B_160_KDF = 0x00000017n;
+export const CKD_BLAKE2B_256_KDF = 0x00000018n;
+export const CKD_BLAKE2B_384_KDF = 0x00000019n;
+export const CKD_BLAKE2B_512_KDF = 0x0000001an;
+export const CKP_PKCS5_PBKD2_HMAC_SHA1 = 0x00000001n;
+export const CKP_PKCS5_PBKD2_HMAC_GOSTR3411 = 0x00000002n;
+export const CKP_PKCS5_PBKD2_HMAC_SHA224 = 0x00000003n;
+export const CKP_PKCS5_PBKD2_HMAC_SHA256 = 0x00000004n;
+export const CKP_PKCS5_PBKD2_HMAC_SHA384 = 0x00000005n;
+export const CKP_PKCS5_PBKD2_HMAC_SHA512 = 0x00000006n;
+export const CKP_PKCS5_PBKD2_HMAC_SHA512_224 = 0x00000007n;
+export const CKP_PKCS5_PBKD2_HMAC_SHA512_256 = 0x00000008n;
+export const CKZ_SALT_SPECIFIED = 0x00000001n;
+export const CK_OTP_VALUE = 0n;
+export const CK_OTP_PIN = 1n;
+export const CK_OTP_CHALLENGE = 2n;
+export const CK_OTP_TIME = 3n;
+export const CK_OTP_COUNTER = 4n;
+export const CK_OTP_FLAGS = 5n;
+export const CK_OTP_OUTPUT_LENGTH = 6n;
+export const CK_OTP_OUTPUT_FORMAT = 7n;
+export const CKF_NEXT_OTP = 0x00000001n;
+export const CKF_EXCLUDE_TIME = 0x00000002n;
+export const CKF_EXCLUDE_COUNTER = 0x00000004n;
+export const CKF_EXCLUDE_CHALLENGE = 0x00000008n;
+export const CKF_EXCLUDE_PIN = 0x00000010n;
+export const CKF_USER_FRIENDLY_OTP = 0x00000020n;
+export const CKG_NO_GENERATE = 0x00000000n;
+export const CKG_GENERATE = 0x00000001n;
+export const CKG_GENERATE_COUNTER = 0x00000002n;
+export const CKG_GENERATE_RANDOM = 0x00000003n;
+export const CKG_GENERATE_COUNTER_XOR = 0x00000004n;
+export const CK_SP800_108_ITERATION_VARIABLE = 0x00000001n;
+export const CK_SP800_108_OPTIONAL_COUNTER = 0x00000002n;
+export const CK_SP800_108_DKM_LENGTH = 0x00000003n;
+export const CK_SP800_108_BYTE_ARRAY = 0x00000004n;
+export const CK_SP800_108_COUNTER = CK_SP800_108_OPTIONAL_COUNTER;
+export const CK_SP800_108_KEY_HANDLE = 0x00000005n;
+export const CK_SP800_108_DKM_LENGTH_SUM_OF_KEYS = 0x00000001n;
+export const CK_SP800_108_DKM_LENGTH_SUM_OF_SEGMENTS = 0x00000002n;
+export const CKF_HKDF_SALT_NULL = 0x00000001n;
+export const CKF_HKDF_SALT_DATA = 0x00000002n;
+export const CKF_HKDF_SALT_KEY = 0x00000004n;
+export const CKS_LAST_VALIDATION_OK = 0x00000001n;
+export const CKV_AUTHORITY_TYPE_UNSPECIFIED = 0x00000000n;
+export const CKV_AUTHORITY_TYPE_NIST_CMVP = 0x00000001n;
+export const CKV_AUTHORITY_TYPE_COMMON_CRITERIA = 0x00000002n;
+export const CKV_TYPE_UNSPECIFIED = 0x00000000n;
+export const CKV_TYPE_SOFTWARE = 0x00000001n;
+export const CKV_TYPE_HARDWARE = 0x00000002n;
+export const CKV_TYPE_FIRMWARE = 0x00000003n;
+export const CKV_TYPE_HYBRID = 0x00000004n;
+export const CKH_HEDGE_PREFERRED = 0x00000000n;
+export const CKH_HEDGE_REQUIRED = 0x00000001n;
+export const CKH_DETERMINISTIC_REQUIRED = 0x00000002n;
+export const CKP_ML_DSA_44 = 0x00000001n;
+export const CKP_ML_DSA_65 = 0x00000002n;
+export const CKP_ML_DSA_87 = 0x00000003n;
+export const CKP_SLH_DSA_SHA2_128S = 0x00000001n;
+export const CKP_SLH_DSA_SHAKE_128S = 0x00000002n;
+export const CKP_SLH_DSA_SHA2_128F = 0x00000003n;
+export const CKP_SLH_DSA_SHAKE_128F = 0x00000004n;
+export const CKP_SLH_DSA_SHA2_192S = 0x00000005n;
+export const CKP_SLH_DSA_SHAKE_192S = 0x00000006n;
+export const CKP_SLH_DSA_SHA2_192F = 0x00000007n;
+export const CKP_SLH_DSA_SHAKE_192F = 0x00000008n;
+export const CKP_SLH_DSA_SHA2_256S = 0x00000009n;
+export const CKP_SLH_DSA_SHAKE_256S = 0x0000000an;
+export const CKP_SLH_DSA_SHA2_256F = 0x0000000bn;
+export const CKP_SLH_DSA_SHAKE_256F = 0x0000000cn;
+export const CKP_ML_KEM_512 = 0x00000001n;
+export const CKP_ML_KEM_768 = 0x00000002n;
+export const CKP_ML_KEM_1024 = 0x00000003n;
+export const CKT_TRUST_UNKNOWN = 0x00000000n;
+export const CKT_TRUSTED = 0x00000001n;
+export const CKT_TRUST_ANCHOR = 0x00000002n;
+export const CKT_NOT_TRUSTED = 0x00000003n;
+export const CKT_TRUST_MUST_VERIFY_TRUST = 0x00000004n;
+
+export const constants = Object.freeze({
+  CRYPTOKI_VERSION_MAJOR,
+  CRYPTOKI_VERSION_MINOR,
+  CRYPTOKI_VERSION_AMENDMENT,
+  CK_TRUE,
+  CK_FALSE,
+  CK_UNAVAILABLE_INFORMATION,
+  CK_EFFECTIVELY_INFINITE,
+  CK_INVALID_HANDLE,
+  CKN_SURRENDER,
+  CKN_OTP_CHANGED,
+  CKF_TOKEN_PRESENT,
+  CKF_REMOVABLE_DEVICE,
+  CKF_HW_SLOT,
+  CKF_RNG,
+  CKF_WRITE_PROTECTED,
+  CKF_LOGIN_REQUIRED,
+  CKF_USER_PIN_INITIALIZED,
+  CKF_RESTORE_KEY_NOT_NEEDED,
+  CKF_CLOCK_ON_TOKEN,
+  CKF_PROTECTED_AUTHENTICATION_PATH,
+  CKF_DUAL_CRYPTO_OPERATIONS,
+  CKF_TOKEN_INITIALIZED,
+  CKF_SECONDARY_AUTHENTICATION,
+  CKF_USER_PIN_COUNT_LOW,
+  CKF_USER_PIN_FINAL_TRY,
+  CKF_USER_PIN_LOCKED,
+  CKF_USER_PIN_TO_BE_CHANGED,
+  CKF_SO_PIN_COUNT_LOW,
+  CKF_SO_PIN_FINAL_TRY,
+  CKF_SO_PIN_LOCKED,
+  CKF_SO_PIN_TO_BE_CHANGED,
+  CKF_ERROR_STATE,
+  CKF_SEED_RANDOM_REQUIRED,
+  CKF_ASYNC_SESSION_SUPPORTED,
+  CKU_SO,
+  CKU_USER,
+  CKU_CONTEXT_SPECIFIC,
+  CKS_RO_PUBLIC_SESSION,
+  CKS_RO_USER_FUNCTIONS,
+  CKS_RW_PUBLIC_SESSION,
+  CKS_RW_USER_FUNCTIONS,
+  CKS_RW_SO_FUNCTIONS,
+  CKF_RW_SESSION,
+  CKF_SERIAL_SESSION,
+  CKF_ASYNC_SESSION,
+  CKO_DATA,
+  CKO_CERTIFICATE,
+  CKO_PUBLIC_KEY,
+  CKO_PRIVATE_KEY,
+  CKO_SECRET_KEY,
+  CKO_HW_FEATURE,
+  CKO_DOMAIN_PARAMETERS,
+  CKO_MECHANISM,
+  CKO_OTP_KEY,
+  CKO_PROFILE,
+  CKO_VALIDATION,
+  CKO_TRUST,
+  CKO_VENDOR_DEFINED,
+  CKP_INVALID_ID,
+  CKP_BASELINE_PROVIDER,
+  CKP_EXTENDED_PROVIDER,
+  CKP_AUTHENTICATION_TOKEN,
+  CKP_PUBLIC_CERTIFICATES_TOKEN,
+  CKP_COMPLETE_PROVIDER,
+  CKP_HKDF_TLS_TOKEN,
+  CKP_VENDOR_DEFINED,
+  CKH_MONOTONIC_COUNTER,
+  CKH_CLOCK,
+  CKH_USER_INTERFACE,
+  CKH_VENDOR_DEFINED,
+  CKK_RSA,
+  CKK_DSA,
+  CKK_DH,
+  CKK_ECDSA,
+  CKK_EC,
+  CKK_X9_42_DH,
+  CKK_KEA,
+  CKK_GENERIC_SECRET,
+  CKK_RC2,
+  CKK_RC4,
+  CKK_DES,
+  CKK_DES2,
+  CKK_DES3,
+  CKK_CAST,
+  CKK_CAST3,
+  CKK_CAST5,
+  CKK_CAST128,
+  CKK_RC5,
+  CKK_IDEA,
+  CKK_SKIPJACK,
+  CKK_BATON,
+  CKK_JUNIPER,
+  CKK_CDMF,
+  CKK_AES,
+  CKK_BLOWFISH,
+  CKK_TWOFISH,
+  CKK_SECURID,
+  CKK_HOTP,
+  CKK_ACTI,
+  CKK_CAMELLIA,
+  CKK_ARIA,
+  CKK_MD5_HMAC,
+  CKK_SHA_1_HMAC,
+  CKK_RIPEMD128_HMAC,
+  CKK_RIPEMD160_HMAC,
+  CKK_SHA256_HMAC,
+  CKK_SHA384_HMAC,
+  CKK_SHA512_HMAC,
+  CKK_SHA224_HMAC,
+  CKK_SEED,
+  CKK_GOSTR3410,
+  CKK_GOSTR3411,
+  CKK_GOST28147,
+  CKK_CHACHA20,
+  CKK_POLY1305,
+  CKK_AES_XTS,
+  CKK_SHA3_224_HMAC,
+  CKK_SHA3_256_HMAC,
+  CKK_SHA3_384_HMAC,
+  CKK_SHA3_512_HMAC,
+  CKK_BLAKE2B_160_HMAC,
+  CKK_BLAKE2B_256_HMAC,
+  CKK_BLAKE2B_384_HMAC,
+  CKK_BLAKE2B_512_HMAC,
+  CKK_SALSA20,
+  CKK_X2RATCHET,
+  CKK_EC_EDWARDS,
+  CKK_EC_MONTGOMERY,
+  CKK_HKDF,
+  CKK_SHA512_224_HMAC,
+  CKK_SHA512_256_HMAC,
+  CKK_SHA512_T_HMAC,
+  CKK_HSS,
+  CKK_XMSS,
+  CKK_XMSSMT,
+  CKK_ML_KEM,
+  CKK_ML_DSA,
+  CKK_SLH_DSA,
+  CKK_VENDOR_DEFINED,
+  CK_CERTIFICATE_CATEGORY_UNSPECIFIED,
+  CK_CERTIFICATE_CATEGORY_TOKEN_USER,
+  CK_CERTIFICATE_CATEGORY_AUTHORITY,
+  CK_CERTIFICATE_CATEGORY_OTHER_ENTITY,
+  CK_SECURITY_DOMAIN_UNSPECIFIED,
+  CK_SECURITY_DOMAIN_MANUFACTURER,
+  CK_SECURITY_DOMAIN_OPERATOR,
+  CK_SECURITY_DOMAIN_THIRD_PARTY,
+  CKC_X_509,
+  CKC_X_509_ATTR_CERT,
+  CKC_WTLS,
+  CKC_VENDOR_DEFINED,
+  CKF_ARRAY_ATTRIBUTE,
+  CK_OTP_FORMAT_DECIMAL,
+  CK_OTP_FORMAT_HEXADECIMAL,
+  CK_OTP_FORMAT_ALPHANUMERIC,
+  CK_OTP_FORMAT_BINARY,
+  CK_OTP_PARAM_IGNORED,
+  CK_OTP_PARAM_OPTIONAL,
+  CK_OTP_PARAM_MANDATORY,
+  CKA_CLASS,
+  CKA_TOKEN,
+  CKA_PRIVATE,
+  CKA_LABEL,
+  CKA_UNIQUE_ID,
+  CKA_APPLICATION,
+  CKA_VALUE,
+  CKA_OBJECT_ID,
+  CKA_CERTIFICATE_TYPE,
+  CKA_ISSUER,
+  CKA_SERIAL_NUMBER,
+  CKA_AC_ISSUER,
+  CKA_OWNER,
+  CKA_ATTR_TYPES,
+  CKA_TRUSTED,
+  CKA_CERTIFICATE_CATEGORY,
+  CKA_JAVA_MIDP_SECURITY_DOMAIN,
+  CKA_URL,
+  CKA_HASH_OF_SUBJECT_PUBLIC_KEY,
+  CKA_HASH_OF_ISSUER_PUBLIC_KEY,
+  CKA_NAME_HASH_ALGORITHM,
+  CKA_CHECK_VALUE,
+  CKA_KEY_TYPE,
+  CKA_SUBJECT,
+  CKA_ID,
+  CKA_SENSITIVE,
+  CKA_ENCRYPT,
+  CKA_DECRYPT,
+  CKA_WRAP,
+  CKA_UNWRAP,
+  CKA_SIGN,
+  CKA_SIGN_RECOVER,
+  CKA_VERIFY,
+  CKA_VERIFY_RECOVER,
+  CKA_DERIVE,
+  CKA_START_DATE,
+  CKA_END_DATE,
+  CKA_MODULUS,
+  CKA_MODULUS_BITS,
+  CKA_PUBLIC_EXPONENT,
+  CKA_PRIVATE_EXPONENT,
+  CKA_PRIME_1,
+  CKA_PRIME_2,
+  CKA_EXPONENT_1,
+  CKA_EXPONENT_2,
+  CKA_COEFFICIENT,
+  CKA_PUBLIC_KEY_INFO,
+  CKA_PRIME,
+  CKA_SUBPRIME,
+  CKA_BASE,
+  CKA_PRIME_BITS,
+  CKA_SUBPRIME_BITS,
+  CKA_SUB_PRIME_BITS,
+  CKA_VALUE_BITS,
+  CKA_VALUE_LEN,
+  CKA_EXTRACTABLE,
+  CKA_LOCAL,
+  CKA_NEVER_EXTRACTABLE,
+  CKA_ALWAYS_SENSITIVE,
+  CKA_KEY_GEN_MECHANISM,
+  CKA_MODIFIABLE,
+  CKA_COPYABLE,
+  CKA_DESTROYABLE,
+  CKA_ECDSA_PARAMS,
+  CKA_EC_PARAMS,
+  CKA_EC_POINT,
+  CKA_SECONDARY_AUTH,
+  CKA_AUTH_PIN_FLAGS,
+  CKA_ALWAYS_AUTHENTICATE,
+  CKA_WRAP_WITH_TRUSTED,
+  CKA_WRAP_TEMPLATE,
+  CKA_UNWRAP_TEMPLATE,
+  CKA_DERIVE_TEMPLATE,
+  CKA_OTP_FORMAT,
+  CKA_OTP_LENGTH,
+  CKA_OTP_TIME_INTERVAL,
+  CKA_OTP_USER_FRIENDLY_MODE,
+  CKA_OTP_CHALLENGE_REQUIREMENT,
+  CKA_OTP_TIME_REQUIREMENT,
+  CKA_OTP_COUNTER_REQUIREMENT,
+  CKA_OTP_PIN_REQUIREMENT,
+  CKA_OTP_COUNTER,
+  CKA_OTP_TIME,
+  CKA_OTP_USER_IDENTIFIER,
+  CKA_OTP_SERVICE_IDENTIFIER,
+  CKA_OTP_SERVICE_LOGO,
+  CKA_OTP_SERVICE_LOGO_TYPE,
+  CKA_GOSTR3410_PARAMS,
+  CKA_GOSTR3411_PARAMS,
+  CKA_GOST28147_PARAMS,
+  CKA_HW_FEATURE_TYPE,
+  CKA_RESET_ON_INIT,
+  CKA_HAS_RESET,
+  CKA_PIXEL_X,
+  CKA_PIXEL_Y,
+  CKA_RESOLUTION,
+  CKA_CHAR_ROWS,
+  CKA_CHAR_COLUMNS,
+  CKA_COLOR,
+  CKA_BITS_PER_PIXEL,
+  CKA_CHAR_SETS,
+  CKA_ENCODING_METHODS,
+  CKA_MIME_TYPES,
+  CKA_MECHANISM_TYPE,
+  CKA_REQUIRED_CMS_ATTRIBUTES,
+  CKA_DEFAULT_CMS_ATTRIBUTES,
+  CKA_SUPPORTED_CMS_ATTRIBUTES,
+  CKA_ALLOWED_MECHANISMS,
+  CKA_PROFILE_ID,
+  CKA_X2RATCHET_BAG,
+  CKA_X2RATCHET_BAGSIZE,
+  CKA_X2RATCHET_BOBS1STMSG,
+  CKA_X2RATCHET_CKR,
+  CKA_X2RATCHET_CKS,
+  CKA_X2RATCHET_DHP,
+  CKA_X2RATCHET_DHR,
+  CKA_X2RATCHET_DHS,
+  CKA_X2RATCHET_HKR,
+  CKA_X2RATCHET_HKS,
+  CKA_X2RATCHET_ISALICE,
+  CKA_X2RATCHET_NHKR,
+  CKA_X2RATCHET_NHKS,
+  CKA_X2RATCHET_NR,
+  CKA_X2RATCHET_NS,
+  CKA_X2RATCHET_PNS,
+  CKA_X2RATCHET_RK,
+  CKA_HSS_LEVELS,
+  CKA_HSS_LMS_TYPE,
+  CKA_HSS_LMOTS_TYPE,
+  CKA_HSS_LMS_TYPES,
+  CKA_HSS_LMOTS_TYPES,
+  CKA_HSS_KEYS_REMAINING,
+  CKA_PARAMETER_SET,
+  CKA_OBJECT_VALIDATION_FLAGS,
+  CKA_VALIDATION_TYPE,
+  CKA_VALIDATION_VERSION,
+  CKA_VALIDATION_LEVEL,
+  CKA_VALIDATION_MODULE_ID,
+  CKA_VALIDATION_FLAG,
+  CKA_VALIDATION_AUTHORITY_TYPE,
+  CKA_VALIDATION_COUNTRY,
+  CKA_VALIDATION_CERTIFICATE_IDENTIFIER,
+  CKA_VALIDATION_CERTIFICATE_URI,
+  CKA_VALIDATION_VENDOR_URI,
+  CKA_VALIDATION_PROFILE,
+  CKA_ENCAPSULATE_TEMPLATE,
+  CKA_DECAPSULATE_TEMPLATE,
+  CKA_TRUST_SERVER_AUTH,
+  CKA_TRUST_CLIENT_AUTH,
+  CKA_TRUST_CODE_SIGNING,
+  CKA_TRUST_EMAIL_PROTECTION,
+  CKA_TRUST_IPSEC_IKE,
+  CKA_TRUST_TIME_STAMPING,
+  CKA_TRUST_OCSP_SIGNING,
+  CKA_ENCAPSULATE,
+  CKA_DECAPSULATE,
+  CKA_HASH_OF_CERTIFICATE,
+  CKA_PUBLIC_CRC64_VALUE,
+  CKA_SEED,
+  CKA_VENDOR_DEFINED,
+  CKM_RSA_PKCS_KEY_PAIR_GEN,
+  CKM_RSA_PKCS,
+  CKM_RSA_9796,
+  CKM_RSA_X_509,
+  CKM_MD2_RSA_PKCS,
+  CKM_MD5_RSA_PKCS,
+  CKM_SHA1_RSA_PKCS,
+  CKM_RIPEMD128_RSA_PKCS,
+  CKM_RIPEMD160_RSA_PKCS,
+  CKM_RSA_PKCS_OAEP,
+  CKM_RSA_X9_31_KEY_PAIR_GEN,
+  CKM_RSA_X9_31,
+  CKM_SHA1_RSA_X9_31,
+  CKM_RSA_PKCS_PSS,
+  CKM_SHA1_RSA_PKCS_PSS,
+  CKM_DSA_KEY_PAIR_GEN,
+  CKM_DSA,
+  CKM_DSA_SHA1,
+  CKM_DSA_SHA224,
+  CKM_DSA_SHA256,
+  CKM_DSA_SHA384,
+  CKM_DSA_SHA512,
+  CKM_DSA_SHA3_224,
+  CKM_DSA_SHA3_256,
+  CKM_DSA_SHA3_384,
+  CKM_DSA_SHA3_512,
+  CKM_DH_PKCS_KEY_PAIR_GEN,
+  CKM_DH_PKCS_DERIVE,
+  CKM_X9_42_DH_KEY_PAIR_GEN,
+  CKM_X9_42_DH_DERIVE,
+  CKM_X9_42_DH_HYBRID_DERIVE,
+  CKM_X9_42_MQV_DERIVE,
+  CKM_SHA256_RSA_PKCS,
+  CKM_SHA384_RSA_PKCS,
+  CKM_SHA512_RSA_PKCS,
+  CKM_SHA256_RSA_PKCS_PSS,
+  CKM_SHA384_RSA_PKCS_PSS,
+  CKM_SHA512_RSA_PKCS_PSS,
+  CKM_SHA224_RSA_PKCS,
+  CKM_SHA224_RSA_PKCS_PSS,
+  CKM_SHA512_224,
+  CKM_SHA512_224_HMAC,
+  CKM_SHA512_224_HMAC_GENERAL,
+  CKM_SHA512_224_KEY_DERIVATION,
+  CKM_SHA512_256,
+  CKM_SHA512_256_HMAC,
+  CKM_SHA512_256_HMAC_GENERAL,
+  CKM_SHA512_256_KEY_DERIVATION,
+  CKM_SHA512_T,
+  CKM_SHA512_T_HMAC,
+  CKM_SHA512_T_HMAC_GENERAL,
+  CKM_SHA512_T_KEY_DERIVATION,
+  CKM_SHA3_256_RSA_PKCS,
+  CKM_SHA3_384_RSA_PKCS,
+  CKM_SHA3_512_RSA_PKCS,
+  CKM_SHA3_256_RSA_PKCS_PSS,
+  CKM_SHA3_384_RSA_PKCS_PSS,
+  CKM_SHA3_512_RSA_PKCS_PSS,
+  CKM_SHA3_224_RSA_PKCS,
+  CKM_SHA3_224_RSA_PKCS_PSS,
+  CKM_RC2_KEY_GEN,
+  CKM_RC2_ECB,
+  CKM_RC2_CBC,
+  CKM_RC2_MAC,
+  CKM_RC2_MAC_GENERAL,
+  CKM_RC2_CBC_PAD,
+  CKM_RC4_KEY_GEN,
+  CKM_RC4,
+  CKM_DES_KEY_GEN,
+  CKM_DES_ECB,
+  CKM_DES_CBC,
+  CKM_DES_MAC,
+  CKM_DES_MAC_GENERAL,
+  CKM_DES_CBC_PAD,
+  CKM_DES2_KEY_GEN,
+  CKM_DES3_KEY_GEN,
+  CKM_DES3_ECB,
+  CKM_DES3_CBC,
+  CKM_DES3_MAC,
+  CKM_DES3_MAC_GENERAL,
+  CKM_DES3_CBC_PAD,
+  CKM_DES3_CMAC_GENERAL,
+  CKM_DES3_CMAC,
+  CKM_CDMF_KEY_GEN,
+  CKM_CDMF_ECB,
+  CKM_CDMF_CBC,
+  CKM_CDMF_MAC,
+  CKM_CDMF_MAC_GENERAL,
+  CKM_CDMF_CBC_PAD,
+  CKM_DES_OFB64,
+  CKM_DES_OFB8,
+  CKM_DES_CFB64,
+  CKM_DES_CFB8,
+  CKM_MD2,
+  CKM_MD2_HMAC,
+  CKM_MD2_HMAC_GENERAL,
+  CKM_MD5,
+  CKM_MD5_HMAC,
+  CKM_MD5_HMAC_GENERAL,
+  CKM_SHA_1,
+  CKM_SHA_1_HMAC,
+  CKM_SHA_1_HMAC_GENERAL,
+  CKM_RIPEMD128,
+  CKM_RIPEMD128_HMAC,
+  CKM_RIPEMD128_HMAC_GENERAL,
+  CKM_RIPEMD160,
+  CKM_RIPEMD160_HMAC,
+  CKM_RIPEMD160_HMAC_GENERAL,
+  CKM_SHA256,
+  CKM_SHA256_HMAC,
+  CKM_SHA256_HMAC_GENERAL,
+  CKM_SHA224,
+  CKM_SHA224_HMAC,
+  CKM_SHA224_HMAC_GENERAL,
+  CKM_SHA384,
+  CKM_SHA384_HMAC,
+  CKM_SHA384_HMAC_GENERAL,
+  CKM_SHA512,
+  CKM_SHA512_HMAC,
+  CKM_SHA512_HMAC_GENERAL,
+  CKM_SECURID_KEY_GEN,
+  CKM_SECURID,
+  CKM_HOTP_KEY_GEN,
+  CKM_HOTP,
+  CKM_ACTI,
+  CKM_ACTI_KEY_GEN,
+  CKM_SHA3_256,
+  CKM_SHA3_256_HMAC,
+  CKM_SHA3_256_HMAC_GENERAL,
+  CKM_SHA3_256_KEY_GEN,
+  CKM_SHA3_224,
+  CKM_SHA3_224_HMAC,
+  CKM_SHA3_224_HMAC_GENERAL,
+  CKM_SHA3_224_KEY_GEN,
+  CKM_SHA3_384,
+  CKM_SHA3_384_HMAC,
+  CKM_SHA3_384_HMAC_GENERAL,
+  CKM_SHA3_384_KEY_GEN,
+  CKM_SHA3_512,
+  CKM_SHA3_512_HMAC,
+  CKM_SHA3_512_HMAC_GENERAL,
+  CKM_SHA3_512_KEY_GEN,
+  CKM_CAST_KEY_GEN,
+  CKM_CAST_ECB,
+  CKM_CAST_CBC,
+  CKM_CAST_MAC,
+  CKM_CAST_MAC_GENERAL,
+  CKM_CAST_CBC_PAD,
+  CKM_CAST3_KEY_GEN,
+  CKM_CAST3_ECB,
+  CKM_CAST3_CBC,
+  CKM_CAST3_MAC,
+  CKM_CAST3_MAC_GENERAL,
+  CKM_CAST3_CBC_PAD,
+  CKM_CAST5_KEY_GEN,
+  CKM_CAST128_KEY_GEN,
+  CKM_CAST5_ECB,
+  CKM_CAST128_ECB,
+  CKM_CAST5_CBC,
+  CKM_CAST128_CBC,
+  CKM_CAST5_MAC,
+  CKM_CAST128_MAC,
+  CKM_CAST5_MAC_GENERAL,
+  CKM_CAST128_MAC_GENERAL,
+  CKM_CAST5_CBC_PAD,
+  CKM_CAST128_CBC_PAD,
+  CKM_RC5_KEY_GEN,
+  CKM_RC5_ECB,
+  CKM_RC5_CBC,
+  CKM_RC5_MAC,
+  CKM_RC5_MAC_GENERAL,
+  CKM_RC5_CBC_PAD,
+  CKM_IDEA_KEY_GEN,
+  CKM_IDEA_ECB,
+  CKM_IDEA_CBC,
+  CKM_IDEA_MAC,
+  CKM_IDEA_MAC_GENERAL,
+  CKM_IDEA_CBC_PAD,
+  CKM_GENERIC_SECRET_KEY_GEN,
+  CKM_CONCATENATE_BASE_AND_KEY,
+  CKM_CONCATENATE_BASE_AND_DATA,
+  CKM_CONCATENATE_DATA_AND_BASE,
+  CKM_XOR_BASE_AND_DATA,
+  CKM_EXTRACT_KEY_FROM_KEY,
+  CKM_SSL3_PRE_MASTER_KEY_GEN,
+  CKM_SSL3_MASTER_KEY_DERIVE,
+  CKM_SSL3_KEY_AND_MAC_DERIVE,
+  CKM_SSL3_MASTER_KEY_DERIVE_DH,
+  CKM_TLS_PRE_MASTER_KEY_GEN,
+  CKM_TLS_MASTER_KEY_DERIVE,
+  CKM_TLS_KEY_AND_MAC_DERIVE,
+  CKM_TLS_MASTER_KEY_DERIVE_DH,
+  CKM_TLS_PRF,
+  CKM_SSL3_MD5_MAC,
+  CKM_SSL3_SHA1_MAC,
+  CKM_MD5_KEY_DERIVATION,
+  CKM_MD2_KEY_DERIVATION,
+  CKM_SHA1_KEY_DERIVATION,
+  CKM_SHA256_KEY_DERIVATION,
+  CKM_SHA384_KEY_DERIVATION,
+  CKM_SHA512_KEY_DERIVATION,
+  CKM_SHA224_KEY_DERIVATION,
+  CKM_SHA3_256_KEY_DERIVATION,
+  CKM_SHA3_224_KEY_DERIVATION,
+  CKM_SHA3_384_KEY_DERIVATION,
+  CKM_SHA3_512_KEY_DERIVATION,
+  CKM_SHAKE_128_KEY_DERIVATION,
+  CKM_SHAKE_256_KEY_DERIVATION,
+  CKM_SHA3_256_KEY_DERIVE,
+  CKM_SHA3_224_KEY_DERIVE,
+  CKM_SHA3_384_KEY_DERIVE,
+  CKM_SHA3_512_KEY_DERIVE,
+  CKM_SHAKE_128_KEY_DERIVE,
+  CKM_SHAKE_256_KEY_DERIVE,
+  CKM_PBE_MD2_DES_CBC,
+  CKM_PBE_MD5_DES_CBC,
+  CKM_PBE_MD5_CAST_CBC,
+  CKM_PBE_MD5_CAST3_CBC,
+  CKM_PBE_MD5_CAST5_CBC,
+  CKM_PBE_MD5_CAST128_CBC,
+  CKM_PBE_SHA1_CAST5_CBC,
+  CKM_PBE_SHA1_CAST128_CBC,
+  CKM_PBE_SHA1_RC4_128,
+  CKM_PBE_SHA1_RC4_40,
+  CKM_PBE_SHA1_DES3_EDE_CBC,
+  CKM_PBE_SHA1_DES2_EDE_CBC,
+  CKM_PBE_SHA1_RC2_128_CBC,
+  CKM_PBE_SHA1_RC2_40_CBC,
+  CKM_PKCS5_PBKD2,
+  CKM_PBA_SHA1_WITH_SHA1_HMAC,
+  CKM_WTLS_PRE_MASTER_KEY_GEN,
+  CKM_WTLS_MASTER_KEY_DERIVE,
+  CKM_WTLS_MASTER_KEY_DERIVE_DH_ECC,
+  CKM_WTLS_PRF,
+  CKM_WTLS_SERVER_KEY_AND_MAC_DERIVE,
+  CKM_WTLS_CLIENT_KEY_AND_MAC_DERIVE,
+  CKM_TLS10_MAC_SERVER,
+  CKM_TLS10_MAC_CLIENT,
+  CKM_TLS12_MAC,
+  CKM_TLS12_KDF,
+  CKM_TLS12_MASTER_KEY_DERIVE,
+  CKM_TLS12_KEY_AND_MAC_DERIVE,
+  CKM_TLS12_MASTER_KEY_DERIVE_DH,
+  CKM_TLS12_KEY_SAFE_DERIVE,
+  CKM_TLS_MAC,
+  CKM_TLS_KDF,
+  CKM_KEY_WRAP_LYNKS,
+  CKM_KEY_WRAP_SET_OAEP,
+  CKM_CMS_SIG,
+  CKM_KIP_DERIVE,
+  CKM_KIP_WRAP,
+  CKM_KIP_MAC,
+  CKM_CAMELLIA_KEY_GEN,
+  CKM_CAMELLIA_ECB,
+  CKM_CAMELLIA_CBC,
+  CKM_CAMELLIA_MAC,
+  CKM_CAMELLIA_MAC_GENERAL,
+  CKM_CAMELLIA_CBC_PAD,
+  CKM_CAMELLIA_ECB_ENCRYPT_DATA,
+  CKM_CAMELLIA_CBC_ENCRYPT_DATA,
+  CKM_CAMELLIA_CTR,
+  CKM_ARIA_KEY_GEN,
+  CKM_ARIA_ECB,
+  CKM_ARIA_CBC,
+  CKM_ARIA_MAC,
+  CKM_ARIA_MAC_GENERAL,
+  CKM_ARIA_CBC_PAD,
+  CKM_ARIA_ECB_ENCRYPT_DATA,
+  CKM_ARIA_CBC_ENCRYPT_DATA,
+  CKM_SEED_KEY_GEN,
+  CKM_SEED_ECB,
+  CKM_SEED_CBC,
+  CKM_SEED_MAC,
+  CKM_SEED_MAC_GENERAL,
+  CKM_SEED_CBC_PAD,
+  CKM_SEED_ECB_ENCRYPT_DATA,
+  CKM_SEED_CBC_ENCRYPT_DATA,
+  CKM_SKIPJACK_KEY_GEN,
+  CKM_SKIPJACK_ECB64,
+  CKM_SKIPJACK_CBC64,
+  CKM_SKIPJACK_OFB64,
+  CKM_SKIPJACK_CFB64,
+  CKM_SKIPJACK_CFB32,
+  CKM_SKIPJACK_CFB16,
+  CKM_SKIPJACK_CFB8,
+  CKM_SKIPJACK_WRAP,
+  CKM_SKIPJACK_PRIVATE_WRAP,
+  CKM_SKIPJACK_RELAYX,
+  CKM_KEA_KEY_PAIR_GEN,
+  CKM_KEA_KEY_DERIVE,
+  CKM_KEA_DERIVE,
+  CKM_FORTEZZA_TIMESTAMP,
+  CKM_BATON_KEY_GEN,
+  CKM_BATON_ECB128,
+  CKM_BATON_ECB96,
+  CKM_BATON_CBC128,
+  CKM_BATON_COUNTER,
+  CKM_BATON_SHUFFLE,
+  CKM_BATON_WRAP,
+  CKM_ECDSA_KEY_PAIR_GEN,
+  CKM_EC_KEY_PAIR_GEN,
+  CKM_ECDSA,
+  CKM_ECDSA_SHA1,
+  CKM_ECDSA_SHA224,
+  CKM_ECDSA_SHA256,
+  CKM_ECDSA_SHA384,
+  CKM_ECDSA_SHA512,
+  CKM_EC_KEY_PAIR_GEN_W_EXTRA_BITS,
+  CKM_ECDH1_DERIVE,
+  CKM_ECDH1_COFACTOR_DERIVE,
+  CKM_ECMQV_DERIVE,
+  CKM_ECDH_AES_KEY_WRAP,
+  CKM_RSA_AES_KEY_WRAP,
+  CKM_JUNIPER_KEY_GEN,
+  CKM_JUNIPER_ECB128,
+  CKM_JUNIPER_CBC128,
+  CKM_JUNIPER_COUNTER,
+  CKM_JUNIPER_SHUFFLE,
+  CKM_JUNIPER_WRAP,
+  CKM_FASTHASH,
+  CKM_AES_XTS,
+  CKM_AES_XTS_KEY_GEN,
+  CKM_AES_KEY_GEN,
+  CKM_AES_ECB,
+  CKM_AES_CBC,
+  CKM_AES_MAC,
+  CKM_AES_MAC_GENERAL,
+  CKM_AES_CBC_PAD,
+  CKM_AES_CTR,
+  CKM_AES_GCM,
+  CKM_AES_CCM,
+  CKM_AES_CTS,
+  CKM_AES_CMAC,
+  CKM_AES_CMAC_GENERAL,
+  CKM_AES_XCBC_MAC,
+  CKM_AES_XCBC_MAC_96,
+  CKM_AES_GMAC,
+  CKM_BLOWFISH_KEY_GEN,
+  CKM_BLOWFISH_CBC,
+  CKM_TWOFISH_KEY_GEN,
+  CKM_TWOFISH_CBC,
+  CKM_BLOWFISH_CBC_PAD,
+  CKM_TWOFISH_CBC_PAD,
+  CKM_DES_ECB_ENCRYPT_DATA,
+  CKM_DES_CBC_ENCRYPT_DATA,
+  CKM_DES3_ECB_ENCRYPT_DATA,
+  CKM_DES3_CBC_ENCRYPT_DATA,
+  CKM_AES_ECB_ENCRYPT_DATA,
+  CKM_AES_CBC_ENCRYPT_DATA,
+  CKM_GOSTR3410_KEY_PAIR_GEN,
+  CKM_GOSTR3410,
+  CKM_GOSTR3410_WITH_GOSTR3411,
+  CKM_GOSTR3410_KEY_WRAP,
+  CKM_GOSTR3410_DERIVE,
+  CKM_GOSTR3411,
+  CKM_GOSTR3411_HMAC,
+  CKM_GOST28147_KEY_GEN,
+  CKM_GOST28147_ECB,
+  CKM_GOST28147,
+  CKM_GOST28147_MAC,
+  CKM_GOST28147_KEY_WRAP,
+  CKM_CHACHA20_KEY_GEN,
+  CKM_CHACHA20,
+  CKM_POLY1305_KEY_GEN,
+  CKM_POLY1305,
+  CKM_DSA_PARAMETER_GEN,
+  CKM_DH_PKCS_PARAMETER_GEN,
+  CKM_X9_42_DH_PARAMETER_GEN,
+  CKM_DSA_PROBABILISTIC_PARAMETER_GEN,
+  CKM_DSA_PROBABLISTIC_PARAMETER_GEN,
+  CKM_DSA_SHAWE_TAYLOR_PARAMETER_GEN,
+  CKM_DSA_FIPS_G_GEN,
+  CKM_AES_OFB,
+  CKM_AES_CFB64,
+  CKM_AES_CFB8,
+  CKM_AES_CFB128,
+  CKM_AES_CFB1,
+  CKM_AES_KEY_WRAP,
+  CKM_AES_KEY_WRAP_PAD,
+  CKM_AES_KEY_WRAP_KWP,
+  CKM_AES_KEY_WRAP_PKCS7,
+  CKM_RSA_PKCS_TPM_1_1,
+  CKM_RSA_PKCS_OAEP_TPM_1_1,
+  CKM_SHA_1_KEY_GEN,
+  CKM_SHA224_KEY_GEN,
+  CKM_SHA256_KEY_GEN,
+  CKM_SHA384_KEY_GEN,
+  CKM_SHA512_KEY_GEN,
+  CKM_SHA512_224_KEY_GEN,
+  CKM_SHA512_256_KEY_GEN,
+  CKM_SHA512_T_KEY_GEN,
+  CKM_NULL,
+  CKM_BLAKE2B_160,
+  CKM_BLAKE2B_160_HMAC,
+  CKM_BLAKE2B_160_HMAC_GENERAL,
+  CKM_BLAKE2B_160_KEY_DERIVE,
+  CKM_BLAKE2B_160_KEY_GEN,
+  CKM_BLAKE2B_256,
+  CKM_BLAKE2B_256_HMAC,
+  CKM_BLAKE2B_256_HMAC_GENERAL,
+  CKM_BLAKE2B_256_KEY_DERIVE,
+  CKM_BLAKE2B_256_KEY_GEN,
+  CKM_BLAKE2B_384,
+  CKM_BLAKE2B_384_HMAC,
+  CKM_BLAKE2B_384_HMAC_GENERAL,
+  CKM_BLAKE2B_384_KEY_DERIVE,
+  CKM_BLAKE2B_384_KEY_GEN,
+  CKM_BLAKE2B_512,
+  CKM_BLAKE2B_512_HMAC,
+  CKM_BLAKE2B_512_HMAC_GENERAL,
+  CKM_BLAKE2B_512_KEY_DERIVE,
+  CKM_BLAKE2B_512_KEY_GEN,
+  CKM_SALSA20,
+  CKM_CHACHA20_POLY1305,
+  CKM_SALSA20_POLY1305,
+  CKM_X3DH_INITIALIZE,
+  CKM_X3DH_RESPOND,
+  CKM_X2RATCHET_INITIALIZE,
+  CKM_X2RATCHET_RESPOND,
+  CKM_X2RATCHET_ENCRYPT,
+  CKM_X2RATCHET_DECRYPT,
+  CKM_XEDDSA,
+  CKM_HKDF_DERIVE,
+  CKM_HKDF_DATA,
+  CKM_HKDF_KEY_GEN,
+  CKM_SALSA20_KEY_GEN,
+  CKM_ECDSA_SHA3_224,
+  CKM_ECDSA_SHA3_256,
+  CKM_ECDSA_SHA3_384,
+  CKM_ECDSA_SHA3_512,
+  CKM_EC_EDWARDS_KEY_PAIR_GEN,
+  CKM_EC_MONTGOMERY_KEY_PAIR_GEN,
+  CKM_EDDSA,
+  CKM_SP800_108_COUNTER_KDF,
+  CKM_SP800_108_FEEDBACK_KDF,
+  CKM_SP800_108_DOUBLE_PIPELINE_KDF,
+  CKM_IKE2_PRF_PLUS_DERIVE,
+  CKM_IKE_PRF_DERIVE,
+  CKM_IKE1_PRF_DERIVE,
+  CKM_IKE1_EXTENDED_DERIVE,
+  CKM_HSS_KEY_PAIR_GEN,
+  CKM_HSS,
+  CKM_XMSS_KEY_PAIR_GEN,
+  CKM_XMSSMT_KEY_PAIR_GEN,
+  CKM_XMSS,
+  CKM_XMSSMT,
+  CKM_ECDH_X_AES_KEY_WRAP,
+  CKM_ECDH_COF_AES_KEY_WRAP,
+  CKM_PUB_KEY_FROM_PRIV_KEY,
+  CKM_ML_KEM_KEY_PAIR_GEN,
+  CKM_ML_KEM,
+  CKM_ML_DSA_KEY_PAIR_GEN,
+  CKM_ML_DSA,
+  CKM_HASH_ML_DSA,
+  CKM_HASH_ML_DSA_SHA224,
+  CKM_HASH_ML_DSA_SHA256,
+  CKM_HASH_ML_DSA_SHA384,
+  CKM_HASH_ML_DSA_SHA512,
+  CKM_HASH_ML_DSA_SHA3_224,
+  CKM_HASH_ML_DSA_SHA3_256,
+  CKM_HASH_ML_DSA_SHA3_384,
+  CKM_HASH_ML_DSA_SHA3_512,
+  CKM_HASH_ML_DSA_SHAKE128,
+  CKM_HASH_ML_DSA_SHAKE256,
+  CKM_SLH_DSA_KEY_PAIR_GEN,
+  CKM_SLH_DSA,
+  CKM_HASH_SLH_DSA,
+  CKM_HASH_SLH_DSA_SHA224,
+  CKM_HASH_SLH_DSA_SHA256,
+  CKM_HASH_SLH_DSA_SHA384,
+  CKM_HASH_SLH_DSA_SHA512,
+  CKM_HASH_SLH_DSA_SHA3_224,
+  CKM_HASH_SLH_DSA_SHA3_256,
+  CKM_HASH_SLH_DSA_SHA3_384,
+  CKM_HASH_SLH_DSA_SHA3_512,
+  CKM_HASH_SLH_DSA_SHAKE128,
+  CKM_HASH_SLH_DSA_SHAKE256,
+  CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE,
+  CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE_DH,
+  CKM_VENDOR_DEFINED,
+  CKF_HW,
+  CKF_MESSAGE_ENCRYPT,
+  CKF_MESSAGE_DECRYPT,
+  CKF_MESSAGE_SIGN,
+  CKF_MESSAGE_VERIFY,
+  CKF_MULTI_MESSAGE,
+  CKF_MULTI_MESSGE,
+  CKF_FIND_OBJECTS,
+  CKF_ENCRYPT,
+  CKF_DECRYPT,
+  CKF_DIGEST,
+  CKF_SIGN,
+  CKF_SIGN_RECOVER,
+  CKF_VERIFY,
+  CKF_VERIFY_RECOVER,
+  CKF_GENERATE,
+  CKF_GENERATE_KEY_PAIR,
+  CKF_WRAP,
+  CKF_UNWRAP,
+  CKF_DERIVE,
+  CKF_EC_F_P,
+  CKF_EC_F_2M,
+  CKF_EC_ECPARAMETERS,
+  CKF_EC_OID,
+  CKF_EC_NAMEDCURVE,
+  CKF_EC_UNCOMPRESS,
+  CKF_EC_COMPRESS,
+  CKF_EC_CURVENAME,
+  CKF_ENCAPSULATE,
+  CKF_DECAPSULATE,
+  CKF_EXTENSION,
+  CKR_OK,
+  CKR_CANCEL,
+  CKR_HOST_MEMORY,
+  CKR_SLOT_ID_INVALID,
+  CKR_GENERAL_ERROR,
+  CKR_FUNCTION_FAILED,
+  CKR_ARGUMENTS_BAD,
+  CKR_NO_EVENT,
+  CKR_NEED_TO_CREATE_THREADS,
+  CKR_CANT_LOCK,
+  CKR_ATTRIBUTE_READ_ONLY,
+  CKR_ATTRIBUTE_SENSITIVE,
+  CKR_ATTRIBUTE_TYPE_INVALID,
+  CKR_ATTRIBUTE_VALUE_INVALID,
+  CKR_ACTION_PROHIBITED,
+  CKR_DATA_INVALID,
+  CKR_DATA_LEN_RANGE,
+  CKR_DEVICE_ERROR,
+  CKR_DEVICE_MEMORY,
+  CKR_DEVICE_REMOVED,
+  CKR_ENCRYPTED_DATA_INVALID,
+  CKR_ENCRYPTED_DATA_LEN_RANGE,
+  CKR_AEAD_DECRYPT_FAILED,
+  CKR_FUNCTION_CANCELED,
+  CKR_FUNCTION_NOT_PARALLEL,
+  CKR_FUNCTION_NOT_SUPPORTED,
+  CKR_KEY_HANDLE_INVALID,
+  CKR_KEY_SIZE_RANGE,
+  CKR_KEY_TYPE_INCONSISTENT,
+  CKR_KEY_NOT_NEEDED,
+  CKR_KEY_CHANGED,
+  CKR_KEY_NEEDED,
+  CKR_KEY_INDIGESTIBLE,
+  CKR_KEY_FUNCTION_NOT_PERMITTED,
+  CKR_KEY_NOT_WRAPPABLE,
+  CKR_KEY_UNEXTRACTABLE,
+  CKR_MECHANISM_INVALID,
+  CKR_MECHANISM_PARAM_INVALID,
+  CKR_OBJECT_HANDLE_INVALID,
+  CKR_OPERATION_ACTIVE,
+  CKR_OPERATION_NOT_INITIALIZED,
+  CKR_PIN_INCORRECT,
+  CKR_PIN_INVALID,
+  CKR_PIN_LEN_RANGE,
+  CKR_PIN_EXPIRED,
+  CKR_PIN_LOCKED,
+  CKR_SESSION_CLOSED,
+  CKR_SESSION_COUNT,
+  CKR_SESSION_HANDLE_INVALID,
+  CKR_SESSION_PARALLEL_NOT_SUPPORTED,
+  CKR_SESSION_READ_ONLY,
+  CKR_SESSION_EXISTS,
+  CKR_SESSION_READ_ONLY_EXISTS,
+  CKR_SESSION_READ_WRITE_SO_EXISTS,
+  CKR_SIGNATURE_INVALID,
+  CKR_SIGNATURE_LEN_RANGE,
+  CKR_TEMPLATE_INCOMPLETE,
+  CKR_TEMPLATE_INCONSISTENT,
+  CKR_TOKEN_NOT_PRESENT,
+  CKR_TOKEN_NOT_RECOGNIZED,
+  CKR_TOKEN_WRITE_PROTECTED,
+  CKR_UNWRAPPING_KEY_HANDLE_INVALID,
+  CKR_UNWRAPPING_KEY_SIZE_RANGE,
+  CKR_UNWRAPPING_KEY_TYPE_INCONSISTENT,
+  CKR_USER_ALREADY_LOGGED_IN,
+  CKR_USER_NOT_LOGGED_IN,
+  CKR_USER_PIN_NOT_INITIALIZED,
+  CKR_USER_TYPE_INVALID,
+  CKR_USER_ANOTHER_ALREADY_LOGGED_IN,
+  CKR_USER_TOO_MANY_TYPES,
+  CKR_WRAPPED_KEY_INVALID,
+  CKR_WRAPPED_KEY_LEN_RANGE,
+  CKR_WRAPPING_KEY_HANDLE_INVALID,
+  CKR_WRAPPING_KEY_SIZE_RANGE,
+  CKR_WRAPPING_KEY_TYPE_INCONSISTENT,
+  CKR_RANDOM_SEED_NOT_SUPPORTED,
+  CKR_RANDOM_NO_RNG,
+  CKR_DOMAIN_PARAMS_INVALID,
+  CKR_CURVE_NOT_SUPPORTED,
+  CKR_BUFFER_TOO_SMALL,
+  CKR_SAVED_STATE_INVALID,
+  CKR_INFORMATION_SENSITIVE,
+  CKR_STATE_UNSAVEABLE,
+  CKR_CRYPTOKI_NOT_INITIALIZED,
+  CKR_CRYPTOKI_ALREADY_INITIALIZED,
+  CKR_MUTEX_BAD,
+  CKR_MUTEX_NOT_LOCKED,
+  CKR_NEW_PIN_MODE,
+  CKR_NEXT_OTP,
+  CKR_EXCEEDED_MAX_ITERATIONS,
+  CKR_FIPS_SELF_TEST_FAILED,
+  CKR_LIBRARY_LOAD_FAILED,
+  CKR_PIN_TOO_WEAK,
+  CKR_PUBLIC_KEY_INVALID,
+  CKR_FUNCTION_REJECTED,
+  CKR_TOKEN_RESOURCE_EXCEEDED,
+  CKR_OPERATION_CANCEL_FAILED,
+  CKR_KEY_EXHAUSTED,
+  CKR_PENDING,
+  CKR_SESSION_ASYNC_NOT_SUPPORTED,
+  CKR_SEED_RANDOM_REQUIRED,
+  CKR_OPERATION_NOT_VALIDATED,
+  CKR_TOKEN_NOT_INITIALIZED,
+  CKR_PARAMETER_SET_NOT_SUPPORTED,
+  CKR_VENDOR_DEFINED,
+  CKF_END_OF_MESSAGE,
+  CKF_INTERFACE_FORK_SAFE,
+  CKF_LIBRARY_CANT_CREATE_OS_THREADS,
+  CKF_OS_LOCKING_OK,
+  CKF_DONT_BLOCK,
+  CKG_MGF1_SHA1,
+  CKG_MGF1_SHA256,
+  CKG_MGF1_SHA384,
+  CKG_MGF1_SHA512,
+  CKG_MGF1_SHA224,
+  CKG_MGF1_SHA3_224,
+  CKG_MGF1_SHA3_256,
+  CKG_MGF1_SHA3_384,
+  CKG_MGF1_SHA3_512,
+  CKZ_DATA_SPECIFIED,
+  CKD_NULL,
+  CKD_SHA1_KDF,
+  CKD_SHA1_KDF_ASN1,
+  CKD_SHA1_KDF_CONCATENATE,
+  CKD_SHA224_KDF,
+  CKD_SHA256_KDF,
+  CKD_SHA384_KDF,
+  CKD_SHA512_KDF,
+  CKD_CPDIVERSIFY_KDF,
+  CKD_SHA3_224_KDF,
+  CKD_SHA3_256_KDF,
+  CKD_SHA3_384_KDF,
+  CKD_SHA3_512_KDF,
+  CKD_SHA1_KDF_SP800,
+  CKD_SHA224_KDF_SP800,
+  CKD_SHA256_KDF_SP800,
+  CKD_SHA384_KDF_SP800,
+  CKD_SHA512_KDF_SP800,
+  CKD_SHA3_224_KDF_SP800,
+  CKD_SHA3_256_KDF_SP800,
+  CKD_SHA3_384_KDF_SP800,
+  CKD_SHA3_512_KDF_SP800,
+  CKD_BLAKE2B_160_KDF,
+  CKD_BLAKE2B_256_KDF,
+  CKD_BLAKE2B_384_KDF,
+  CKD_BLAKE2B_512_KDF,
+  CKP_PKCS5_PBKD2_HMAC_SHA1,
+  CKP_PKCS5_PBKD2_HMAC_GOSTR3411,
+  CKP_PKCS5_PBKD2_HMAC_SHA224,
+  CKP_PKCS5_PBKD2_HMAC_SHA256,
+  CKP_PKCS5_PBKD2_HMAC_SHA384,
+  CKP_PKCS5_PBKD2_HMAC_SHA512,
+  CKP_PKCS5_PBKD2_HMAC_SHA512_224,
+  CKP_PKCS5_PBKD2_HMAC_SHA512_256,
+  CKZ_SALT_SPECIFIED,
+  CK_OTP_VALUE,
+  CK_OTP_PIN,
+  CK_OTP_CHALLENGE,
+  CK_OTP_TIME,
+  CK_OTP_COUNTER,
+  CK_OTP_FLAGS,
+  CK_OTP_OUTPUT_LENGTH,
+  CK_OTP_OUTPUT_FORMAT,
+  CKF_NEXT_OTP,
+  CKF_EXCLUDE_TIME,
+  CKF_EXCLUDE_COUNTER,
+  CKF_EXCLUDE_CHALLENGE,
+  CKF_EXCLUDE_PIN,
+  CKF_USER_FRIENDLY_OTP,
+  CKG_NO_GENERATE,
+  CKG_GENERATE,
+  CKG_GENERATE_COUNTER,
+  CKG_GENERATE_RANDOM,
+  CKG_GENERATE_COUNTER_XOR,
+  CK_SP800_108_ITERATION_VARIABLE,
+  CK_SP800_108_OPTIONAL_COUNTER,
+  CK_SP800_108_DKM_LENGTH,
+  CK_SP800_108_BYTE_ARRAY,
+  CK_SP800_108_COUNTER,
+  CK_SP800_108_KEY_HANDLE,
+  CK_SP800_108_DKM_LENGTH_SUM_OF_KEYS,
+  CK_SP800_108_DKM_LENGTH_SUM_OF_SEGMENTS,
+  CKF_HKDF_SALT_NULL,
+  CKF_HKDF_SALT_DATA,
+  CKF_HKDF_SALT_KEY,
+  CKS_LAST_VALIDATION_OK,
+  CKV_AUTHORITY_TYPE_UNSPECIFIED,
+  CKV_AUTHORITY_TYPE_NIST_CMVP,
+  CKV_AUTHORITY_TYPE_COMMON_CRITERIA,
+  CKV_TYPE_UNSPECIFIED,
+  CKV_TYPE_SOFTWARE,
+  CKV_TYPE_HARDWARE,
+  CKV_TYPE_FIRMWARE,
+  CKV_TYPE_HYBRID,
+  CKH_HEDGE_PREFERRED,
+  CKH_HEDGE_REQUIRED,
+  CKH_DETERMINISTIC_REQUIRED,
+  CKP_ML_DSA_44,
+  CKP_ML_DSA_65,
+  CKP_ML_DSA_87,
+  CKP_SLH_DSA_SHA2_128S,
+  CKP_SLH_DSA_SHAKE_128S,
+  CKP_SLH_DSA_SHA2_128F,
+  CKP_SLH_DSA_SHAKE_128F,
+  CKP_SLH_DSA_SHA2_192S,
+  CKP_SLH_DSA_SHAKE_192S,
+  CKP_SLH_DSA_SHA2_192F,
+  CKP_SLH_DSA_SHAKE_192F,
+  CKP_SLH_DSA_SHA2_256S,
+  CKP_SLH_DSA_SHAKE_256S,
+  CKP_SLH_DSA_SHA2_256F,
+  CKP_SLH_DSA_SHAKE_256F,
+  CKP_ML_KEM_512,
+  CKP_ML_KEM_768,
+  CKP_ML_KEM_1024,
+  CKT_TRUST_UNKNOWN,
+  CKT_TRUSTED,
+  CKT_TRUST_ANCHOR,
+  CKT_NOT_TRUSTED,
+  CKT_TRUST_MUST_VERIFY_TRUST,
+});
+
+export function createTypes({ packing = 1 } = {}) {
+  if (packing !== 1 && packing !== null) throw new TypeError("packing must be 1 (specification) or null (native alignment)");
+  class CryptokiStructure extends ctypes.Structure {}
+  if (packing === 1) CryptokiStructure._pack_ = 1;
+  class CK_VERSION extends CryptokiStructure {}
+  class CK_INFO extends CryptokiStructure {}
+  class CK_SLOT_INFO extends CryptokiStructure {}
+  class CK_TOKEN_INFO extends CryptokiStructure {}
+  class CK_SESSION_INFO extends CryptokiStructure {}
+  class CK_ATTRIBUTE extends CryptokiStructure {}
+  class CK_DATE extends CryptokiStructure {}
+  class CK_MECHANISM extends CryptokiStructure {}
+  class CK_MECHANISM_INFO extends CryptokiStructure {}
+  class CK_INTERFACE extends CryptokiStructure {}
+  class CK_C_INITIALIZE_ARGS extends CryptokiStructure {}
+  class CK_RSA_PKCS_OAEP_PARAMS extends CryptokiStructure {}
+  class CK_RSA_PKCS_PSS_PARAMS extends CryptokiStructure {}
+  class CK_ECDH1_DERIVE_PARAMS extends CryptokiStructure {}
+  class CK_ECDH2_DERIVE_PARAMS extends CryptokiStructure {}
+  class CK_ECMQV_DERIVE_PARAMS extends CryptokiStructure {}
+  class CK_X9_42_DH1_DERIVE_PARAMS extends CryptokiStructure {}
+  class CK_X9_42_DH2_DERIVE_PARAMS extends CryptokiStructure {}
+  class CK_X9_42_MQV_DERIVE_PARAMS extends CryptokiStructure {}
+  class CK_KEA_DERIVE_PARAMS extends CryptokiStructure {}
+  class CK_RC2_CBC_PARAMS extends CryptokiStructure {}
+  class CK_RC2_MAC_GENERAL_PARAMS extends CryptokiStructure {}
+  class CK_RC5_PARAMS extends CryptokiStructure {}
+  class CK_RC5_CBC_PARAMS extends CryptokiStructure {}
+  class CK_RC5_MAC_GENERAL_PARAMS extends CryptokiStructure {}
+  class CK_DES_CBC_ENCRYPT_DATA_PARAMS extends CryptokiStructure {}
+  class CK_AES_CBC_ENCRYPT_DATA_PARAMS extends CryptokiStructure {}
+  class CK_SKIPJACK_PRIVATE_WRAP_PARAMS extends CryptokiStructure {}
+  class CK_SKIPJACK_RELAYX_PARAMS extends CryptokiStructure {}
+  class CK_PBE_PARAMS extends CryptokiStructure {}
+  class CK_KEY_WRAP_SET_OAEP_PARAMS extends CryptokiStructure {}
+  class CK_SSL3_RANDOM_DATA extends CryptokiStructure {}
+  class CK_SSL3_MASTER_KEY_DERIVE_PARAMS extends CryptokiStructure {}
+  class CK_SSL3_KEY_MAT_OUT extends CryptokiStructure {}
+  class CK_SSL3_KEY_MAT_PARAMS extends CryptokiStructure {}
+  class CK_TLS_PRF_PARAMS extends CryptokiStructure {}
+  class CK_WTLS_RANDOM_DATA extends CryptokiStructure {}
+  class CK_WTLS_MASTER_KEY_DERIVE_PARAMS extends CryptokiStructure {}
+  class CK_WTLS_PRF_PARAMS extends CryptokiStructure {}
+  class CK_WTLS_KEY_MAT_OUT extends CryptokiStructure {}
+  class CK_WTLS_KEY_MAT_PARAMS extends CryptokiStructure {}
+  class CK_CMS_SIG_PARAMS extends CryptokiStructure {}
+  class CK_KEY_DERIVATION_STRING_DATA extends CryptokiStructure {}
+  class CK_PKCS5_PBKD2_PARAMS extends CryptokiStructure {}
+  class CK_PKCS5_PBKD2_PARAMS2 extends CryptokiStructure {}
+  class CK_OTP_PARAM extends CryptokiStructure {}
+  class CK_OTP_PARAMS extends CryptokiStructure {}
+  class CK_OTP_SIGNATURE_INFO extends CryptokiStructure {}
+  class CK_KIP_PARAMS extends CryptokiStructure {}
+  class CK_AES_CTR_PARAMS extends CryptokiStructure {}
+  class CK_GCM_PARAMS extends CryptokiStructure {}
+  class CK_GCM_MESSAGE_PARAMS extends CryptokiStructure {}
+  class CK_GCM_WRAP_PARAMS extends CryptokiStructure {}
+  class CK_CCM_PARAMS extends CryptokiStructure {}
+  class CK_CCM_MESSAGE_PARAMS extends CryptokiStructure {}
+  class CK_CCM_WRAP_PARAMS extends CryptokiStructure {}
+  class CK_AES_GCM_PARAMS extends CryptokiStructure {}
+  class CK_AES_CCM_PARAMS extends CryptokiStructure {}
+  class CK_CAMELLIA_CTR_PARAMS extends CryptokiStructure {}
+  class CK_CAMELLIA_CBC_ENCRYPT_DATA_PARAMS extends CryptokiStructure {}
+  class CK_ARIA_CBC_ENCRYPT_DATA_PARAMS extends CryptokiStructure {}
+  class CK_DSA_PARAMETER_GEN_PARAM extends CryptokiStructure {}
+  class CK_ECDH_AES_KEY_WRAP_PARAMS extends CryptokiStructure {}
+  class CK_RSA_AES_KEY_WRAP_PARAMS extends CryptokiStructure {}
+  class CK_TLS12_MASTER_KEY_DERIVE_PARAMS extends CryptokiStructure {}
+  class CK_TLS12_KEY_MAT_PARAMS extends CryptokiStructure {}
+  class CK_TLS_KDF_PARAMS extends CryptokiStructure {}
+  class CK_TLS_MAC_PARAMS extends CryptokiStructure {}
+  class CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS extends CryptokiStructure {}
+  class CK_GOSTR3410_DERIVE_PARAMS extends CryptokiStructure {}
+  class CK_GOSTR3410_KEY_WRAP_PARAMS extends CryptokiStructure {}
+  class CK_SEED_CBC_ENCRYPT_DATA_PARAMS extends CryptokiStructure {}
+  class CK_PRF_DATA_PARAM extends CryptokiStructure {}
+  class CK_SP800_108_COUNTER_FORMAT extends CryptokiStructure {}
+  class CK_SP800_108_DKM_LENGTH_FORMAT extends CryptokiStructure {}
+  class CK_DERIVED_KEY extends CryptokiStructure {}
+  class CK_SP800_108_KDF_PARAMS extends CryptokiStructure {}
+  class CK_SP800_108_FEEDBACK_KDF_PARAMS extends CryptokiStructure {}
+  class CK_EDDSA_PARAMS extends CryptokiStructure {}
+  class CK_CHACHA20_PARAMS extends CryptokiStructure {}
+  class CK_SALSA20_PARAMS extends CryptokiStructure {}
+  class CK_SALSA20_CHACHA20_POLY1305_PARAMS extends CryptokiStructure {}
+  class CK_SALSA20_CHACHA20_POLY1305_MSG_PARAMS extends CryptokiStructure {}
+  class CK_X3DH_INITIATE_PARAMS extends CryptokiStructure {}
+  class CK_X3DH_RESPOND_PARAMS extends CryptokiStructure {}
+  class CK_X2RATCHET_INITIALIZE_PARAMS extends CryptokiStructure {}
+  class CK_X2RATCHET_RESPOND_PARAMS extends CryptokiStructure {}
+  class CK_XEDDSA_PARAMS extends CryptokiStructure {}
+  class CK_HKDF_PARAMS extends CryptokiStructure {}
+  class specifiedParams extends CryptokiStructure {}
+  class CK_IKE2_PRF_PLUS_DERIVE_PARAMS extends CryptokiStructure {}
+  class CK_IKE_PRF_DERIVE_PARAMS extends CryptokiStructure {}
+  class CK_IKE1_PRF_DERIVE_PARAMS extends CryptokiStructure {}
+  class CK_IKE1_EXTENDED_DERIVE_PARAMS extends CryptokiStructure {}
+  class CK_ASYNC_DATA extends CryptokiStructure {}
+  class CK_SIGN_ADDITIONAL_CONTEXT extends CryptokiStructure {}
+  class CK_HASH_SIGN_ADDITIONAL_CONTEXT extends CryptokiStructure {}
+  class CK_FUNCTION_LIST extends CryptokiStructure {}
+  class CK_FUNCTION_LIST_3_0 extends CryptokiStructure {}
+  class CK_FUNCTION_LIST_3_2 extends CryptokiStructure {}
+  const CK_BYTE = ctypes.c_ubyte;
+  const CK_CHAR = CK_BYTE;
+  const CK_UTF8CHAR = CK_BYTE;
+  const CK_BBOOL = CK_BYTE;
+  const CK_ULONG = ctypes.c_ulong;
+  const CK_LONG = ctypes.c_long;
+  const CK_FLAGS = CK_ULONG;
+  const CK_BYTE_PTR = ctypes.POINTER(CK_BYTE);
+  const CK_CHAR_PTR = ctypes.POINTER(CK_CHAR);
+  const CK_UTF8CHAR_PTR = ctypes.POINTER(CK_UTF8CHAR);
+  const CK_ULONG_PTR = ctypes.POINTER(CK_ULONG);
+  const CK_VOID_PTR = ctypes.c_void_p;
+  const CK_FLAGS_PTR = ctypes.POINTER(CK_ULONG);
+  const CK_VOID_PTR_PTR = ctypes.POINTER(CK_VOID_PTR);
+  const CK_VERSION_PTR = ctypes.POINTER(CK_VERSION);
+  const CK_INFO_PTR = ctypes.POINTER(CK_INFO);
+  const CK_NOTIFICATION = CK_ULONG;
+  const CK_SLOT_ID = CK_ULONG;
+  const CK_SLOT_ID_PTR = ctypes.POINTER(CK_SLOT_ID);
+  const CK_SLOT_INFO_PTR = ctypes.POINTER(CK_SLOT_INFO);
+  const CK_TOKEN_INFO_PTR = ctypes.POINTER(CK_TOKEN_INFO);
+  const CK_SESSION_HANDLE = CK_ULONG;
+  const CK_SESSION_HANDLE_PTR = ctypes.POINTER(CK_SESSION_HANDLE);
+  const CK_USER_TYPE = CK_ULONG;
+  const CK_STATE = CK_ULONG;
+  const CK_SESSION_INFO_PTR = ctypes.POINTER(CK_SESSION_INFO);
+  const CK_OBJECT_HANDLE = CK_ULONG;
+  const CK_OBJECT_HANDLE_PTR = ctypes.POINTER(CK_OBJECT_HANDLE);
+  const CK_OBJECT_CLASS = CK_ULONG;
+  const CK_OBJECT_CLASS_PTR = ctypes.POINTER(CK_OBJECT_CLASS);
+  const CK_HW_FEATURE_TYPE = CK_ULONG;
+  const CK_KEY_TYPE = CK_ULONG;
+  const CK_CERTIFICATE_TYPE = CK_ULONG;
+  const CK_ATTRIBUTE_TYPE = CK_ULONG;
+  const CK_ATTRIBUTE_PTR = ctypes.POINTER(CK_ATTRIBUTE);
+  const CK_MECHANISM_TYPE = CK_ULONG;
+  const CK_MECHANISM_TYPE_PTR = ctypes.POINTER(CK_MECHANISM_TYPE);
+  const CK_MECHANISM_PTR = ctypes.POINTER(CK_MECHANISM);
+  const CK_MECHANISM_INFO_PTR = ctypes.POINTER(CK_MECHANISM_INFO);
+  const CK_RV = CK_ULONG;
+  const CK_FUNCTION_LIST_PTR = ctypes.POINTER(CK_FUNCTION_LIST);
+  const CK_FUNCTION_LIST_3_0_PTR = ctypes.POINTER(CK_FUNCTION_LIST_3_0);
+  const CK_FUNCTION_LIST_3_2_PTR = ctypes.POINTER(CK_FUNCTION_LIST_3_2);
+  const CK_FUNCTION_LIST_PTR_PTR = ctypes.POINTER(CK_FUNCTION_LIST_PTR);
+  const CK_FUNCTION_LIST_3_0_PTR_PTR = ctypes.POINTER(CK_FUNCTION_LIST_3_0_PTR);
+  const CK_FUNCTION_LIST_3_2_PTR_PTR = ctypes.POINTER(CK_FUNCTION_LIST_3_2_PTR);
+  const CK_INTERFACE_PTR = ctypes.POINTER(CK_INTERFACE);
+  const CK_INTERFACE_PTR_PTR = ctypes.POINTER(CK_INTERFACE_PTR);
+  const CK_C_INITIALIZE_ARGS_PTR = ctypes.POINTER(CK_C_INITIALIZE_ARGS);
+  const CK_RSA_PKCS_MGF_TYPE = CK_ULONG;
+  const CK_RSA_PKCS_MGF_TYPE_PTR = ctypes.POINTER(CK_RSA_PKCS_MGF_TYPE);
+  const CK_RSA_PKCS_OAEP_SOURCE_TYPE = CK_ULONG;
+  const CK_RSA_PKCS_OAEP_SOURCE_TYPE_PTR = ctypes.POINTER(CK_RSA_PKCS_OAEP_SOURCE_TYPE);
+  const CK_RSA_PKCS_OAEP_PARAMS_PTR = ctypes.POINTER(CK_RSA_PKCS_OAEP_PARAMS);
+  const CK_RSA_PKCS_PSS_PARAMS_PTR = ctypes.POINTER(CK_RSA_PKCS_PSS_PARAMS);
+  const CK_EC_KDF_TYPE = CK_ULONG;
+  const CK_EC_KDF_TYPE_PTR = ctypes.POINTER(CK_EC_KDF_TYPE);
+  const CK_ECDH1_DERIVE_PARAMS_PTR = ctypes.POINTER(CK_ECDH1_DERIVE_PARAMS);
+  const CK_ECDH2_DERIVE_PARAMS_PTR = ctypes.POINTER(CK_ECDH2_DERIVE_PARAMS);
+  const CK_ECMQV_DERIVE_PARAMS_PTR = ctypes.POINTER(CK_ECMQV_DERIVE_PARAMS);
+  const CK_X9_42_DH_KDF_TYPE = CK_ULONG;
+  const CK_X9_42_DH_KDF_TYPE_PTR = ctypes.POINTER(CK_X9_42_DH_KDF_TYPE);
+  const CK_X9_42_DH1_DERIVE_PARAMS_PTR = ctypes.POINTER(CK_X9_42_DH1_DERIVE_PARAMS);
+  const CK_X9_42_DH2_DERIVE_PARAMS_PTR = ctypes.POINTER(CK_X9_42_DH2_DERIVE_PARAMS);
+  const CK_X9_42_MQV_DERIVE_PARAMS_PTR = ctypes.POINTER(CK_X9_42_MQV_DERIVE_PARAMS);
+  const CK_KEA_DERIVE_PARAMS_PTR = ctypes.POINTER(CK_KEA_DERIVE_PARAMS);
+  const CK_RC2_PARAMS = CK_ULONG;
+  const CK_RC2_PARAMS_PTR = ctypes.POINTER(CK_RC2_PARAMS);
+  const CK_RC2_CBC_PARAMS_PTR = ctypes.POINTER(CK_RC2_CBC_PARAMS);
+  const CK_RC2_MAC_GENERAL_PARAMS_PTR = ctypes.POINTER(CK_RC2_MAC_GENERAL_PARAMS);
+  const CK_RC5_PARAMS_PTR = ctypes.POINTER(CK_RC5_PARAMS);
+  const CK_RC5_CBC_PARAMS_PTR = ctypes.POINTER(CK_RC5_CBC_PARAMS);
+  const CK_RC5_MAC_GENERAL_PARAMS_PTR = ctypes.POINTER(CK_RC5_MAC_GENERAL_PARAMS);
+  const CK_MAC_GENERAL_PARAMS = CK_ULONG;
+  const CK_MAC_GENERAL_PARAMS_PTR = ctypes.POINTER(CK_MAC_GENERAL_PARAMS);
+  const CK_DES_CBC_ENCRYPT_DATA_PARAMS_PTR = ctypes.POINTER(CK_DES_CBC_ENCRYPT_DATA_PARAMS);
+  const CK_AES_CBC_ENCRYPT_DATA_PARAMS_PTR = ctypes.POINTER(CK_AES_CBC_ENCRYPT_DATA_PARAMS);
+  const CK_SKIPJACK_PRIVATE_WRAP_PARAMS_PTR = ctypes.POINTER(CK_SKIPJACK_PRIVATE_WRAP_PARAMS);
+  const CK_SKIPJACK_RELAYX_PARAMS_PTR = ctypes.POINTER(CK_SKIPJACK_RELAYX_PARAMS);
+  const CK_PBE_PARAMS_PTR = ctypes.POINTER(CK_PBE_PARAMS);
+  const CK_KEY_WRAP_SET_OAEP_PARAMS_PTR = ctypes.POINTER(CK_KEY_WRAP_SET_OAEP_PARAMS);
+  const CK_SSL3_MASTER_KEY_DERIVE_PARAMS_PTR = ctypes.POINTER(CK_SSL3_MASTER_KEY_DERIVE_PARAMS);
+  const CK_SSL3_KEY_MAT_OUT_PTR = ctypes.POINTER(CK_SSL3_KEY_MAT_OUT);
+  const CK_SSL3_KEY_MAT_PARAMS_PTR = ctypes.POINTER(CK_SSL3_KEY_MAT_PARAMS);
+  const CK_TLS_PRF_PARAMS_PTR = ctypes.POINTER(CK_TLS_PRF_PARAMS);
+  const CK_WTLS_RANDOM_DATA_PTR = ctypes.POINTER(CK_WTLS_RANDOM_DATA);
+  const CK_WTLS_MASTER_KEY_DERIVE_PARAMS_PTR = ctypes.POINTER(CK_WTLS_MASTER_KEY_DERIVE_PARAMS);
+  const CK_WTLS_PRF_PARAMS_PTR = ctypes.POINTER(CK_WTLS_PRF_PARAMS);
+  const CK_WTLS_KEY_MAT_OUT_PTR = ctypes.POINTER(CK_WTLS_KEY_MAT_OUT);
+  const CK_WTLS_KEY_MAT_PARAMS_PTR = ctypes.POINTER(CK_WTLS_KEY_MAT_PARAMS);
+  const CK_CMS_SIG_PARAMS_PTR = ctypes.POINTER(CK_CMS_SIG_PARAMS);
+  const CK_KEY_DERIVATION_STRING_DATA_PTR = ctypes.POINTER(CK_KEY_DERIVATION_STRING_DATA);
+  const CK_EXTRACT_PARAMS = CK_ULONG;
+  const CK_EXTRACT_PARAMS_PTR = ctypes.POINTER(CK_EXTRACT_PARAMS);
+  const CK_PKCS5_PBKD2_PSEUDO_RANDOM_FUNCTION_TYPE = CK_ULONG;
+  const CK_PKCS5_PBKD2_PSEUDO_RANDOM_FUNCTION_TYPE_PTR = ctypes.POINTER(CK_PKCS5_PBKD2_PSEUDO_RANDOM_FUNCTION_TYPE);
+  const CK_PKCS5_PBKDF2_SALT_SOURCE_TYPE = CK_ULONG;
+  const CK_PKCS5_PBKDF2_SALT_SOURCE_TYPE_PTR = ctypes.POINTER(CK_PKCS5_PBKDF2_SALT_SOURCE_TYPE);
+  const CK_PKCS5_PBKD2_PARAMS_PTR = ctypes.POINTER(CK_PKCS5_PBKD2_PARAMS);
+  const CK_PKCS5_PBKD2_PARAMS2_PTR = ctypes.POINTER(CK_PKCS5_PBKD2_PARAMS2);
+  const CK_OTP_PARAM_TYPE = CK_ULONG;
+  const CK_PARAM_TYPE = CK_OTP_PARAM_TYPE;
+  const CK_OTP_PARAM_PTR = ctypes.POINTER(CK_OTP_PARAM);
+  const CK_OTP_PARAMS_PTR = ctypes.POINTER(CK_OTP_PARAMS);
+  const CK_OTP_SIGNATURE_INFO_PTR = ctypes.POINTER(CK_OTP_SIGNATURE_INFO);
+  const CK_KIP_PARAMS_PTR = ctypes.POINTER(CK_KIP_PARAMS);
+  const CK_AES_CTR_PARAMS_PTR = ctypes.POINTER(CK_AES_CTR_PARAMS);
+  const CK_GCM_PARAMS_PTR = ctypes.POINTER(CK_GCM_PARAMS);
+  const CK_GENERATOR_FUNCTION = CK_ULONG;
+  const CK_GCM_MESSAGE_PARAMS_PTR = ctypes.POINTER(CK_GCM_MESSAGE_PARAMS);
+  const CK_GCM_WRAP_PARAMS_PTR = ctypes.POINTER(CK_GCM_WRAP_PARAMS);
+  const CK_CCM_PARAMS_PTR = ctypes.POINTER(CK_CCM_PARAMS);
+  const CK_CCM_MESSAGE_PARAMS_PTR = ctypes.POINTER(CK_CCM_MESSAGE_PARAMS);
+  const CK_CCM_WRAP_PARAMS_PTR = ctypes.POINTER(CK_CCM_WRAP_PARAMS);
+  const CK_AES_GCM_PARAMS_PTR = ctypes.POINTER(CK_AES_GCM_PARAMS);
+  const CK_AES_CCM_PARAMS_PTR = ctypes.POINTER(CK_AES_CCM_PARAMS);
+  const CK_CAMELLIA_CTR_PARAMS_PTR = ctypes.POINTER(CK_CAMELLIA_CTR_PARAMS);
+  const CK_CAMELLIA_CBC_ENCRYPT_DATA_PARAMS_PTR = ctypes.POINTER(CK_CAMELLIA_CBC_ENCRYPT_DATA_PARAMS);
+  const CK_ARIA_CBC_ENCRYPT_DATA_PARAMS_PTR = ctypes.POINTER(CK_ARIA_CBC_ENCRYPT_DATA_PARAMS);
+  const CK_DSA_PARAMETER_GEN_PARAM_PTR = ctypes.POINTER(CK_DSA_PARAMETER_GEN_PARAM);
+  const CK_ECDH_AES_KEY_WRAP_PARAMS_PTR = ctypes.POINTER(CK_ECDH_AES_KEY_WRAP_PARAMS);
+  const CK_JAVA_MIDP_SECURITY_DOMAIN = CK_ULONG;
+  const CK_CERTIFICATE_CATEGORY = CK_ULONG;
+  const CK_RSA_AES_KEY_WRAP_PARAMS_PTR = ctypes.POINTER(CK_RSA_AES_KEY_WRAP_PARAMS);
+  const CK_TLS12_MASTER_KEY_DERIVE_PARAMS_PTR = ctypes.POINTER(CK_TLS12_MASTER_KEY_DERIVE_PARAMS);
+  const CK_TLS12_KEY_MAT_PARAMS_PTR = ctypes.POINTER(CK_TLS12_KEY_MAT_PARAMS);
+  const CK_TLS_KDF_PARAMS_PTR = ctypes.POINTER(CK_TLS_KDF_PARAMS);
+  const CK_TLS_MAC_PARAMS_PTR = ctypes.POINTER(CK_TLS_MAC_PARAMS);
+  const CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS_PTR = ctypes.POINTER(CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS);
+  const CK_GOSTR3410_DERIVE_PARAMS_PTR = ctypes.POINTER(CK_GOSTR3410_DERIVE_PARAMS);
+  const CK_GOSTR3410_KEY_WRAP_PARAMS_PTR = ctypes.POINTER(CK_GOSTR3410_KEY_WRAP_PARAMS);
+  const CK_SEED_CBC_ENCRYPT_DATA_PARAMS_PTR = ctypes.POINTER(CK_SEED_CBC_ENCRYPT_DATA_PARAMS);
+  const CK_PROFILE_ID = CK_ULONG;
+  const CK_PROFILE_ID_PTR = ctypes.POINTER(CK_PROFILE_ID);
+  const CK_PRF_DATA_TYPE = CK_ULONG;
+  const CK_SP800_108_PRF_TYPE = CK_MECHANISM_TYPE;
+  const CK_PRF_DATA_PARAM_PTR = ctypes.POINTER(CK_PRF_DATA_PARAM);
+  const CK_SP800_108_COUNTER_FORMAT_PTR = ctypes.POINTER(CK_SP800_108_COUNTER_FORMAT);
+  const CK_SP800_108_DKM_LENGTH_METHOD = CK_ULONG;
+  const CK_SP800_108_DKM_LENGTH_FORMAT_PTR = ctypes.POINTER(CK_SP800_108_DKM_LENGTH_FORMAT);
+  const CK_DERIVED_KEY_PTR = ctypes.POINTER(CK_DERIVED_KEY);
+  const CK_SP800_108_KDF_PARAMS_PTR = ctypes.POINTER(CK_SP800_108_KDF_PARAMS);
+  const CK_SP800_108_FEEDBACK_KDF_PARAMS_PTR = ctypes.POINTER(CK_SP800_108_FEEDBACK_KDF_PARAMS);
+  const CK_EDDSA_PARAMS_PTR = ctypes.POINTER(CK_EDDSA_PARAMS);
+  const CK_CHACHA20_PARAMS_PTR = ctypes.POINTER(CK_CHACHA20_PARAMS);
+  const CK_SALSA20_PARAMS_PTR = ctypes.POINTER(CK_SALSA20_PARAMS);
+  const CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR = ctypes.POINTER(CK_SALSA20_CHACHA20_POLY1305_PARAMS);
+  const CK_SALSA20_CHACHA20_POLY1305_MSG_PARAMS_PTR = ctypes.POINTER(CK_SALSA20_CHACHA20_POLY1305_MSG_PARAMS);
+  const CK_X3DH_KDF_TYPE = CK_ULONG;
+  const CK_X3DH_KDF_TYPE_PTR = ctypes.POINTER(CK_X3DH_KDF_TYPE);
+  const CK_X2RATCHET_KDF_TYPE = CK_ULONG;
+  const CK_X2RATCHET_KDF_TYPE_PTR = ctypes.POINTER(CK_X2RATCHET_KDF_TYPE);
+  const CK_X2RATCHET_INITIALIZE_PARAMS_PTR = ctypes.POINTER(CK_X2RATCHET_INITIALIZE_PARAMS);
+  const CK_X2RATCHET_RESPOND_PARAMS_PTR = ctypes.POINTER(CK_X2RATCHET_RESPOND_PARAMS);
+  const CK_XEDDSA_HASH_TYPE = CK_ULONG;
+  const CK_XEDDSA_HASH_TYPE_PTR = ctypes.POINTER(CK_XEDDSA_HASH_TYPE);
+  const CK_XEDDSA_PARAMS_PTR = ctypes.POINTER(CK_XEDDSA_PARAMS);
+  const CK_HKDF_PARAMS_PTR = ctypes.POINTER(CK_HKDF_PARAMS);
+  const CK_HSS_LEVELS = CK_ULONG;
+  const CK_LMS_TYPE = CK_ULONG;
+  const CK_LMOTS_TYPE = CK_ULONG;
+  const CK_IKE2_PRF_PLUS_DERIVE_PARAMS_PTR = ctypes.POINTER(CK_IKE2_PRF_PLUS_DERIVE_PARAMS);
+  const CK_IKE_PRF_DERIVE_PARAMS_PTR = ctypes.POINTER(CK_IKE_PRF_DERIVE_PARAMS);
+  const CK_IKE1_PRF_DERIVE_PARAMS_PTR = ctypes.POINTER(CK_IKE1_PRF_DERIVE_PARAMS);
+  const CK_IKE1_EXTENDED_DERIVE_PARAMS_PTR = ctypes.POINTER(CK_IKE1_EXTENDED_DERIVE_PARAMS);
+  const CK_ASYNC_DATA_PTR = ctypes.POINTER(CK_ASYNC_DATA);
+  const CK_SESSION_VALIDATION_FLAGS_TYPE = CK_ULONG;
+  const CK_VALIDATION_TYPE = CK_ULONG;
+  const CK_VALIDATION_TYPE_PTR = ctypes.POINTER(CK_VALIDATION_TYPE);
+  const CK_VALIDATION_AUTHORITY_TYPE = CK_ULONG;
+  const CK_VALIDATION_AUTHORITY_TYPE_PTR = ctypes.POINTER(CK_VALIDATION_AUTHORITY_TYPE);
+  const CK_XMSSMT_PARAMETER_SET_TYPE = CK_ULONG;
+  const CK_XMSS_PARAMETER_SET_TYPE = CK_ULONG;
+  const CK_HEDGE_TYPE = CK_ULONG;
+  const CK_ML_DSA_PARAMETER_SET_TYPE = CK_ULONG;
+  const CK_SLH_DSA_PARAMETER_SET_TYPE = CK_ULONG;
+  const CK_ML_KEM_PARAMETER_SET_TYPE = CK_ULONG;
+  const CK_TRUST = CK_ULONG;
+  const CK_NOTIFY = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_NOTIFICATION, CK_VOID_PTR);
+  const CK_CREATEMUTEX = ctypes.CFUNCTYPE(CK_RV, CK_VOID_PTR_PTR);
+  const CK_DESTROYMUTEX = ctypes.CFUNCTYPE(CK_RV, CK_VOID_PTR);
+  const CK_LOCKMUTEX = ctypes.CFUNCTYPE(CK_RV, CK_VOID_PTR);
+  const CK_UNLOCKMUTEX = ctypes.CFUNCTYPE(CK_RV, CK_VOID_PTR);
+  const CK_C_Initialize = ctypes.CFUNCTYPE(CK_RV, CK_VOID_PTR);
+  const CK_C_Finalize = ctypes.CFUNCTYPE(CK_RV, CK_VOID_PTR);
+  const CK_C_GetInfo = ctypes.CFUNCTYPE(CK_RV, CK_INFO_PTR);
+  const CK_C_GetFunctionList = ctypes.CFUNCTYPE(CK_RV, CK_FUNCTION_LIST_PTR_PTR);
+  const CK_C_GetSlotList = ctypes.CFUNCTYPE(CK_RV, CK_BBOOL, CK_SLOT_ID_PTR, CK_ULONG_PTR);
+  const CK_C_GetSlotInfo = ctypes.CFUNCTYPE(CK_RV, CK_SLOT_ID, CK_SLOT_INFO_PTR);
+  const CK_C_GetTokenInfo = ctypes.CFUNCTYPE(CK_RV, CK_SLOT_ID, CK_TOKEN_INFO_PTR);
+  const CK_C_GetMechanismList = ctypes.CFUNCTYPE(CK_RV, CK_SLOT_ID, CK_MECHANISM_TYPE_PTR, CK_ULONG_PTR);
+  const CK_C_GetMechanismInfo = ctypes.CFUNCTYPE(CK_RV, CK_SLOT_ID, CK_MECHANISM_TYPE, CK_MECHANISM_INFO_PTR);
+  const CK_C_InitToken = ctypes.CFUNCTYPE(CK_RV, CK_SLOT_ID, CK_UTF8CHAR_PTR, CK_ULONG, CK_UTF8CHAR_PTR);
+  const CK_C_InitPIN = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_UTF8CHAR_PTR, CK_ULONG);
+  const CK_C_SetPIN = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_UTF8CHAR_PTR, CK_ULONG, CK_UTF8CHAR_PTR, CK_ULONG);
+  const CK_C_OpenSession = ctypes.CFUNCTYPE(CK_RV, CK_SLOT_ID, CK_FLAGS, CK_VOID_PTR, CK_NOTIFY, CK_SESSION_HANDLE_PTR);
+  const CK_C_CloseSession = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE);
+  const CK_C_CloseAllSessions = ctypes.CFUNCTYPE(CK_RV, CK_SLOT_ID);
+  const CK_C_GetSessionInfo = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_SESSION_INFO_PTR);
+  const CK_C_GetOperationState = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG_PTR);
+  const CK_C_SetOperationState = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG, CK_OBJECT_HANDLE, CK_OBJECT_HANDLE);
+  const CK_C_Login = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_USER_TYPE, CK_UTF8CHAR_PTR, CK_ULONG);
+  const CK_C_Logout = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE);
+  const CK_C_CreateObject = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_ATTRIBUTE_PTR, CK_ULONG, CK_OBJECT_HANDLE_PTR);
+  const CK_C_CopyObject = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_OBJECT_HANDLE, CK_ATTRIBUTE_PTR, CK_ULONG, CK_OBJECT_HANDLE_PTR);
+  const CK_C_DestroyObject = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_OBJECT_HANDLE);
+  const CK_C_GetObjectSize = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_OBJECT_HANDLE, CK_ULONG_PTR);
+  const CK_C_GetAttributeValue = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_OBJECT_HANDLE, CK_ATTRIBUTE_PTR, CK_ULONG);
+  const CK_C_SetAttributeValue = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_OBJECT_HANDLE, CK_ATTRIBUTE_PTR, CK_ULONG);
+  const CK_C_FindObjectsInit = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_ATTRIBUTE_PTR, CK_ULONG);
+  const CK_C_FindObjects = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_OBJECT_HANDLE_PTR, CK_ULONG, CK_ULONG_PTR);
+  const CK_C_FindObjectsFinal = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE);
+  const CK_C_EncryptInit = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE);
+  const CK_C_Encrypt = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
+  const CK_C_EncryptUpdate = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
+  const CK_C_EncryptFinal = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG_PTR);
+  const CK_C_DecryptInit = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE);
+  const CK_C_Decrypt = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
+  const CK_C_DecryptUpdate = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
+  const CK_C_DecryptFinal = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG_PTR);
+  const CK_C_DigestInit = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_MECHANISM_PTR);
+  const CK_C_Digest = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
+  const CK_C_DigestUpdate = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG);
+  const CK_C_DigestKey = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_OBJECT_HANDLE);
+  const CK_C_DigestFinal = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG_PTR);
+  const CK_C_SignInit = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE);
+  const CK_C_Sign = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
+  const CK_C_SignUpdate = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG);
+  const CK_C_SignFinal = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG_PTR);
+  const CK_C_SignRecoverInit = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE);
+  const CK_C_SignRecover = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
+  const CK_C_VerifyInit = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE);
+  const CK_C_Verify = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG);
+  const CK_C_VerifyUpdate = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG);
+  const CK_C_VerifyFinal = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG);
+  const CK_C_VerifyRecoverInit = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE);
+  const CK_C_VerifyRecover = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
+  const CK_C_DigestEncryptUpdate = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
+  const CK_C_DecryptDigestUpdate = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
+  const CK_C_SignEncryptUpdate = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
+  const CK_C_DecryptVerifyUpdate = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
+  const CK_C_GenerateKey = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_ATTRIBUTE_PTR, CK_ULONG, CK_OBJECT_HANDLE_PTR);
+  const CK_C_GenerateKeyPair = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_ATTRIBUTE_PTR, CK_ULONG, CK_ATTRIBUTE_PTR, CK_ULONG, CK_OBJECT_HANDLE_PTR, CK_OBJECT_HANDLE_PTR);
+  const CK_C_WrapKey = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE, CK_OBJECT_HANDLE, CK_BYTE_PTR, CK_ULONG_PTR);
+  const CK_C_UnwrapKey = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE, CK_BYTE_PTR, CK_ULONG, CK_ATTRIBUTE_PTR, CK_ULONG, CK_OBJECT_HANDLE_PTR);
+  const CK_C_DeriveKey = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE, CK_ATTRIBUTE_PTR, CK_ULONG, CK_OBJECT_HANDLE_PTR);
+  const CK_C_SeedRandom = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG);
+  const CK_C_GenerateRandom = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG);
+  const CK_C_GetFunctionStatus = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE);
+  const CK_C_CancelFunction = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE);
+  const CK_C_WaitForSlotEvent = ctypes.CFUNCTYPE(CK_RV, CK_FLAGS, CK_SLOT_ID_PTR, CK_VOID_PTR);
+  const CK_C_GetInterfaceList = ctypes.CFUNCTYPE(CK_RV, CK_INTERFACE_PTR, CK_ULONG_PTR);
+  const CK_C_GetInterface = ctypes.CFUNCTYPE(CK_RV, CK_UTF8CHAR_PTR, CK_VERSION_PTR, CK_INTERFACE_PTR_PTR, CK_FLAGS);
+  const CK_C_LoginUser = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_USER_TYPE, CK_UTF8CHAR_PTR, CK_ULONG, CK_UTF8CHAR_PTR, CK_ULONG);
+  const CK_C_SessionCancel = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_FLAGS);
+  const CK_C_MessageEncryptInit = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE);
+  const CK_C_EncryptMessage = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
+  const CK_C_EncryptMessageBegin = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG);
+  const CK_C_EncryptMessageNext = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR, CK_FLAGS);
+  const CK_C_MessageEncryptFinal = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE);
+  const CK_C_MessageDecryptInit = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE);
+  const CK_C_DecryptMessage = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
+  const CK_C_DecryptMessageBegin = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG);
+  const CK_C_DecryptMessageNext = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR, CK_FLAGS);
+  const CK_C_MessageDecryptFinal = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE);
+  const CK_C_MessageSignInit = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE);
+  const CK_C_SignMessage = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
+  const CK_C_SignMessageBegin = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG);
+  const CK_C_SignMessageNext = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
+  const CK_C_MessageSignFinal = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE);
+  const CK_C_MessageVerifyInit = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE);
+  const CK_C_VerifyMessage = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG);
+  const CK_C_VerifyMessageBegin = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG);
+  const CK_C_VerifyMessageNext = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG);
+  const CK_C_MessageVerifyFinal = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE);
+  const CK_C_EncapsulateKey = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE, CK_ATTRIBUTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR, CK_OBJECT_HANDLE_PTR);
+  const CK_C_DecapsulateKey = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE, CK_ATTRIBUTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, CK_OBJECT_HANDLE_PTR);
+  const CK_C_VerifySignatureInit = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE, CK_BYTE_PTR, CK_ULONG);
+  const CK_C_VerifySignature = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG);
+  const CK_C_VerifySignatureUpdate = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG);
+  const CK_C_VerifySignatureFinal = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE);
+  const CK_C_GetSessionValidationFlags = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_SESSION_VALIDATION_FLAGS_TYPE, CK_FLAGS_PTR);
+  const CK_C_AsyncComplete = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_UTF8CHAR_PTR, CK_ASYNC_DATA_PTR);
+  const CK_C_AsyncGetID = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_UTF8CHAR_PTR, CK_ULONG_PTR);
+  const CK_C_AsyncJoin = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_UTF8CHAR_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG);
+  const CK_C_WrapKeyAuthenticated = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE, CK_OBJECT_HANDLE, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
+  const CK_C_UnwrapKeyAuthenticated = ctypes.CFUNCTYPE(CK_RV, CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE, CK_BYTE_PTR, CK_ULONG, CK_ATTRIBUTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, CK_OBJECT_HANDLE_PTR);
+  CK_VERSION._fields_ = [
+    ["major", CK_BYTE],
+    ["minor", CK_BYTE],
+  ];
+  CK_INFO._fields_ = [
+    ["cryptokiVersion", CK_VERSION],
+    ["manufacturerID", ctypes.ARRAY(CK_UTF8CHAR, 32)],
+    ["flags", CK_FLAGS],
+    ["libraryDescription", ctypes.ARRAY(CK_UTF8CHAR, 32)],
+    ["libraryVersion", CK_VERSION],
+  ];
+  CK_SLOT_INFO._fields_ = [
+    ["slotDescription", ctypes.ARRAY(CK_UTF8CHAR, 64)],
+    ["manufacturerID", ctypes.ARRAY(CK_UTF8CHAR, 32)],
+    ["flags", CK_FLAGS],
+    ["hardwareVersion", CK_VERSION],
+    ["firmwareVersion", CK_VERSION],
+  ];
+  CK_TOKEN_INFO._fields_ = [
+    ["label", ctypes.ARRAY(CK_UTF8CHAR, 32)],
+    ["manufacturerID", ctypes.ARRAY(CK_UTF8CHAR, 32)],
+    ["model", ctypes.ARRAY(CK_UTF8CHAR, 16)],
+    ["serialNumber", ctypes.ARRAY(CK_CHAR, 16)],
+    ["flags", CK_FLAGS],
+    ["ulMaxSessionCount", CK_ULONG],
+    ["ulSessionCount", CK_ULONG],
+    ["ulMaxRwSessionCount", CK_ULONG],
+    ["ulRwSessionCount", CK_ULONG],
+    ["ulMaxPinLen", CK_ULONG],
+    ["ulMinPinLen", CK_ULONG],
+    ["ulTotalPublicMemory", CK_ULONG],
+    ["ulFreePublicMemory", CK_ULONG],
+    ["ulTotalPrivateMemory", CK_ULONG],
+    ["ulFreePrivateMemory", CK_ULONG],
+    ["hardwareVersion", CK_VERSION],
+    ["firmwareVersion", CK_VERSION],
+    ["utcTime", ctypes.ARRAY(CK_CHAR, 16)],
+  ];
+  CK_SESSION_INFO._fields_ = [
+    ["slotID", CK_SLOT_ID],
+    ["state", CK_STATE],
+    ["flags", CK_FLAGS],
+    ["ulDeviceError", CK_ULONG],
+  ];
+  CK_ATTRIBUTE._fields_ = [
+    ["type", CK_ATTRIBUTE_TYPE],
+    ["pValue", CK_VOID_PTR],
+    ["ulValueLen", CK_ULONG],
+  ];
+  CK_DATE._fields_ = [
+    ["year", ctypes.ARRAY(CK_CHAR, 4)],
+    ["month", ctypes.ARRAY(CK_CHAR, 2)],
+    ["day", ctypes.ARRAY(CK_CHAR, 2)],
+  ];
+  CK_MECHANISM._fields_ = [
+    ["mechanism", CK_MECHANISM_TYPE],
+    ["pParameter", CK_VOID_PTR],
+    ["ulParameterLen", CK_ULONG],
+  ];
+  CK_MECHANISM_INFO._fields_ = [
+    ["ulMinKeySize", CK_ULONG],
+    ["ulMaxKeySize", CK_ULONG],
+    ["flags", CK_FLAGS],
+  ];
+  CK_INTERFACE._fields_ = [
+    ["pInterfaceName", CK_UTF8CHAR_PTR],
+    ["pFunctionList", CK_VOID_PTR],
+    ["flags", CK_FLAGS],
+  ];
+  CK_C_INITIALIZE_ARGS._fields_ = [
+    ["CreateMutex", CK_CREATEMUTEX],
+    ["DestroyMutex", CK_DESTROYMUTEX],
+    ["LockMutex", CK_LOCKMUTEX],
+    ["UnlockMutex", CK_UNLOCKMUTEX],
+    ["flags", CK_FLAGS],
+    ["pReserved", CK_VOID_PTR],
+  ];
+  CK_RSA_PKCS_OAEP_PARAMS._fields_ = [
+    ["hashAlg", CK_MECHANISM_TYPE],
+    ["mgf", CK_RSA_PKCS_MGF_TYPE],
+    ["source", CK_RSA_PKCS_OAEP_SOURCE_TYPE],
+    ["pSourceData", CK_VOID_PTR],
+    ["ulSourceDataLen", CK_ULONG],
+  ];
+  CK_RSA_PKCS_PSS_PARAMS._fields_ = [
+    ["hashAlg", CK_MECHANISM_TYPE],
+    ["mgf", CK_RSA_PKCS_MGF_TYPE],
+    ["sLen", CK_ULONG],
+  ];
+  CK_ECDH1_DERIVE_PARAMS._fields_ = [
+    ["kdf", CK_EC_KDF_TYPE],
+    ["ulSharedDataLen", CK_ULONG],
+    ["pSharedData", CK_BYTE_PTR],
+    ["ulPublicDataLen", CK_ULONG],
+    ["pPublicData", CK_BYTE_PTR],
+  ];
+  CK_ECDH2_DERIVE_PARAMS._fields_ = [
+    ["kdf", CK_EC_KDF_TYPE],
+    ["ulSharedDataLen", CK_ULONG],
+    ["pSharedData", CK_BYTE_PTR],
+    ["ulPublicDataLen", CK_ULONG],
+    ["pPublicData", CK_BYTE_PTR],
+    ["ulPrivateDataLen", CK_ULONG],
+    ["hPrivateData", CK_OBJECT_HANDLE],
+    ["ulPublicDataLen2", CK_ULONG],
+    ["pPublicData2", CK_BYTE_PTR],
+  ];
+  CK_ECMQV_DERIVE_PARAMS._fields_ = [
+    ["kdf", CK_EC_KDF_TYPE],
+    ["ulSharedDataLen", CK_ULONG],
+    ["pSharedData", CK_BYTE_PTR],
+    ["ulPublicDataLen", CK_ULONG],
+    ["pPublicData", CK_BYTE_PTR],
+    ["ulPrivateDataLen", CK_ULONG],
+    ["hPrivateData", CK_OBJECT_HANDLE],
+    ["ulPublicDataLen2", CK_ULONG],
+    ["pPublicData2", CK_BYTE_PTR],
+    ["publicKey", CK_OBJECT_HANDLE],
+  ];
+  CK_X9_42_DH1_DERIVE_PARAMS._fields_ = [
+    ["kdf", CK_X9_42_DH_KDF_TYPE],
+    ["ulOtherInfoLen", CK_ULONG],
+    ["pOtherInfo", CK_BYTE_PTR],
+    ["ulPublicDataLen", CK_ULONG],
+    ["pPublicData", CK_BYTE_PTR],
+  ];
+  CK_X9_42_DH2_DERIVE_PARAMS._fields_ = [
+    ["kdf", CK_X9_42_DH_KDF_TYPE],
+    ["ulOtherInfoLen", CK_ULONG],
+    ["pOtherInfo", CK_BYTE_PTR],
+    ["ulPublicDataLen", CK_ULONG],
+    ["pPublicData", CK_BYTE_PTR],
+    ["ulPrivateDataLen", CK_ULONG],
+    ["hPrivateData", CK_OBJECT_HANDLE],
+    ["ulPublicDataLen2", CK_ULONG],
+    ["pPublicData2", CK_BYTE_PTR],
+  ];
+  CK_X9_42_MQV_DERIVE_PARAMS._fields_ = [
+    ["kdf", CK_X9_42_DH_KDF_TYPE],
+    ["ulOtherInfoLen", CK_ULONG],
+    ["pOtherInfo", CK_BYTE_PTR],
+    ["ulPublicDataLen", CK_ULONG],
+    ["pPublicData", CK_BYTE_PTR],
+    ["ulPrivateDataLen", CK_ULONG],
+    ["hPrivateData", CK_OBJECT_HANDLE],
+    ["ulPublicDataLen2", CK_ULONG],
+    ["pPublicData2", CK_BYTE_PTR],
+    ["publicKey", CK_OBJECT_HANDLE],
+  ];
+  CK_KEA_DERIVE_PARAMS._fields_ = [
+    ["isSender", CK_BBOOL],
+    ["ulRandomLen", CK_ULONG],
+    ["pRandomA", CK_BYTE_PTR],
+    ["pRandomB", CK_BYTE_PTR],
+    ["ulPublicDataLen", CK_ULONG],
+    ["pPublicData", CK_BYTE_PTR],
+  ];
+  CK_RC2_CBC_PARAMS._fields_ = [
+    ["ulEffectiveBits", CK_ULONG],
+    ["iv", ctypes.ARRAY(CK_BYTE, 8)],
+  ];
+  CK_RC2_MAC_GENERAL_PARAMS._fields_ = [
+    ["ulEffectiveBits", CK_ULONG],
+    ["ulMacLength", CK_ULONG],
+  ];
+  CK_RC5_PARAMS._fields_ = [
+    ["ulWordsize", CK_ULONG],
+    ["ulRounds", CK_ULONG],
+  ];
+  CK_RC5_CBC_PARAMS._fields_ = [
+    ["ulWordsize", CK_ULONG],
+    ["ulRounds", CK_ULONG],
+    ["pIv", CK_BYTE_PTR],
+    ["ulIvLen", CK_ULONG],
+  ];
+  CK_RC5_MAC_GENERAL_PARAMS._fields_ = [
+    ["ulWordsize", CK_ULONG],
+    ["ulRounds", CK_ULONG],
+    ["ulMacLength", CK_ULONG],
+  ];
+  CK_DES_CBC_ENCRYPT_DATA_PARAMS._fields_ = [
+    ["iv", ctypes.ARRAY(CK_BYTE, 8)],
+    ["pData", CK_BYTE_PTR],
+    ["length", CK_ULONG],
+  ];
+  CK_AES_CBC_ENCRYPT_DATA_PARAMS._fields_ = [
+    ["iv", ctypes.ARRAY(CK_BYTE, 16)],
+    ["pData", CK_BYTE_PTR],
+    ["length", CK_ULONG],
+  ];
+  CK_SKIPJACK_PRIVATE_WRAP_PARAMS._fields_ = [
+    ["ulPasswordLen", CK_ULONG],
+    ["pPassword", CK_BYTE_PTR],
+    ["ulPublicDataLen", CK_ULONG],
+    ["pPublicData", CK_BYTE_PTR],
+    ["ulPAndGLen", CK_ULONG],
+    ["ulQLen", CK_ULONG],
+    ["ulRandomLen", CK_ULONG],
+    ["pRandomA", CK_BYTE_PTR],
+    ["pPrimeP", CK_BYTE_PTR],
+    ["pBaseG", CK_BYTE_PTR],
+    ["pSubprimeQ", CK_BYTE_PTR],
+  ];
+  CK_SKIPJACK_RELAYX_PARAMS._fields_ = [
+    ["ulOldWrappedXLen", CK_ULONG],
+    ["pOldWrappedX", CK_BYTE_PTR],
+    ["ulOldPasswordLen", CK_ULONG],
+    ["pOldPassword", CK_BYTE_PTR],
+    ["ulOldPublicDataLen", CK_ULONG],
+    ["pOldPublicData", CK_BYTE_PTR],
+    ["ulOldRandomLen", CK_ULONG],
+    ["pOldRandomA", CK_BYTE_PTR],
+    ["ulNewPasswordLen", CK_ULONG],
+    ["pNewPassword", CK_BYTE_PTR],
+    ["ulNewPublicDataLen", CK_ULONG],
+    ["pNewPublicData", CK_BYTE_PTR],
+    ["ulNewRandomLen", CK_ULONG],
+    ["pNewRandomA", CK_BYTE_PTR],
+  ];
+  CK_PBE_PARAMS._fields_ = [
+    ["pInitVector", CK_BYTE_PTR],
+    ["pPassword", CK_UTF8CHAR_PTR],
+    ["ulPasswordLen", CK_ULONG],
+    ["pSalt", CK_BYTE_PTR],
+    ["ulSaltLen", CK_ULONG],
+    ["ulIteration", CK_ULONG],
+  ];
+  CK_KEY_WRAP_SET_OAEP_PARAMS._fields_ = [
+    ["bBC", CK_BYTE],
+    ["pX", CK_BYTE_PTR],
+    ["ulXLen", CK_ULONG],
+  ];
+  CK_SSL3_RANDOM_DATA._fields_ = [
+    ["pClientRandom", CK_BYTE_PTR],
+    ["ulClientRandomLen", CK_ULONG],
+    ["pServerRandom", CK_BYTE_PTR],
+    ["ulServerRandomLen", CK_ULONG],
+  ];
+  CK_SSL3_MASTER_KEY_DERIVE_PARAMS._fields_ = [
+    ["RandomInfo", CK_SSL3_RANDOM_DATA],
+    ["pVersion", CK_VERSION_PTR],
+  ];
+  CK_SSL3_KEY_MAT_OUT._fields_ = [
+    ["hClientMacSecret", CK_OBJECT_HANDLE],
+    ["hServerMacSecret", CK_OBJECT_HANDLE],
+    ["hClientKey", CK_OBJECT_HANDLE],
+    ["hServerKey", CK_OBJECT_HANDLE],
+    ["pIVClient", CK_BYTE_PTR],
+    ["pIVServer", CK_BYTE_PTR],
+  ];
+  CK_SSL3_KEY_MAT_PARAMS._fields_ = [
+    ["ulMacSizeInBits", CK_ULONG],
+    ["ulKeySizeInBits", CK_ULONG],
+    ["ulIVSizeInBits", CK_ULONG],
+    ["bIsExport", CK_BBOOL],
+    ["RandomInfo", CK_SSL3_RANDOM_DATA],
+    ["pReturnedKeyMaterial", CK_SSL3_KEY_MAT_OUT_PTR],
+  ];
+  CK_TLS_PRF_PARAMS._fields_ = [
+    ["pSeed", CK_BYTE_PTR],
+    ["ulSeedLen", CK_ULONG],
+    ["pLabel", CK_BYTE_PTR],
+    ["ulLabelLen", CK_ULONG],
+    ["pOutput", CK_BYTE_PTR],
+    ["pulOutputLen", CK_ULONG_PTR],
+  ];
+  CK_WTLS_RANDOM_DATA._fields_ = [
+    ["pClientRandom", CK_BYTE_PTR],
+    ["ulClientRandomLen", CK_ULONG],
+    ["pServerRandom", CK_BYTE_PTR],
+    ["ulServerRandomLen", CK_ULONG],
+  ];
+  CK_WTLS_MASTER_KEY_DERIVE_PARAMS._fields_ = [
+    ["DigestMechanism", CK_MECHANISM_TYPE],
+    ["RandomInfo", CK_WTLS_RANDOM_DATA],
+    ["pVersion", CK_BYTE_PTR],
+  ];
+  CK_WTLS_PRF_PARAMS._fields_ = [
+    ["DigestMechanism", CK_MECHANISM_TYPE],
+    ["pSeed", CK_BYTE_PTR],
+    ["ulSeedLen", CK_ULONG],
+    ["pLabel", CK_BYTE_PTR],
+    ["ulLabelLen", CK_ULONG],
+    ["pOutput", CK_BYTE_PTR],
+    ["pulOutputLen", CK_ULONG_PTR],
+  ];
+  CK_WTLS_KEY_MAT_OUT._fields_ = [
+    ["hMacSecret", CK_OBJECT_HANDLE],
+    ["hKey", CK_OBJECT_HANDLE],
+    ["pIV", CK_BYTE_PTR],
+  ];
+  CK_WTLS_KEY_MAT_PARAMS._fields_ = [
+    ["DigestMechanism", CK_MECHANISM_TYPE],
+    ["ulMacSizeInBits", CK_ULONG],
+    ["ulKeySizeInBits", CK_ULONG],
+    ["ulIVSizeInBits", CK_ULONG],
+    ["ulSequenceNumber", CK_ULONG],
+    ["bIsExport", CK_BBOOL],
+    ["RandomInfo", CK_WTLS_RANDOM_DATA],
+    ["pReturnedKeyMaterial", CK_WTLS_KEY_MAT_OUT_PTR],
+  ];
+  CK_CMS_SIG_PARAMS._fields_ = [
+    ["certificateHandle", CK_OBJECT_HANDLE],
+    ["pSigningMechanism", CK_MECHANISM_PTR],
+    ["pDigestMechanism", CK_MECHANISM_PTR],
+    ["pContentType", CK_UTF8CHAR_PTR],
+    ["pRequestedAttributes", CK_BYTE_PTR],
+    ["ulRequestedAttributesLen", CK_ULONG],
+    ["pRequiredAttributes", CK_BYTE_PTR],
+    ["ulRequiredAttributesLen", CK_ULONG],
+  ];
+  CK_KEY_DERIVATION_STRING_DATA._fields_ = [
+    ["pData", CK_BYTE_PTR],
+    ["ulLen", CK_ULONG],
+  ];
+  CK_PKCS5_PBKD2_PARAMS._fields_ = [
+    ["saltSource", CK_PKCS5_PBKDF2_SALT_SOURCE_TYPE],
+    ["pSaltSourceData", CK_VOID_PTR],
+    ["ulSaltSourceDataLen", CK_ULONG],
+    ["iterations", CK_ULONG],
+    ["prf", CK_PKCS5_PBKD2_PSEUDO_RANDOM_FUNCTION_TYPE],
+    ["pPrfData", CK_VOID_PTR],
+    ["ulPrfDataLen", CK_ULONG],
+    ["pPassword", CK_UTF8CHAR_PTR],
+    ["ulPasswordLen", CK_ULONG_PTR],
+  ];
+  CK_PKCS5_PBKD2_PARAMS2._fields_ = [
+    ["saltSource", CK_PKCS5_PBKDF2_SALT_SOURCE_TYPE],
+    ["pSaltSourceData", CK_VOID_PTR],
+    ["ulSaltSourceDataLen", CK_ULONG],
+    ["iterations", CK_ULONG],
+    ["prf", CK_PKCS5_PBKD2_PSEUDO_RANDOM_FUNCTION_TYPE],
+    ["pPrfData", CK_VOID_PTR],
+    ["ulPrfDataLen", CK_ULONG],
+    ["pPassword", CK_UTF8CHAR_PTR],
+    ["ulPasswordLen", CK_ULONG],
+  ];
+  CK_OTP_PARAM._fields_ = [
+    ["type", CK_OTP_PARAM_TYPE],
+    ["pValue", CK_VOID_PTR],
+    ["ulValueLen", CK_ULONG],
+  ];
+  CK_OTP_PARAMS._fields_ = [
+    ["pParams", CK_OTP_PARAM_PTR],
+    ["ulCount", CK_ULONG],
+  ];
+  CK_OTP_SIGNATURE_INFO._fields_ = [
+    ["pParams", CK_OTP_PARAM_PTR],
+    ["ulCount", CK_ULONG],
+  ];
+  CK_KIP_PARAMS._fields_ = [
+    ["pMechanism", CK_MECHANISM_PTR],
+    ["hKey", CK_OBJECT_HANDLE],
+    ["pSeed", CK_BYTE_PTR],
+    ["ulSeedLen", CK_ULONG],
+  ];
+  CK_AES_CTR_PARAMS._fields_ = [
+    ["ulCounterBits", CK_ULONG],
+    ["cb", ctypes.ARRAY(CK_BYTE, 16)],
+  ];
+  CK_GCM_PARAMS._fields_ = [
+    ["pIv", CK_BYTE_PTR],
+    ["ulIvLen", CK_ULONG],
+    ["ulIvBits", CK_ULONG],
+    ["pAAD", CK_BYTE_PTR],
+    ["ulAADLen", CK_ULONG],
+    ["ulTagBits", CK_ULONG],
+  ];
+  CK_GCM_MESSAGE_PARAMS._fields_ = [
+    ["pIv", CK_BYTE_PTR],
+    ["ulIvLen", CK_ULONG],
+    ["ulIvFixedBits", CK_ULONG],
+    ["ivGenerator", CK_GENERATOR_FUNCTION],
+    ["pTag", CK_BYTE_PTR],
+    ["ulTagBits", CK_ULONG],
+  ];
+  CK_GCM_WRAP_PARAMS._fields_ = [
+    ["pIv", CK_BYTE_PTR],
+    ["ulIvLen", CK_ULONG],
+    ["ulIvFixedBits", CK_ULONG],
+    ["ivGenerator", CK_GENERATOR_FUNCTION],
+    ["pAAD", CK_BYTE_PTR],
+    ["ulAADLen", CK_ULONG],
+    ["ulTagBits", CK_ULONG],
+  ];
+  CK_CCM_PARAMS._fields_ = [
+    ["ulDataLen", CK_ULONG],
+    ["pNonce", CK_BYTE_PTR],
+    ["ulNonceLen", CK_ULONG],
+    ["pAAD", CK_BYTE_PTR],
+    ["ulAADLen", CK_ULONG],
+    ["ulMACLen", CK_ULONG],
+  ];
+  CK_CCM_MESSAGE_PARAMS._fields_ = [
+    ["ulDataLen", CK_ULONG],
+    ["pNonce", CK_BYTE_PTR],
+    ["ulNonceLen", CK_ULONG],
+    ["ulNonceFixedBits", CK_ULONG],
+    ["nonceGenerator", CK_GENERATOR_FUNCTION],
+    ["pMAC", CK_BYTE_PTR],
+    ["ulMACLen", CK_ULONG],
+  ];
+  CK_CCM_WRAP_PARAMS._fields_ = [
+    ["ulDataLen", CK_ULONG],
+    ["pNonce", CK_BYTE_PTR],
+    ["ulNonceLen", CK_ULONG],
+    ["ulNonceFixedBits", CK_ULONG],
+    ["nonceGenerator", CK_GENERATOR_FUNCTION],
+    ["pAAD", CK_BYTE_PTR],
+    ["ulAADLen", CK_ULONG],
+    ["ulMACLen", CK_ULONG],
+  ];
+  CK_AES_GCM_PARAMS._fields_ = [
+    ["pIv", CK_BYTE_PTR],
+    ["ulIvLen", CK_ULONG],
+    ["ulIvBits", CK_ULONG],
+    ["pAAD", CK_BYTE_PTR],
+    ["ulAADLen", CK_ULONG],
+    ["ulTagBits", CK_ULONG],
+  ];
+  CK_AES_CCM_PARAMS._fields_ = [
+    ["ulDataLen", CK_ULONG],
+    ["pNonce", CK_BYTE_PTR],
+    ["ulNonceLen", CK_ULONG],
+    ["pAAD", CK_BYTE_PTR],
+    ["ulAADLen", CK_ULONG],
+    ["ulMACLen", CK_ULONG],
+  ];
+  CK_CAMELLIA_CTR_PARAMS._fields_ = [
+    ["ulCounterBits", CK_ULONG],
+    ["cb", ctypes.ARRAY(CK_BYTE, 16)],
+  ];
+  CK_CAMELLIA_CBC_ENCRYPT_DATA_PARAMS._fields_ = [
+    ["iv", ctypes.ARRAY(CK_BYTE, 16)],
+    ["pData", CK_BYTE_PTR],
+    ["length", CK_ULONG],
+  ];
+  CK_ARIA_CBC_ENCRYPT_DATA_PARAMS._fields_ = [
+    ["iv", ctypes.ARRAY(CK_BYTE, 16)],
+    ["pData", CK_BYTE_PTR],
+    ["length", CK_ULONG],
+  ];
+  CK_DSA_PARAMETER_GEN_PARAM._fields_ = [
+    ["hash", CK_MECHANISM_TYPE],
+    ["pSeed", CK_BYTE_PTR],
+    ["ulSeedLen", CK_ULONG],
+    ["ulIndex", CK_ULONG],
+  ];
+  CK_ECDH_AES_KEY_WRAP_PARAMS._fields_ = [
+    ["ulAESKeyBits", CK_ULONG],
+    ["kdf", CK_EC_KDF_TYPE],
+    ["ulSharedDataLen", CK_ULONG],
+    ["pSharedData", CK_BYTE_PTR],
+  ];
+  CK_RSA_AES_KEY_WRAP_PARAMS._fields_ = [
+    ["ulAESKeyBits", CK_ULONG],
+    ["pOAEPParams", CK_RSA_PKCS_OAEP_PARAMS_PTR],
+  ];
+  CK_TLS12_MASTER_KEY_DERIVE_PARAMS._fields_ = [
+    ["RandomInfo", CK_SSL3_RANDOM_DATA],
+    ["pVersion", CK_VERSION_PTR],
+    ["prfHashMechanism", CK_MECHANISM_TYPE],
+  ];
+  CK_TLS12_KEY_MAT_PARAMS._fields_ = [
+    ["ulMacSizeInBits", CK_ULONG],
+    ["ulKeySizeInBits", CK_ULONG],
+    ["ulIVSizeInBits", CK_ULONG],
+    ["bIsExport", CK_BBOOL],
+    ["RandomInfo", CK_SSL3_RANDOM_DATA],
+    ["pReturnedKeyMaterial", CK_SSL3_KEY_MAT_OUT_PTR],
+    ["prfHashMechanism", CK_MECHANISM_TYPE],
+  ];
+  CK_TLS_KDF_PARAMS._fields_ = [
+    ["prfMechanism", CK_MECHANISM_TYPE],
+    ["pLabel", CK_BYTE_PTR],
+    ["ulLabelLength", CK_ULONG],
+    ["RandomInfo", CK_SSL3_RANDOM_DATA],
+    ["pContextData", CK_BYTE_PTR],
+    ["ulContextDataLength", CK_ULONG],
+  ];
+  CK_TLS_MAC_PARAMS._fields_ = [
+    ["prfHashMechanism", CK_MECHANISM_TYPE],
+    ["ulMacLength", CK_ULONG],
+    ["ulServerOrClient", CK_ULONG],
+  ];
+  CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS._fields_ = [
+    ["prfHashMechanism", CK_MECHANISM_TYPE],
+    ["pSessionHash", CK_BYTE_PTR],
+    ["ulSessionHashLen", CK_ULONG],
+    ["pVersion", CK_VERSION_PTR],
+  ];
+  CK_GOSTR3410_DERIVE_PARAMS._fields_ = [
+    ["kdf", CK_EC_KDF_TYPE],
+    ["pPublicData", CK_BYTE_PTR],
+    ["ulPublicDataLen", CK_ULONG],
+    ["pUKM", CK_BYTE_PTR],
+    ["ulUKMLen", CK_ULONG],
+  ];
+  CK_GOSTR3410_KEY_WRAP_PARAMS._fields_ = [
+    ["pWrapOID", CK_BYTE_PTR],
+    ["ulWrapOIDLen", CK_ULONG],
+    ["pUKM", CK_BYTE_PTR],
+    ["ulUKMLen", CK_ULONG],
+    ["hKey", CK_OBJECT_HANDLE],
+  ];
+  CK_SEED_CBC_ENCRYPT_DATA_PARAMS._fields_ = [
+    ["iv", ctypes.ARRAY(CK_BYTE, 16)],
+    ["pData", CK_BYTE_PTR],
+    ["length", CK_ULONG],
+  ];
+  CK_PRF_DATA_PARAM._fields_ = [
+    ["type", CK_PRF_DATA_TYPE],
+    ["pValue", CK_VOID_PTR],
+    ["ulValueLen", CK_ULONG],
+  ];
+  CK_SP800_108_COUNTER_FORMAT._fields_ = [
+    ["bLittleEndian", CK_BBOOL],
+    ["ulWidthInBits", CK_ULONG],
+  ];
+  CK_SP800_108_DKM_LENGTH_FORMAT._fields_ = [
+    ["dkmLengthMethod", CK_SP800_108_DKM_LENGTH_METHOD],
+    ["bLittleEndian", CK_BBOOL],
+    ["ulWidthInBits", CK_ULONG],
+  ];
+  CK_DERIVED_KEY._fields_ = [
+    ["pTemplate", CK_ATTRIBUTE_PTR],
+    ["ulAttributeCount", CK_ULONG],
+    ["phKey", CK_OBJECT_HANDLE_PTR],
+  ];
+  CK_SP800_108_KDF_PARAMS._fields_ = [
+    ["prfType", CK_SP800_108_PRF_TYPE],
+    ["ulNumberOfDataParams", CK_ULONG],
+    ["pDataParams", CK_PRF_DATA_PARAM_PTR],
+    ["ulAdditionalDerivedKeys", CK_ULONG],
+    ["pAdditionalDerivedKeys", CK_DERIVED_KEY_PTR],
+  ];
+  CK_SP800_108_FEEDBACK_KDF_PARAMS._fields_ = [
+    ["prfType", CK_SP800_108_PRF_TYPE],
+    ["ulNumberOfDataParams", CK_ULONG],
+    ["pDataParams", CK_PRF_DATA_PARAM_PTR],
+    ["ulIVLen", CK_ULONG],
+    ["pIV", CK_BYTE_PTR],
+    ["ulAdditionalDerivedKeys", CK_ULONG],
+    ["pAdditionalDerivedKeys", CK_DERIVED_KEY_PTR],
+  ];
+  CK_EDDSA_PARAMS._fields_ = [
+    ["phFlag", CK_BBOOL],
+    ["ulContextDataLen", CK_ULONG],
+    ["pContextData", CK_BYTE_PTR],
+  ];
+  CK_CHACHA20_PARAMS._fields_ = [
+    ["pBlockCounter", CK_BYTE_PTR],
+    ["blockCounterBits", CK_ULONG],
+    ["pNonce", CK_BYTE_PTR],
+    ["ulNonceBits", CK_ULONG],
+  ];
+  CK_SALSA20_PARAMS._fields_ = [
+    ["pBlockCounter", CK_BYTE_PTR],
+    ["pNonce", CK_BYTE_PTR],
+    ["ulNonceBits", CK_ULONG],
+  ];
+  CK_SALSA20_CHACHA20_POLY1305_PARAMS._fields_ = [
+    ["pNonce", CK_BYTE_PTR],
+    ["ulNonceLen", CK_ULONG],
+    ["pAAD", CK_BYTE_PTR],
+    ["ulAADLen", CK_ULONG],
+  ];
+  CK_SALSA20_CHACHA20_POLY1305_MSG_PARAMS._fields_ = [
+    ["pNonce", CK_BYTE_PTR],
+    ["ulNonceLen", CK_ULONG],
+    ["pTag", CK_BYTE_PTR],
+  ];
+  CK_X3DH_INITIATE_PARAMS._fields_ = [
+    ["kdf", CK_X3DH_KDF_TYPE],
+    ["pPeer_identity", CK_OBJECT_HANDLE],
+    ["pPeer_prekey", CK_OBJECT_HANDLE],
+    ["pPrekey_signature", CK_BYTE_PTR],
+    ["pOnetime_key", CK_BYTE_PTR],
+    ["pOwn_identity", CK_OBJECT_HANDLE],
+    ["pOwn_ephemeral", CK_OBJECT_HANDLE],
+  ];
+  CK_X3DH_RESPOND_PARAMS._fields_ = [
+    ["kdf", CK_X3DH_KDF_TYPE],
+    ["pIdentity_id", CK_BYTE_PTR],
+    ["pPrekey_id", CK_BYTE_PTR],
+    ["pOnetime_id", CK_BYTE_PTR],
+    ["pInitiator_identity", CK_OBJECT_HANDLE],
+    ["pInitiator_ephemeral", CK_BYTE_PTR],
+  ];
+  CK_X2RATCHET_INITIALIZE_PARAMS._fields_ = [
+    ["sk", CK_BYTE_PTR],
+    ["peer_public_prekey", CK_OBJECT_HANDLE],
+    ["peer_public_identity", CK_OBJECT_HANDLE],
+    ["own_public_identity", CK_OBJECT_HANDLE],
+    ["bEncryptedHeader", CK_BBOOL],
+    ["eCurve", CK_ULONG],
+    ["aeadMechanism", CK_MECHANISM_TYPE],
+    ["kdfMechanism", CK_X2RATCHET_KDF_TYPE],
+  ];
+  CK_X2RATCHET_RESPOND_PARAMS._fields_ = [
+    ["sk", CK_BYTE_PTR],
+    ["own_prekey", CK_OBJECT_HANDLE],
+    ["initiator_identity", CK_OBJECT_HANDLE],
+    ["own_public_identity", CK_OBJECT_HANDLE],
+    ["bEncryptedHeader", CK_BBOOL],
+    ["eCurve", CK_ULONG],
+    ["aeadMechanism", CK_MECHANISM_TYPE],
+    ["kdfMechanism", CK_X2RATCHET_KDF_TYPE],
+  ];
+  CK_XEDDSA_PARAMS._fields_ = [["hash", CK_XEDDSA_HASH_TYPE]];
+  CK_HKDF_PARAMS._fields_ = [
+    ["bExtract", CK_BBOOL],
+    ["bExpand", CK_BBOOL],
+    ["prfHashMechanism", CK_MECHANISM_TYPE],
+    ["ulSaltType", CK_ULONG],
+    ["pSalt", CK_BYTE_PTR],
+    ["ulSaltLen", CK_ULONG],
+    ["hSaltKey", CK_OBJECT_HANDLE],
+    ["pInfo", CK_BYTE_PTR],
+    ["ulInfoLen", CK_ULONG],
+  ];
+  specifiedParams._fields_ = [
+    ["levels", CK_HSS_LEVELS],
+    ["lm_type", ctypes.ARRAY(CK_LMS_TYPE, 8)],
+    ["lm_ots_type", ctypes.ARRAY(CK_LMOTS_TYPE, 8)],
+  ];
+  CK_IKE2_PRF_PLUS_DERIVE_PARAMS._fields_ = [
+    ["prfMechanism", CK_MECHANISM_TYPE],
+    ["bHasSeedKey", CK_BBOOL],
+    ["hSeedKey", CK_OBJECT_HANDLE],
+    ["pSeedData", CK_BYTE_PTR],
+    ["ulSeedDataLen", CK_ULONG],
+  ];
+  CK_IKE_PRF_DERIVE_PARAMS._fields_ = [
+    ["prfMechanism", CK_MECHANISM_TYPE],
+    ["bDataAsKey", CK_BBOOL],
+    ["bRekey", CK_BBOOL],
+    ["pNi", CK_BYTE_PTR],
+    ["ulNiLen", CK_ULONG],
+    ["pNr", CK_BYTE_PTR],
+    ["ulNrLen", CK_ULONG],
+    ["hNewKey", CK_OBJECT_HANDLE],
+  ];
+  CK_IKE1_PRF_DERIVE_PARAMS._fields_ = [
+    ["prfMechanism", CK_MECHANISM_TYPE],
+    ["bHasPrevKey", CK_BBOOL],
+    ["hKeygxy", CK_OBJECT_HANDLE],
+    ["hPrevKey", CK_OBJECT_HANDLE],
+    ["pCKYi", CK_BYTE_PTR],
+    ["ulCKYiLen", CK_ULONG],
+    ["pCKYr", CK_BYTE_PTR],
+    ["ulCKYrLen", CK_ULONG],
+    ["keyNumber", CK_BYTE],
+  ];
+  CK_IKE1_EXTENDED_DERIVE_PARAMS._fields_ = [
+    ["prfMechanism", CK_MECHANISM_TYPE],
+    ["bHasKeygxy", CK_BBOOL],
+    ["hKeygxy", CK_OBJECT_HANDLE],
+    ["pExtraData", CK_BYTE_PTR],
+    ["ulExtraDataLen", CK_ULONG],
+  ];
+  CK_ASYNC_DATA._fields_ = [
+    ["ulVersion", CK_ULONG],
+    ["pValue", CK_BYTE_PTR],
+    ["ulValue", CK_ULONG],
+    ["hObject", CK_OBJECT_HANDLE],
+    ["hAdditionalObject", CK_OBJECT_HANDLE],
+  ];
+  CK_SIGN_ADDITIONAL_CONTEXT._fields_ = [
+    ["hedgeVariant", CK_HEDGE_TYPE],
+    ["pContext", CK_BYTE_PTR],
+    ["ulContextLen", CK_ULONG],
+  ];
+  CK_HASH_SIGN_ADDITIONAL_CONTEXT._fields_ = [
+    ["hedgeVariant", CK_HEDGE_TYPE],
+    ["pContext", CK_BYTE_PTR],
+    ["ulContextLen", CK_ULONG],
+    ["hash", CK_MECHANISM_TYPE],
+  ];
+  CK_FUNCTION_LIST._fields_ = [
+    ["version", CK_VERSION],
+    ["C_Initialize", CK_C_Initialize],
+    ["C_Finalize", CK_C_Finalize],
+    ["C_GetInfo", CK_C_GetInfo],
+    ["C_GetFunctionList", CK_C_GetFunctionList],
+    ["C_GetSlotList", CK_C_GetSlotList],
+    ["C_GetSlotInfo", CK_C_GetSlotInfo],
+    ["C_GetTokenInfo", CK_C_GetTokenInfo],
+    ["C_GetMechanismList", CK_C_GetMechanismList],
+    ["C_GetMechanismInfo", CK_C_GetMechanismInfo],
+    ["C_InitToken", CK_C_InitToken],
+    ["C_InitPIN", CK_C_InitPIN],
+    ["C_SetPIN", CK_C_SetPIN],
+    ["C_OpenSession", CK_C_OpenSession],
+    ["C_CloseSession", CK_C_CloseSession],
+    ["C_CloseAllSessions", CK_C_CloseAllSessions],
+    ["C_GetSessionInfo", CK_C_GetSessionInfo],
+    ["C_GetOperationState", CK_C_GetOperationState],
+    ["C_SetOperationState", CK_C_SetOperationState],
+    ["C_Login", CK_C_Login],
+    ["C_Logout", CK_C_Logout],
+    ["C_CreateObject", CK_C_CreateObject],
+    ["C_CopyObject", CK_C_CopyObject],
+    ["C_DestroyObject", CK_C_DestroyObject],
+    ["C_GetObjectSize", CK_C_GetObjectSize],
+    ["C_GetAttributeValue", CK_C_GetAttributeValue],
+    ["C_SetAttributeValue", CK_C_SetAttributeValue],
+    ["C_FindObjectsInit", CK_C_FindObjectsInit],
+    ["C_FindObjects", CK_C_FindObjects],
+    ["C_FindObjectsFinal", CK_C_FindObjectsFinal],
+    ["C_EncryptInit", CK_C_EncryptInit],
+    ["C_Encrypt", CK_C_Encrypt],
+    ["C_EncryptUpdate", CK_C_EncryptUpdate],
+    ["C_EncryptFinal", CK_C_EncryptFinal],
+    ["C_DecryptInit", CK_C_DecryptInit],
+    ["C_Decrypt", CK_C_Decrypt],
+    ["C_DecryptUpdate", CK_C_DecryptUpdate],
+    ["C_DecryptFinal", CK_C_DecryptFinal],
+    ["C_DigestInit", CK_C_DigestInit],
+    ["C_Digest", CK_C_Digest],
+    ["C_DigestUpdate", CK_C_DigestUpdate],
+    ["C_DigestKey", CK_C_DigestKey],
+    ["C_DigestFinal", CK_C_DigestFinal],
+    ["C_SignInit", CK_C_SignInit],
+    ["C_Sign", CK_C_Sign],
+    ["C_SignUpdate", CK_C_SignUpdate],
+    ["C_SignFinal", CK_C_SignFinal],
+    ["C_SignRecoverInit", CK_C_SignRecoverInit],
+    ["C_SignRecover", CK_C_SignRecover],
+    ["C_VerifyInit", CK_C_VerifyInit],
+    ["C_Verify", CK_C_Verify],
+    ["C_VerifyUpdate", CK_C_VerifyUpdate],
+    ["C_VerifyFinal", CK_C_VerifyFinal],
+    ["C_VerifyRecoverInit", CK_C_VerifyRecoverInit],
+    ["C_VerifyRecover", CK_C_VerifyRecover],
+    ["C_DigestEncryptUpdate", CK_C_DigestEncryptUpdate],
+    ["C_DecryptDigestUpdate", CK_C_DecryptDigestUpdate],
+    ["C_SignEncryptUpdate", CK_C_SignEncryptUpdate],
+    ["C_DecryptVerifyUpdate", CK_C_DecryptVerifyUpdate],
+    ["C_GenerateKey", CK_C_GenerateKey],
+    ["C_GenerateKeyPair", CK_C_GenerateKeyPair],
+    ["C_WrapKey", CK_C_WrapKey],
+    ["C_UnwrapKey", CK_C_UnwrapKey],
+    ["C_DeriveKey", CK_C_DeriveKey],
+    ["C_SeedRandom", CK_C_SeedRandom],
+    ["C_GenerateRandom", CK_C_GenerateRandom],
+    ["C_GetFunctionStatus", CK_C_GetFunctionStatus],
+    ["C_CancelFunction", CK_C_CancelFunction],
+    ["C_WaitForSlotEvent", CK_C_WaitForSlotEvent],
+  ];
+  CK_FUNCTION_LIST_3_0._fields_ = [
+    ["version", CK_VERSION],
+    ["C_Initialize", CK_C_Initialize],
+    ["C_Finalize", CK_C_Finalize],
+    ["C_GetInfo", CK_C_GetInfo],
+    ["C_GetFunctionList", CK_C_GetFunctionList],
+    ["C_GetSlotList", CK_C_GetSlotList],
+    ["C_GetSlotInfo", CK_C_GetSlotInfo],
+    ["C_GetTokenInfo", CK_C_GetTokenInfo],
+    ["C_GetMechanismList", CK_C_GetMechanismList],
+    ["C_GetMechanismInfo", CK_C_GetMechanismInfo],
+    ["C_InitToken", CK_C_InitToken],
+    ["C_InitPIN", CK_C_InitPIN],
+    ["C_SetPIN", CK_C_SetPIN],
+    ["C_OpenSession", CK_C_OpenSession],
+    ["C_CloseSession", CK_C_CloseSession],
+    ["C_CloseAllSessions", CK_C_CloseAllSessions],
+    ["C_GetSessionInfo", CK_C_GetSessionInfo],
+    ["C_GetOperationState", CK_C_GetOperationState],
+    ["C_SetOperationState", CK_C_SetOperationState],
+    ["C_Login", CK_C_Login],
+    ["C_Logout", CK_C_Logout],
+    ["C_CreateObject", CK_C_CreateObject],
+    ["C_CopyObject", CK_C_CopyObject],
+    ["C_DestroyObject", CK_C_DestroyObject],
+    ["C_GetObjectSize", CK_C_GetObjectSize],
+    ["C_GetAttributeValue", CK_C_GetAttributeValue],
+    ["C_SetAttributeValue", CK_C_SetAttributeValue],
+    ["C_FindObjectsInit", CK_C_FindObjectsInit],
+    ["C_FindObjects", CK_C_FindObjects],
+    ["C_FindObjectsFinal", CK_C_FindObjectsFinal],
+    ["C_EncryptInit", CK_C_EncryptInit],
+    ["C_Encrypt", CK_C_Encrypt],
+    ["C_EncryptUpdate", CK_C_EncryptUpdate],
+    ["C_EncryptFinal", CK_C_EncryptFinal],
+    ["C_DecryptInit", CK_C_DecryptInit],
+    ["C_Decrypt", CK_C_Decrypt],
+    ["C_DecryptUpdate", CK_C_DecryptUpdate],
+    ["C_DecryptFinal", CK_C_DecryptFinal],
+    ["C_DigestInit", CK_C_DigestInit],
+    ["C_Digest", CK_C_Digest],
+    ["C_DigestUpdate", CK_C_DigestUpdate],
+    ["C_DigestKey", CK_C_DigestKey],
+    ["C_DigestFinal", CK_C_DigestFinal],
+    ["C_SignInit", CK_C_SignInit],
+    ["C_Sign", CK_C_Sign],
+    ["C_SignUpdate", CK_C_SignUpdate],
+    ["C_SignFinal", CK_C_SignFinal],
+    ["C_SignRecoverInit", CK_C_SignRecoverInit],
+    ["C_SignRecover", CK_C_SignRecover],
+    ["C_VerifyInit", CK_C_VerifyInit],
+    ["C_Verify", CK_C_Verify],
+    ["C_VerifyUpdate", CK_C_VerifyUpdate],
+    ["C_VerifyFinal", CK_C_VerifyFinal],
+    ["C_VerifyRecoverInit", CK_C_VerifyRecoverInit],
+    ["C_VerifyRecover", CK_C_VerifyRecover],
+    ["C_DigestEncryptUpdate", CK_C_DigestEncryptUpdate],
+    ["C_DecryptDigestUpdate", CK_C_DecryptDigestUpdate],
+    ["C_SignEncryptUpdate", CK_C_SignEncryptUpdate],
+    ["C_DecryptVerifyUpdate", CK_C_DecryptVerifyUpdate],
+    ["C_GenerateKey", CK_C_GenerateKey],
+    ["C_GenerateKeyPair", CK_C_GenerateKeyPair],
+    ["C_WrapKey", CK_C_WrapKey],
+    ["C_UnwrapKey", CK_C_UnwrapKey],
+    ["C_DeriveKey", CK_C_DeriveKey],
+    ["C_SeedRandom", CK_C_SeedRandom],
+    ["C_GenerateRandom", CK_C_GenerateRandom],
+    ["C_GetFunctionStatus", CK_C_GetFunctionStatus],
+    ["C_CancelFunction", CK_C_CancelFunction],
+    ["C_WaitForSlotEvent", CK_C_WaitForSlotEvent],
+    ["C_GetInterfaceList", CK_C_GetInterfaceList],
+    ["C_GetInterface", CK_C_GetInterface],
+    ["C_LoginUser", CK_C_LoginUser],
+    ["C_SessionCancel", CK_C_SessionCancel],
+    ["C_MessageEncryptInit", CK_C_MessageEncryptInit],
+    ["C_EncryptMessage", CK_C_EncryptMessage],
+    ["C_EncryptMessageBegin", CK_C_EncryptMessageBegin],
+    ["C_EncryptMessageNext", CK_C_EncryptMessageNext],
+    ["C_MessageEncryptFinal", CK_C_MessageEncryptFinal],
+    ["C_MessageDecryptInit", CK_C_MessageDecryptInit],
+    ["C_DecryptMessage", CK_C_DecryptMessage],
+    ["C_DecryptMessageBegin", CK_C_DecryptMessageBegin],
+    ["C_DecryptMessageNext", CK_C_DecryptMessageNext],
+    ["C_MessageDecryptFinal", CK_C_MessageDecryptFinal],
+    ["C_MessageSignInit", CK_C_MessageSignInit],
+    ["C_SignMessage", CK_C_SignMessage],
+    ["C_SignMessageBegin", CK_C_SignMessageBegin],
+    ["C_SignMessageNext", CK_C_SignMessageNext],
+    ["C_MessageSignFinal", CK_C_MessageSignFinal],
+    ["C_MessageVerifyInit", CK_C_MessageVerifyInit],
+    ["C_VerifyMessage", CK_C_VerifyMessage],
+    ["C_VerifyMessageBegin", CK_C_VerifyMessageBegin],
+    ["C_VerifyMessageNext", CK_C_VerifyMessageNext],
+    ["C_MessageVerifyFinal", CK_C_MessageVerifyFinal],
+  ];
+  CK_FUNCTION_LIST_3_2._fields_ = [
+    ["version", CK_VERSION],
+    ["C_Initialize", CK_C_Initialize],
+    ["C_Finalize", CK_C_Finalize],
+    ["C_GetInfo", CK_C_GetInfo],
+    ["C_GetFunctionList", CK_C_GetFunctionList],
+    ["C_GetSlotList", CK_C_GetSlotList],
+    ["C_GetSlotInfo", CK_C_GetSlotInfo],
+    ["C_GetTokenInfo", CK_C_GetTokenInfo],
+    ["C_GetMechanismList", CK_C_GetMechanismList],
+    ["C_GetMechanismInfo", CK_C_GetMechanismInfo],
+    ["C_InitToken", CK_C_InitToken],
+    ["C_InitPIN", CK_C_InitPIN],
+    ["C_SetPIN", CK_C_SetPIN],
+    ["C_OpenSession", CK_C_OpenSession],
+    ["C_CloseSession", CK_C_CloseSession],
+    ["C_CloseAllSessions", CK_C_CloseAllSessions],
+    ["C_GetSessionInfo", CK_C_GetSessionInfo],
+    ["C_GetOperationState", CK_C_GetOperationState],
+    ["C_SetOperationState", CK_C_SetOperationState],
+    ["C_Login", CK_C_Login],
+    ["C_Logout", CK_C_Logout],
+    ["C_CreateObject", CK_C_CreateObject],
+    ["C_CopyObject", CK_C_CopyObject],
+    ["C_DestroyObject", CK_C_DestroyObject],
+    ["C_GetObjectSize", CK_C_GetObjectSize],
+    ["C_GetAttributeValue", CK_C_GetAttributeValue],
+    ["C_SetAttributeValue", CK_C_SetAttributeValue],
+    ["C_FindObjectsInit", CK_C_FindObjectsInit],
+    ["C_FindObjects", CK_C_FindObjects],
+    ["C_FindObjectsFinal", CK_C_FindObjectsFinal],
+    ["C_EncryptInit", CK_C_EncryptInit],
+    ["C_Encrypt", CK_C_Encrypt],
+    ["C_EncryptUpdate", CK_C_EncryptUpdate],
+    ["C_EncryptFinal", CK_C_EncryptFinal],
+    ["C_DecryptInit", CK_C_DecryptInit],
+    ["C_Decrypt", CK_C_Decrypt],
+    ["C_DecryptUpdate", CK_C_DecryptUpdate],
+    ["C_DecryptFinal", CK_C_DecryptFinal],
+    ["C_DigestInit", CK_C_DigestInit],
+    ["C_Digest", CK_C_Digest],
+    ["C_DigestUpdate", CK_C_DigestUpdate],
+    ["C_DigestKey", CK_C_DigestKey],
+    ["C_DigestFinal", CK_C_DigestFinal],
+    ["C_SignInit", CK_C_SignInit],
+    ["C_Sign", CK_C_Sign],
+    ["C_SignUpdate", CK_C_SignUpdate],
+    ["C_SignFinal", CK_C_SignFinal],
+    ["C_SignRecoverInit", CK_C_SignRecoverInit],
+    ["C_SignRecover", CK_C_SignRecover],
+    ["C_VerifyInit", CK_C_VerifyInit],
+    ["C_Verify", CK_C_Verify],
+    ["C_VerifyUpdate", CK_C_VerifyUpdate],
+    ["C_VerifyFinal", CK_C_VerifyFinal],
+    ["C_VerifyRecoverInit", CK_C_VerifyRecoverInit],
+    ["C_VerifyRecover", CK_C_VerifyRecover],
+    ["C_DigestEncryptUpdate", CK_C_DigestEncryptUpdate],
+    ["C_DecryptDigestUpdate", CK_C_DecryptDigestUpdate],
+    ["C_SignEncryptUpdate", CK_C_SignEncryptUpdate],
+    ["C_DecryptVerifyUpdate", CK_C_DecryptVerifyUpdate],
+    ["C_GenerateKey", CK_C_GenerateKey],
+    ["C_GenerateKeyPair", CK_C_GenerateKeyPair],
+    ["C_WrapKey", CK_C_WrapKey],
+    ["C_UnwrapKey", CK_C_UnwrapKey],
+    ["C_DeriveKey", CK_C_DeriveKey],
+    ["C_SeedRandom", CK_C_SeedRandom],
+    ["C_GenerateRandom", CK_C_GenerateRandom],
+    ["C_GetFunctionStatus", CK_C_GetFunctionStatus],
+    ["C_CancelFunction", CK_C_CancelFunction],
+    ["C_WaitForSlotEvent", CK_C_WaitForSlotEvent],
+    ["C_GetInterfaceList", CK_C_GetInterfaceList],
+    ["C_GetInterface", CK_C_GetInterface],
+    ["C_LoginUser", CK_C_LoginUser],
+    ["C_SessionCancel", CK_C_SessionCancel],
+    ["C_MessageEncryptInit", CK_C_MessageEncryptInit],
+    ["C_EncryptMessage", CK_C_EncryptMessage],
+    ["C_EncryptMessageBegin", CK_C_EncryptMessageBegin],
+    ["C_EncryptMessageNext", CK_C_EncryptMessageNext],
+    ["C_MessageEncryptFinal", CK_C_MessageEncryptFinal],
+    ["C_MessageDecryptInit", CK_C_MessageDecryptInit],
+    ["C_DecryptMessage", CK_C_DecryptMessage],
+    ["C_DecryptMessageBegin", CK_C_DecryptMessageBegin],
+    ["C_DecryptMessageNext", CK_C_DecryptMessageNext],
+    ["C_MessageDecryptFinal", CK_C_MessageDecryptFinal],
+    ["C_MessageSignInit", CK_C_MessageSignInit],
+    ["C_SignMessage", CK_C_SignMessage],
+    ["C_SignMessageBegin", CK_C_SignMessageBegin],
+    ["C_SignMessageNext", CK_C_SignMessageNext],
+    ["C_MessageSignFinal", CK_C_MessageSignFinal],
+    ["C_MessageVerifyInit", CK_C_MessageVerifyInit],
+    ["C_VerifyMessage", CK_C_VerifyMessage],
+    ["C_VerifyMessageBegin", CK_C_VerifyMessageBegin],
+    ["C_VerifyMessageNext", CK_C_VerifyMessageNext],
+    ["C_MessageVerifyFinal", CK_C_MessageVerifyFinal],
+    ["C_EncapsulateKey", CK_C_EncapsulateKey],
+    ["C_DecapsulateKey", CK_C_DecapsulateKey],
+    ["C_VerifySignatureInit", CK_C_VerifySignatureInit],
+    ["C_VerifySignature", CK_C_VerifySignature],
+    ["C_VerifySignatureUpdate", CK_C_VerifySignatureUpdate],
+    ["C_VerifySignatureFinal", CK_C_VerifySignatureFinal],
+    ["C_GetSessionValidationFlags", CK_C_GetSessionValidationFlags],
+    ["C_AsyncComplete", CK_C_AsyncComplete],
+    ["C_AsyncGetID", CK_C_AsyncGetID],
+    ["C_AsyncJoin", CK_C_AsyncJoin],
+    ["C_WrapKeyAuthenticated", CK_C_WrapKeyAuthenticated],
+    ["C_UnwrapKeyAuthenticated", CK_C_UnwrapKeyAuthenticated],
+  ];
+  return Object.freeze({
+    packing,
+    CK_BYTE,
+    CK_CHAR,
+    CK_UTF8CHAR,
+    CK_BBOOL,
+    CK_ULONG,
+    CK_LONG,
+    CK_FLAGS,
+    CK_BYTE_PTR,
+    CK_CHAR_PTR,
+    CK_UTF8CHAR_PTR,
+    CK_ULONG_PTR,
+    CK_VOID_PTR,
+    CK_FLAGS_PTR,
+    CK_VOID_PTR_PTR,
+    CK_VERSION_PTR,
+    CK_INFO_PTR,
+    CK_NOTIFICATION,
+    CK_SLOT_ID,
+    CK_SLOT_ID_PTR,
+    CK_SLOT_INFO_PTR,
+    CK_TOKEN_INFO_PTR,
+    CK_SESSION_HANDLE,
+    CK_SESSION_HANDLE_PTR,
+    CK_USER_TYPE,
+    CK_STATE,
+    CK_SESSION_INFO_PTR,
+    CK_OBJECT_HANDLE,
+    CK_OBJECT_HANDLE_PTR,
+    CK_OBJECT_CLASS,
+    CK_OBJECT_CLASS_PTR,
+    CK_HW_FEATURE_TYPE,
+    CK_KEY_TYPE,
+    CK_CERTIFICATE_TYPE,
+    CK_ATTRIBUTE_TYPE,
+    CK_ATTRIBUTE_PTR,
+    CK_MECHANISM_TYPE,
+    CK_MECHANISM_TYPE_PTR,
+    CK_MECHANISM_PTR,
+    CK_MECHANISM_INFO_PTR,
+    CK_RV,
+    CK_FUNCTION_LIST_PTR,
+    CK_FUNCTION_LIST_3_0_PTR,
+    CK_FUNCTION_LIST_3_2_PTR,
+    CK_FUNCTION_LIST_PTR_PTR,
+    CK_FUNCTION_LIST_3_0_PTR_PTR,
+    CK_FUNCTION_LIST_3_2_PTR_PTR,
+    CK_INTERFACE_PTR,
+    CK_INTERFACE_PTR_PTR,
+    CK_C_INITIALIZE_ARGS_PTR,
+    CK_RSA_PKCS_MGF_TYPE,
+    CK_RSA_PKCS_MGF_TYPE_PTR,
+    CK_RSA_PKCS_OAEP_SOURCE_TYPE,
+    CK_RSA_PKCS_OAEP_SOURCE_TYPE_PTR,
+    CK_RSA_PKCS_OAEP_PARAMS_PTR,
+    CK_RSA_PKCS_PSS_PARAMS_PTR,
+    CK_EC_KDF_TYPE,
+    CK_EC_KDF_TYPE_PTR,
+    CK_ECDH1_DERIVE_PARAMS_PTR,
+    CK_ECDH2_DERIVE_PARAMS_PTR,
+    CK_ECMQV_DERIVE_PARAMS_PTR,
+    CK_X9_42_DH_KDF_TYPE,
+    CK_X9_42_DH_KDF_TYPE_PTR,
+    CK_X9_42_DH1_DERIVE_PARAMS_PTR,
+    CK_X9_42_DH2_DERIVE_PARAMS_PTR,
+    CK_X9_42_MQV_DERIVE_PARAMS_PTR,
+    CK_KEA_DERIVE_PARAMS_PTR,
+    CK_RC2_PARAMS,
+    CK_RC2_PARAMS_PTR,
+    CK_RC2_CBC_PARAMS_PTR,
+    CK_RC2_MAC_GENERAL_PARAMS_PTR,
+    CK_RC5_PARAMS_PTR,
+    CK_RC5_CBC_PARAMS_PTR,
+    CK_RC5_MAC_GENERAL_PARAMS_PTR,
+    CK_MAC_GENERAL_PARAMS,
+    CK_MAC_GENERAL_PARAMS_PTR,
+    CK_DES_CBC_ENCRYPT_DATA_PARAMS_PTR,
+    CK_AES_CBC_ENCRYPT_DATA_PARAMS_PTR,
+    CK_SKIPJACK_PRIVATE_WRAP_PARAMS_PTR,
+    CK_SKIPJACK_RELAYX_PARAMS_PTR,
+    CK_PBE_PARAMS_PTR,
+    CK_KEY_WRAP_SET_OAEP_PARAMS_PTR,
+    CK_SSL3_MASTER_KEY_DERIVE_PARAMS_PTR,
+    CK_SSL3_KEY_MAT_OUT_PTR,
+    CK_SSL3_KEY_MAT_PARAMS_PTR,
+    CK_TLS_PRF_PARAMS_PTR,
+    CK_WTLS_RANDOM_DATA_PTR,
+    CK_WTLS_MASTER_KEY_DERIVE_PARAMS_PTR,
+    CK_WTLS_PRF_PARAMS_PTR,
+    CK_WTLS_KEY_MAT_OUT_PTR,
+    CK_WTLS_KEY_MAT_PARAMS_PTR,
+    CK_CMS_SIG_PARAMS_PTR,
+    CK_KEY_DERIVATION_STRING_DATA_PTR,
+    CK_EXTRACT_PARAMS,
+    CK_EXTRACT_PARAMS_PTR,
+    CK_PKCS5_PBKD2_PSEUDO_RANDOM_FUNCTION_TYPE,
+    CK_PKCS5_PBKD2_PSEUDO_RANDOM_FUNCTION_TYPE_PTR,
+    CK_PKCS5_PBKDF2_SALT_SOURCE_TYPE,
+    CK_PKCS5_PBKDF2_SALT_SOURCE_TYPE_PTR,
+    CK_PKCS5_PBKD2_PARAMS_PTR,
+    CK_PKCS5_PBKD2_PARAMS2_PTR,
+    CK_OTP_PARAM_TYPE,
+    CK_PARAM_TYPE,
+    CK_OTP_PARAM_PTR,
+    CK_OTP_PARAMS_PTR,
+    CK_OTP_SIGNATURE_INFO_PTR,
+    CK_KIP_PARAMS_PTR,
+    CK_AES_CTR_PARAMS_PTR,
+    CK_GCM_PARAMS_PTR,
+    CK_GENERATOR_FUNCTION,
+    CK_GCM_MESSAGE_PARAMS_PTR,
+    CK_GCM_WRAP_PARAMS_PTR,
+    CK_CCM_PARAMS_PTR,
+    CK_CCM_MESSAGE_PARAMS_PTR,
+    CK_CCM_WRAP_PARAMS_PTR,
+    CK_AES_GCM_PARAMS_PTR,
+    CK_AES_CCM_PARAMS_PTR,
+    CK_CAMELLIA_CTR_PARAMS_PTR,
+    CK_CAMELLIA_CBC_ENCRYPT_DATA_PARAMS_PTR,
+    CK_ARIA_CBC_ENCRYPT_DATA_PARAMS_PTR,
+    CK_DSA_PARAMETER_GEN_PARAM_PTR,
+    CK_ECDH_AES_KEY_WRAP_PARAMS_PTR,
+    CK_JAVA_MIDP_SECURITY_DOMAIN,
+    CK_CERTIFICATE_CATEGORY,
+    CK_RSA_AES_KEY_WRAP_PARAMS_PTR,
+    CK_TLS12_MASTER_KEY_DERIVE_PARAMS_PTR,
+    CK_TLS12_KEY_MAT_PARAMS_PTR,
+    CK_TLS_KDF_PARAMS_PTR,
+    CK_TLS_MAC_PARAMS_PTR,
+    CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS_PTR,
+    CK_GOSTR3410_DERIVE_PARAMS_PTR,
+    CK_GOSTR3410_KEY_WRAP_PARAMS_PTR,
+    CK_SEED_CBC_ENCRYPT_DATA_PARAMS_PTR,
+    CK_PROFILE_ID,
+    CK_PROFILE_ID_PTR,
+    CK_PRF_DATA_TYPE,
+    CK_SP800_108_PRF_TYPE,
+    CK_PRF_DATA_PARAM_PTR,
+    CK_SP800_108_COUNTER_FORMAT_PTR,
+    CK_SP800_108_DKM_LENGTH_METHOD,
+    CK_SP800_108_DKM_LENGTH_FORMAT_PTR,
+    CK_DERIVED_KEY_PTR,
+    CK_SP800_108_KDF_PARAMS_PTR,
+    CK_SP800_108_FEEDBACK_KDF_PARAMS_PTR,
+    CK_EDDSA_PARAMS_PTR,
+    CK_CHACHA20_PARAMS_PTR,
+    CK_SALSA20_PARAMS_PTR,
+    CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR,
+    CK_SALSA20_CHACHA20_POLY1305_MSG_PARAMS_PTR,
+    CK_X3DH_KDF_TYPE,
+    CK_X3DH_KDF_TYPE_PTR,
+    CK_X2RATCHET_KDF_TYPE,
+    CK_X2RATCHET_KDF_TYPE_PTR,
+    CK_X2RATCHET_INITIALIZE_PARAMS_PTR,
+    CK_X2RATCHET_RESPOND_PARAMS_PTR,
+    CK_XEDDSA_HASH_TYPE,
+    CK_XEDDSA_HASH_TYPE_PTR,
+    CK_XEDDSA_PARAMS_PTR,
+    CK_HKDF_PARAMS_PTR,
+    CK_HSS_LEVELS,
+    CK_LMS_TYPE,
+    CK_LMOTS_TYPE,
+    CK_IKE2_PRF_PLUS_DERIVE_PARAMS_PTR,
+    CK_IKE_PRF_DERIVE_PARAMS_PTR,
+    CK_IKE1_PRF_DERIVE_PARAMS_PTR,
+    CK_IKE1_EXTENDED_DERIVE_PARAMS_PTR,
+    CK_ASYNC_DATA_PTR,
+    CK_SESSION_VALIDATION_FLAGS_TYPE,
+    CK_VALIDATION_TYPE,
+    CK_VALIDATION_TYPE_PTR,
+    CK_VALIDATION_AUTHORITY_TYPE,
+    CK_VALIDATION_AUTHORITY_TYPE_PTR,
+    CK_XMSSMT_PARAMETER_SET_TYPE,
+    CK_XMSS_PARAMETER_SET_TYPE,
+    CK_HEDGE_TYPE,
+    CK_ML_DSA_PARAMETER_SET_TYPE,
+    CK_SLH_DSA_PARAMETER_SET_TYPE,
+    CK_ML_KEM_PARAMETER_SET_TYPE,
+    CK_TRUST,
+    CK_VERSION,
+    CK_INFO,
+    CK_SLOT_INFO,
+    CK_TOKEN_INFO,
+    CK_SESSION_INFO,
+    CK_ATTRIBUTE,
+    CK_DATE,
+    CK_MECHANISM,
+    CK_MECHANISM_INFO,
+    CK_INTERFACE,
+    CK_C_INITIALIZE_ARGS,
+    CK_RSA_PKCS_OAEP_PARAMS,
+    CK_RSA_PKCS_PSS_PARAMS,
+    CK_ECDH1_DERIVE_PARAMS,
+    CK_ECDH2_DERIVE_PARAMS,
+    CK_ECMQV_DERIVE_PARAMS,
+    CK_X9_42_DH1_DERIVE_PARAMS,
+    CK_X9_42_DH2_DERIVE_PARAMS,
+    CK_X9_42_MQV_DERIVE_PARAMS,
+    CK_KEA_DERIVE_PARAMS,
+    CK_RC2_CBC_PARAMS,
+    CK_RC2_MAC_GENERAL_PARAMS,
+    CK_RC5_PARAMS,
+    CK_RC5_CBC_PARAMS,
+    CK_RC5_MAC_GENERAL_PARAMS,
+    CK_DES_CBC_ENCRYPT_DATA_PARAMS,
+    CK_AES_CBC_ENCRYPT_DATA_PARAMS,
+    CK_SKIPJACK_PRIVATE_WRAP_PARAMS,
+    CK_SKIPJACK_RELAYX_PARAMS,
+    CK_PBE_PARAMS,
+    CK_KEY_WRAP_SET_OAEP_PARAMS,
+    CK_SSL3_RANDOM_DATA,
+    CK_SSL3_MASTER_KEY_DERIVE_PARAMS,
+    CK_SSL3_KEY_MAT_OUT,
+    CK_SSL3_KEY_MAT_PARAMS,
+    CK_TLS_PRF_PARAMS,
+    CK_WTLS_RANDOM_DATA,
+    CK_WTLS_MASTER_KEY_DERIVE_PARAMS,
+    CK_WTLS_PRF_PARAMS,
+    CK_WTLS_KEY_MAT_OUT,
+    CK_WTLS_KEY_MAT_PARAMS,
+    CK_CMS_SIG_PARAMS,
+    CK_KEY_DERIVATION_STRING_DATA,
+    CK_PKCS5_PBKD2_PARAMS,
+    CK_PKCS5_PBKD2_PARAMS2,
+    CK_OTP_PARAM,
+    CK_OTP_PARAMS,
+    CK_OTP_SIGNATURE_INFO,
+    CK_KIP_PARAMS,
+    CK_AES_CTR_PARAMS,
+    CK_GCM_PARAMS,
+    CK_GCM_MESSAGE_PARAMS,
+    CK_GCM_WRAP_PARAMS,
+    CK_CCM_PARAMS,
+    CK_CCM_MESSAGE_PARAMS,
+    CK_CCM_WRAP_PARAMS,
+    CK_AES_GCM_PARAMS,
+    CK_AES_CCM_PARAMS,
+    CK_CAMELLIA_CTR_PARAMS,
+    CK_CAMELLIA_CBC_ENCRYPT_DATA_PARAMS,
+    CK_ARIA_CBC_ENCRYPT_DATA_PARAMS,
+    CK_DSA_PARAMETER_GEN_PARAM,
+    CK_ECDH_AES_KEY_WRAP_PARAMS,
+    CK_RSA_AES_KEY_WRAP_PARAMS,
+    CK_TLS12_MASTER_KEY_DERIVE_PARAMS,
+    CK_TLS12_KEY_MAT_PARAMS,
+    CK_TLS_KDF_PARAMS,
+    CK_TLS_MAC_PARAMS,
+    CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS,
+    CK_GOSTR3410_DERIVE_PARAMS,
+    CK_GOSTR3410_KEY_WRAP_PARAMS,
+    CK_SEED_CBC_ENCRYPT_DATA_PARAMS,
+    CK_PRF_DATA_PARAM,
+    CK_SP800_108_COUNTER_FORMAT,
+    CK_SP800_108_DKM_LENGTH_FORMAT,
+    CK_DERIVED_KEY,
+    CK_SP800_108_KDF_PARAMS,
+    CK_SP800_108_FEEDBACK_KDF_PARAMS,
+    CK_EDDSA_PARAMS,
+    CK_CHACHA20_PARAMS,
+    CK_SALSA20_PARAMS,
+    CK_SALSA20_CHACHA20_POLY1305_PARAMS,
+    CK_SALSA20_CHACHA20_POLY1305_MSG_PARAMS,
+    CK_X3DH_INITIATE_PARAMS,
+    CK_X3DH_RESPOND_PARAMS,
+    CK_X2RATCHET_INITIALIZE_PARAMS,
+    CK_X2RATCHET_RESPOND_PARAMS,
+    CK_XEDDSA_PARAMS,
+    CK_HKDF_PARAMS,
+    specifiedParams,
+    CK_IKE2_PRF_PLUS_DERIVE_PARAMS,
+    CK_IKE_PRF_DERIVE_PARAMS,
+    CK_IKE1_PRF_DERIVE_PARAMS,
+    CK_IKE1_EXTENDED_DERIVE_PARAMS,
+    CK_ASYNC_DATA,
+    CK_SIGN_ADDITIONAL_CONTEXT,
+    CK_HASH_SIGN_ADDITIONAL_CONTEXT,
+    CK_FUNCTION_LIST,
+    CK_FUNCTION_LIST_3_0,
+    CK_FUNCTION_LIST_3_2,
+    CK_NOTIFY,
+    CK_CREATEMUTEX,
+    CK_DESTROYMUTEX,
+    CK_LOCKMUTEX,
+    CK_UNLOCKMUTEX,
+    CK_C_Initialize,
+    CK_C_Finalize,
+    CK_C_GetInfo,
+    CK_C_GetFunctionList,
+    CK_C_GetSlotList,
+    CK_C_GetSlotInfo,
+    CK_C_GetTokenInfo,
+    CK_C_GetMechanismList,
+    CK_C_GetMechanismInfo,
+    CK_C_InitToken,
+    CK_C_InitPIN,
+    CK_C_SetPIN,
+    CK_C_OpenSession,
+    CK_C_CloseSession,
+    CK_C_CloseAllSessions,
+    CK_C_GetSessionInfo,
+    CK_C_GetOperationState,
+    CK_C_SetOperationState,
+    CK_C_Login,
+    CK_C_Logout,
+    CK_C_CreateObject,
+    CK_C_CopyObject,
+    CK_C_DestroyObject,
+    CK_C_GetObjectSize,
+    CK_C_GetAttributeValue,
+    CK_C_SetAttributeValue,
+    CK_C_FindObjectsInit,
+    CK_C_FindObjects,
+    CK_C_FindObjectsFinal,
+    CK_C_EncryptInit,
+    CK_C_Encrypt,
+    CK_C_EncryptUpdate,
+    CK_C_EncryptFinal,
+    CK_C_DecryptInit,
+    CK_C_Decrypt,
+    CK_C_DecryptUpdate,
+    CK_C_DecryptFinal,
+    CK_C_DigestInit,
+    CK_C_Digest,
+    CK_C_DigestUpdate,
+    CK_C_DigestKey,
+    CK_C_DigestFinal,
+    CK_C_SignInit,
+    CK_C_Sign,
+    CK_C_SignUpdate,
+    CK_C_SignFinal,
+    CK_C_SignRecoverInit,
+    CK_C_SignRecover,
+    CK_C_VerifyInit,
+    CK_C_Verify,
+    CK_C_VerifyUpdate,
+    CK_C_VerifyFinal,
+    CK_C_VerifyRecoverInit,
+    CK_C_VerifyRecover,
+    CK_C_DigestEncryptUpdate,
+    CK_C_DecryptDigestUpdate,
+    CK_C_SignEncryptUpdate,
+    CK_C_DecryptVerifyUpdate,
+    CK_C_GenerateKey,
+    CK_C_GenerateKeyPair,
+    CK_C_WrapKey,
+    CK_C_UnwrapKey,
+    CK_C_DeriveKey,
+    CK_C_SeedRandom,
+    CK_C_GenerateRandom,
+    CK_C_GetFunctionStatus,
+    CK_C_CancelFunction,
+    CK_C_WaitForSlotEvent,
+    CK_C_GetInterfaceList,
+    CK_C_GetInterface,
+    CK_C_LoginUser,
+    CK_C_SessionCancel,
+    CK_C_MessageEncryptInit,
+    CK_C_EncryptMessage,
+    CK_C_EncryptMessageBegin,
+    CK_C_EncryptMessageNext,
+    CK_C_MessageEncryptFinal,
+    CK_C_MessageDecryptInit,
+    CK_C_DecryptMessage,
+    CK_C_DecryptMessageBegin,
+    CK_C_DecryptMessageNext,
+    CK_C_MessageDecryptFinal,
+    CK_C_MessageSignInit,
+    CK_C_SignMessage,
+    CK_C_SignMessageBegin,
+    CK_C_SignMessageNext,
+    CK_C_MessageSignFinal,
+    CK_C_MessageVerifyInit,
+    CK_C_VerifyMessage,
+    CK_C_VerifyMessageBegin,
+    CK_C_VerifyMessageNext,
+    CK_C_MessageVerifyFinal,
+    CK_C_EncapsulateKey,
+    CK_C_DecapsulateKey,
+    CK_C_VerifySignatureInit,
+    CK_C_VerifySignature,
+    CK_C_VerifySignatureUpdate,
+    CK_C_VerifySignatureFinal,
+    CK_C_GetSessionValidationFlags,
+    CK_C_AsyncComplete,
+    CK_C_AsyncGetID,
+    CK_C_AsyncJoin,
+    CK_C_WrapKeyAuthenticated,
+    CK_C_UnwrapKeyAuthenticated,
+  });
+}
+
+export const types = createTypes();
+export const {
+  CK_BYTE,
+  CK_CHAR,
+  CK_UTF8CHAR,
+  CK_BBOOL,
+  CK_ULONG,
+  CK_LONG,
+  CK_FLAGS,
+  CK_BYTE_PTR,
+  CK_CHAR_PTR,
+  CK_UTF8CHAR_PTR,
+  CK_ULONG_PTR,
+  CK_VOID_PTR,
+  CK_FLAGS_PTR,
+  CK_VOID_PTR_PTR,
+  CK_VERSION_PTR,
+  CK_INFO_PTR,
+  CK_NOTIFICATION,
+  CK_SLOT_ID,
+  CK_SLOT_ID_PTR,
+  CK_SLOT_INFO_PTR,
+  CK_TOKEN_INFO_PTR,
+  CK_SESSION_HANDLE,
+  CK_SESSION_HANDLE_PTR,
+  CK_USER_TYPE,
+  CK_STATE,
+  CK_SESSION_INFO_PTR,
+  CK_OBJECT_HANDLE,
+  CK_OBJECT_HANDLE_PTR,
+  CK_OBJECT_CLASS,
+  CK_OBJECT_CLASS_PTR,
+  CK_HW_FEATURE_TYPE,
+  CK_KEY_TYPE,
+  CK_CERTIFICATE_TYPE,
+  CK_ATTRIBUTE_TYPE,
+  CK_ATTRIBUTE_PTR,
+  CK_MECHANISM_TYPE,
+  CK_MECHANISM_TYPE_PTR,
+  CK_MECHANISM_PTR,
+  CK_MECHANISM_INFO_PTR,
+  CK_RV,
+  CK_FUNCTION_LIST_PTR,
+  CK_FUNCTION_LIST_3_0_PTR,
+  CK_FUNCTION_LIST_3_2_PTR,
+  CK_FUNCTION_LIST_PTR_PTR,
+  CK_FUNCTION_LIST_3_0_PTR_PTR,
+  CK_FUNCTION_LIST_3_2_PTR_PTR,
+  CK_INTERFACE_PTR,
+  CK_INTERFACE_PTR_PTR,
+  CK_C_INITIALIZE_ARGS_PTR,
+  CK_RSA_PKCS_MGF_TYPE,
+  CK_RSA_PKCS_MGF_TYPE_PTR,
+  CK_RSA_PKCS_OAEP_SOURCE_TYPE,
+  CK_RSA_PKCS_OAEP_SOURCE_TYPE_PTR,
+  CK_RSA_PKCS_OAEP_PARAMS_PTR,
+  CK_RSA_PKCS_PSS_PARAMS_PTR,
+  CK_EC_KDF_TYPE,
+  CK_EC_KDF_TYPE_PTR,
+  CK_ECDH1_DERIVE_PARAMS_PTR,
+  CK_ECDH2_DERIVE_PARAMS_PTR,
+  CK_ECMQV_DERIVE_PARAMS_PTR,
+  CK_X9_42_DH_KDF_TYPE,
+  CK_X9_42_DH_KDF_TYPE_PTR,
+  CK_X9_42_DH1_DERIVE_PARAMS_PTR,
+  CK_X9_42_DH2_DERIVE_PARAMS_PTR,
+  CK_X9_42_MQV_DERIVE_PARAMS_PTR,
+  CK_KEA_DERIVE_PARAMS_PTR,
+  CK_RC2_PARAMS,
+  CK_RC2_PARAMS_PTR,
+  CK_RC2_CBC_PARAMS_PTR,
+  CK_RC2_MAC_GENERAL_PARAMS_PTR,
+  CK_RC5_PARAMS_PTR,
+  CK_RC5_CBC_PARAMS_PTR,
+  CK_RC5_MAC_GENERAL_PARAMS_PTR,
+  CK_MAC_GENERAL_PARAMS,
+  CK_MAC_GENERAL_PARAMS_PTR,
+  CK_DES_CBC_ENCRYPT_DATA_PARAMS_PTR,
+  CK_AES_CBC_ENCRYPT_DATA_PARAMS_PTR,
+  CK_SKIPJACK_PRIVATE_WRAP_PARAMS_PTR,
+  CK_SKIPJACK_RELAYX_PARAMS_PTR,
+  CK_PBE_PARAMS_PTR,
+  CK_KEY_WRAP_SET_OAEP_PARAMS_PTR,
+  CK_SSL3_MASTER_KEY_DERIVE_PARAMS_PTR,
+  CK_SSL3_KEY_MAT_OUT_PTR,
+  CK_SSL3_KEY_MAT_PARAMS_PTR,
+  CK_TLS_PRF_PARAMS_PTR,
+  CK_WTLS_RANDOM_DATA_PTR,
+  CK_WTLS_MASTER_KEY_DERIVE_PARAMS_PTR,
+  CK_WTLS_PRF_PARAMS_PTR,
+  CK_WTLS_KEY_MAT_OUT_PTR,
+  CK_WTLS_KEY_MAT_PARAMS_PTR,
+  CK_CMS_SIG_PARAMS_PTR,
+  CK_KEY_DERIVATION_STRING_DATA_PTR,
+  CK_EXTRACT_PARAMS,
+  CK_EXTRACT_PARAMS_PTR,
+  CK_PKCS5_PBKD2_PSEUDO_RANDOM_FUNCTION_TYPE,
+  CK_PKCS5_PBKD2_PSEUDO_RANDOM_FUNCTION_TYPE_PTR,
+  CK_PKCS5_PBKDF2_SALT_SOURCE_TYPE,
+  CK_PKCS5_PBKDF2_SALT_SOURCE_TYPE_PTR,
+  CK_PKCS5_PBKD2_PARAMS_PTR,
+  CK_PKCS5_PBKD2_PARAMS2_PTR,
+  CK_OTP_PARAM_TYPE,
+  CK_PARAM_TYPE,
+  CK_OTP_PARAM_PTR,
+  CK_OTP_PARAMS_PTR,
+  CK_OTP_SIGNATURE_INFO_PTR,
+  CK_KIP_PARAMS_PTR,
+  CK_AES_CTR_PARAMS_PTR,
+  CK_GCM_PARAMS_PTR,
+  CK_GENERATOR_FUNCTION,
+  CK_GCM_MESSAGE_PARAMS_PTR,
+  CK_GCM_WRAP_PARAMS_PTR,
+  CK_CCM_PARAMS_PTR,
+  CK_CCM_MESSAGE_PARAMS_PTR,
+  CK_CCM_WRAP_PARAMS_PTR,
+  CK_AES_GCM_PARAMS_PTR,
+  CK_AES_CCM_PARAMS_PTR,
+  CK_CAMELLIA_CTR_PARAMS_PTR,
+  CK_CAMELLIA_CBC_ENCRYPT_DATA_PARAMS_PTR,
+  CK_ARIA_CBC_ENCRYPT_DATA_PARAMS_PTR,
+  CK_DSA_PARAMETER_GEN_PARAM_PTR,
+  CK_ECDH_AES_KEY_WRAP_PARAMS_PTR,
+  CK_JAVA_MIDP_SECURITY_DOMAIN,
+  CK_CERTIFICATE_CATEGORY,
+  CK_RSA_AES_KEY_WRAP_PARAMS_PTR,
+  CK_TLS12_MASTER_KEY_DERIVE_PARAMS_PTR,
+  CK_TLS12_KEY_MAT_PARAMS_PTR,
+  CK_TLS_KDF_PARAMS_PTR,
+  CK_TLS_MAC_PARAMS_PTR,
+  CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS_PTR,
+  CK_GOSTR3410_DERIVE_PARAMS_PTR,
+  CK_GOSTR3410_KEY_WRAP_PARAMS_PTR,
+  CK_SEED_CBC_ENCRYPT_DATA_PARAMS_PTR,
+  CK_PROFILE_ID,
+  CK_PROFILE_ID_PTR,
+  CK_PRF_DATA_TYPE,
+  CK_SP800_108_PRF_TYPE,
+  CK_PRF_DATA_PARAM_PTR,
+  CK_SP800_108_COUNTER_FORMAT_PTR,
+  CK_SP800_108_DKM_LENGTH_METHOD,
+  CK_SP800_108_DKM_LENGTH_FORMAT_PTR,
+  CK_DERIVED_KEY_PTR,
+  CK_SP800_108_KDF_PARAMS_PTR,
+  CK_SP800_108_FEEDBACK_KDF_PARAMS_PTR,
+  CK_EDDSA_PARAMS_PTR,
+  CK_CHACHA20_PARAMS_PTR,
+  CK_SALSA20_PARAMS_PTR,
+  CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR,
+  CK_SALSA20_CHACHA20_POLY1305_MSG_PARAMS_PTR,
+  CK_X3DH_KDF_TYPE,
+  CK_X3DH_KDF_TYPE_PTR,
+  CK_X2RATCHET_KDF_TYPE,
+  CK_X2RATCHET_KDF_TYPE_PTR,
+  CK_X2RATCHET_INITIALIZE_PARAMS_PTR,
+  CK_X2RATCHET_RESPOND_PARAMS_PTR,
+  CK_XEDDSA_HASH_TYPE,
+  CK_XEDDSA_HASH_TYPE_PTR,
+  CK_XEDDSA_PARAMS_PTR,
+  CK_HKDF_PARAMS_PTR,
+  CK_HSS_LEVELS,
+  CK_LMS_TYPE,
+  CK_LMOTS_TYPE,
+  CK_IKE2_PRF_PLUS_DERIVE_PARAMS_PTR,
+  CK_IKE_PRF_DERIVE_PARAMS_PTR,
+  CK_IKE1_PRF_DERIVE_PARAMS_PTR,
+  CK_IKE1_EXTENDED_DERIVE_PARAMS_PTR,
+  CK_ASYNC_DATA_PTR,
+  CK_SESSION_VALIDATION_FLAGS_TYPE,
+  CK_VALIDATION_TYPE,
+  CK_VALIDATION_TYPE_PTR,
+  CK_VALIDATION_AUTHORITY_TYPE,
+  CK_VALIDATION_AUTHORITY_TYPE_PTR,
+  CK_XMSSMT_PARAMETER_SET_TYPE,
+  CK_XMSS_PARAMETER_SET_TYPE,
+  CK_HEDGE_TYPE,
+  CK_ML_DSA_PARAMETER_SET_TYPE,
+  CK_SLH_DSA_PARAMETER_SET_TYPE,
+  CK_ML_KEM_PARAMETER_SET_TYPE,
+  CK_TRUST,
+  CK_VERSION,
+  CK_INFO,
+  CK_SLOT_INFO,
+  CK_TOKEN_INFO,
+  CK_SESSION_INFO,
+  CK_ATTRIBUTE,
+  CK_DATE,
+  CK_MECHANISM,
+  CK_MECHANISM_INFO,
+  CK_INTERFACE,
+  CK_C_INITIALIZE_ARGS,
+  CK_RSA_PKCS_OAEP_PARAMS,
+  CK_RSA_PKCS_PSS_PARAMS,
+  CK_ECDH1_DERIVE_PARAMS,
+  CK_ECDH2_DERIVE_PARAMS,
+  CK_ECMQV_DERIVE_PARAMS,
+  CK_X9_42_DH1_DERIVE_PARAMS,
+  CK_X9_42_DH2_DERIVE_PARAMS,
+  CK_X9_42_MQV_DERIVE_PARAMS,
+  CK_KEA_DERIVE_PARAMS,
+  CK_RC2_CBC_PARAMS,
+  CK_RC2_MAC_GENERAL_PARAMS,
+  CK_RC5_PARAMS,
+  CK_RC5_CBC_PARAMS,
+  CK_RC5_MAC_GENERAL_PARAMS,
+  CK_DES_CBC_ENCRYPT_DATA_PARAMS,
+  CK_AES_CBC_ENCRYPT_DATA_PARAMS,
+  CK_SKIPJACK_PRIVATE_WRAP_PARAMS,
+  CK_SKIPJACK_RELAYX_PARAMS,
+  CK_PBE_PARAMS,
+  CK_KEY_WRAP_SET_OAEP_PARAMS,
+  CK_SSL3_RANDOM_DATA,
+  CK_SSL3_MASTER_KEY_DERIVE_PARAMS,
+  CK_SSL3_KEY_MAT_OUT,
+  CK_SSL3_KEY_MAT_PARAMS,
+  CK_TLS_PRF_PARAMS,
+  CK_WTLS_RANDOM_DATA,
+  CK_WTLS_MASTER_KEY_DERIVE_PARAMS,
+  CK_WTLS_PRF_PARAMS,
+  CK_WTLS_KEY_MAT_OUT,
+  CK_WTLS_KEY_MAT_PARAMS,
+  CK_CMS_SIG_PARAMS,
+  CK_KEY_DERIVATION_STRING_DATA,
+  CK_PKCS5_PBKD2_PARAMS,
+  CK_PKCS5_PBKD2_PARAMS2,
+  CK_OTP_PARAM,
+  CK_OTP_PARAMS,
+  CK_OTP_SIGNATURE_INFO,
+  CK_KIP_PARAMS,
+  CK_AES_CTR_PARAMS,
+  CK_GCM_PARAMS,
+  CK_GCM_MESSAGE_PARAMS,
+  CK_GCM_WRAP_PARAMS,
+  CK_CCM_PARAMS,
+  CK_CCM_MESSAGE_PARAMS,
+  CK_CCM_WRAP_PARAMS,
+  CK_AES_GCM_PARAMS,
+  CK_AES_CCM_PARAMS,
+  CK_CAMELLIA_CTR_PARAMS,
+  CK_CAMELLIA_CBC_ENCRYPT_DATA_PARAMS,
+  CK_ARIA_CBC_ENCRYPT_DATA_PARAMS,
+  CK_DSA_PARAMETER_GEN_PARAM,
+  CK_ECDH_AES_KEY_WRAP_PARAMS,
+  CK_RSA_AES_KEY_WRAP_PARAMS,
+  CK_TLS12_MASTER_KEY_DERIVE_PARAMS,
+  CK_TLS12_KEY_MAT_PARAMS,
+  CK_TLS_KDF_PARAMS,
+  CK_TLS_MAC_PARAMS,
+  CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS,
+  CK_GOSTR3410_DERIVE_PARAMS,
+  CK_GOSTR3410_KEY_WRAP_PARAMS,
+  CK_SEED_CBC_ENCRYPT_DATA_PARAMS,
+  CK_PRF_DATA_PARAM,
+  CK_SP800_108_COUNTER_FORMAT,
+  CK_SP800_108_DKM_LENGTH_FORMAT,
+  CK_DERIVED_KEY,
+  CK_SP800_108_KDF_PARAMS,
+  CK_SP800_108_FEEDBACK_KDF_PARAMS,
+  CK_EDDSA_PARAMS,
+  CK_CHACHA20_PARAMS,
+  CK_SALSA20_PARAMS,
+  CK_SALSA20_CHACHA20_POLY1305_PARAMS,
+  CK_SALSA20_CHACHA20_POLY1305_MSG_PARAMS,
+  CK_X3DH_INITIATE_PARAMS,
+  CK_X3DH_RESPOND_PARAMS,
+  CK_X2RATCHET_INITIALIZE_PARAMS,
+  CK_X2RATCHET_RESPOND_PARAMS,
+  CK_XEDDSA_PARAMS,
+  CK_HKDF_PARAMS,
+  specifiedParams,
+  CK_IKE2_PRF_PLUS_DERIVE_PARAMS,
+  CK_IKE_PRF_DERIVE_PARAMS,
+  CK_IKE1_PRF_DERIVE_PARAMS,
+  CK_IKE1_EXTENDED_DERIVE_PARAMS,
+  CK_ASYNC_DATA,
+  CK_SIGN_ADDITIONAL_CONTEXT,
+  CK_HASH_SIGN_ADDITIONAL_CONTEXT,
+  CK_FUNCTION_LIST,
+  CK_FUNCTION_LIST_3_0,
+  CK_FUNCTION_LIST_3_2,
+  CK_NOTIFY,
+  CK_CREATEMUTEX,
+  CK_DESTROYMUTEX,
+  CK_LOCKMUTEX,
+  CK_UNLOCKMUTEX,
+  CK_C_Initialize,
+  CK_C_Finalize,
+  CK_C_GetInfo,
+  CK_C_GetFunctionList,
+  CK_C_GetSlotList,
+  CK_C_GetSlotInfo,
+  CK_C_GetTokenInfo,
+  CK_C_GetMechanismList,
+  CK_C_GetMechanismInfo,
+  CK_C_InitToken,
+  CK_C_InitPIN,
+  CK_C_SetPIN,
+  CK_C_OpenSession,
+  CK_C_CloseSession,
+  CK_C_CloseAllSessions,
+  CK_C_GetSessionInfo,
+  CK_C_GetOperationState,
+  CK_C_SetOperationState,
+  CK_C_Login,
+  CK_C_Logout,
+  CK_C_CreateObject,
+  CK_C_CopyObject,
+  CK_C_DestroyObject,
+  CK_C_GetObjectSize,
+  CK_C_GetAttributeValue,
+  CK_C_SetAttributeValue,
+  CK_C_FindObjectsInit,
+  CK_C_FindObjects,
+  CK_C_FindObjectsFinal,
+  CK_C_EncryptInit,
+  CK_C_Encrypt,
+  CK_C_EncryptUpdate,
+  CK_C_EncryptFinal,
+  CK_C_DecryptInit,
+  CK_C_Decrypt,
+  CK_C_DecryptUpdate,
+  CK_C_DecryptFinal,
+  CK_C_DigestInit,
+  CK_C_Digest,
+  CK_C_DigestUpdate,
+  CK_C_DigestKey,
+  CK_C_DigestFinal,
+  CK_C_SignInit,
+  CK_C_Sign,
+  CK_C_SignUpdate,
+  CK_C_SignFinal,
+  CK_C_SignRecoverInit,
+  CK_C_SignRecover,
+  CK_C_VerifyInit,
+  CK_C_Verify,
+  CK_C_VerifyUpdate,
+  CK_C_VerifyFinal,
+  CK_C_VerifyRecoverInit,
+  CK_C_VerifyRecover,
+  CK_C_DigestEncryptUpdate,
+  CK_C_DecryptDigestUpdate,
+  CK_C_SignEncryptUpdate,
+  CK_C_DecryptVerifyUpdate,
+  CK_C_GenerateKey,
+  CK_C_GenerateKeyPair,
+  CK_C_WrapKey,
+  CK_C_UnwrapKey,
+  CK_C_DeriveKey,
+  CK_C_SeedRandom,
+  CK_C_GenerateRandom,
+  CK_C_GetFunctionStatus,
+  CK_C_CancelFunction,
+  CK_C_WaitForSlotEvent,
+  CK_C_GetInterfaceList,
+  CK_C_GetInterface,
+  CK_C_LoginUser,
+  CK_C_SessionCancel,
+  CK_C_MessageEncryptInit,
+  CK_C_EncryptMessage,
+  CK_C_EncryptMessageBegin,
+  CK_C_EncryptMessageNext,
+  CK_C_MessageEncryptFinal,
+  CK_C_MessageDecryptInit,
+  CK_C_DecryptMessage,
+  CK_C_DecryptMessageBegin,
+  CK_C_DecryptMessageNext,
+  CK_C_MessageDecryptFinal,
+  CK_C_MessageSignInit,
+  CK_C_SignMessage,
+  CK_C_SignMessageBegin,
+  CK_C_SignMessageNext,
+  CK_C_MessageSignFinal,
+  CK_C_MessageVerifyInit,
+  CK_C_VerifyMessage,
+  CK_C_VerifyMessageBegin,
+  CK_C_VerifyMessageNext,
+  CK_C_MessageVerifyFinal,
+  CK_C_EncapsulateKey,
+  CK_C_DecapsulateKey,
+  CK_C_VerifySignatureInit,
+  CK_C_VerifySignature,
+  CK_C_VerifySignatureUpdate,
+  CK_C_VerifySignatureFinal,
+  CK_C_GetSessionValidationFlags,
+  CK_C_AsyncComplete,
+  CK_C_AsyncGetID,
+  CK_C_AsyncJoin,
+  CK_C_WrapKeyAuthenticated,
+  CK_C_UnwrapKeyAuthenticated,
+} = types;
+
+const defaultTypes = types;
+export { CK_TRUE as TRUE, CK_FALSE as FALSE };
+export const NULL_PTR = null;
+
+const versions = ["2.40", "3.0", "3.1", "3.2"];
+const errorNames = new Map(
+  Object.entries(constants)
+    .filter(([name]) => name.startsWith("CKR_"))
+    .map(([name, value]) => [value, name]),
+);
+
+export class CryptokiError extends Error {
+  constructor(rv, functionName) {
+    super(`${functionName}: ${errorNames.get(rv) ?? `CK_RV(0x${rv.toString(16)})`}`);
+    this.name = "CryptokiError";
+    this.rv = rv;
+    this.functionName = functionName;
+  }
+}
+
+export function checkRV(rv, functionName = "Cryptoki", accepted = []) {
+  if (typeof rv !== "bigint") throw new TypeError("CK_RV must be a BigInt");
+  if (rv !== CKR_OK && !accepted.includes(rv)) throw new CryptokiError(rv, functionName);
+  return rv;
+}
+
+export class UnavailableFunctionError extends Error {
+  constructor(name, version) {
+    super(`${name} is unavailable in the loaded Cryptoki ${version} function list`);
+    this.name = "UnavailableFunctionError";
+    this.functionName = name;
+  }
+}
+
+function optionalSymbol(library, name) {
+  try {
+    return library.symbol(name);
+  } catch (error) {
+    // Missing discovery exports are expected for 2.40-only providers.
+    if (error instanceof Error && error.message.startsWith(`Symbol '${name}' not found:`)) return null;
+    throw error;
+  }
+}
+
+function versionOf(address, types) {
+  if (address === null || address === 0n) throw new Error("Provider returned a NULL function list");
+  const value = ctypes.cast(address, ctypes.POINTER(types.CK_VERSION)).contents;
+  return `${value.major}.${value.minor}`;
+}
+
+function tableType(version, types) {
+  if (version === "2.40") return types.CK_FUNCTION_LIST;
+  if (version === "3.0" || version === "3.1") return types.CK_FUNCTION_LIST_3_0;
+  if (version === "3.2") return types.CK_FUNCTION_LIST_3_2;
+  throw new Error(`Unsupported provider interface version ${version}; supported range is 2.40-3.2`);
+}
+
+function interfaceName(pointer) {
+  if (pointer.isNull) throw new Error("Provider returned a NULL interface name");
+  return ctypes.string_at(pointer);
+}
+
+function discover(library, types, requested) {
+  const legacy = types.CK_C_GetFunctionList(["C_GetFunctionList", library]);
+  const getListAddress = optionalSymbol(library, "C_GetInterfaceList");
+  const getInterfaceAddress = optionalSymbol(library, "C_GetInterface");
+  const interfaces = [];
+  if (getListAddress !== null) {
+    const getList = types.CK_C_GetInterfaceList(getListAddress);
+    const count = new types.CK_ULONG();
+    checkRV(getList(null, ctypes.byref(count)), "C_GetInterfaceList");
+    for (let attempt = 0; ; attempt++) {
+      if (count.value > 4096n) throw new RangeError("Provider returned more than 4096 interfaces");
+      const buffer = ctypes.ARRAY(types.CK_INTERFACE, Number(count.value))();
+      const capacity = count.value;
+      const rv = getList(buffer, ctypes.byref(count));
+      if (rv === CKR_BUFFER_TOO_SMALL && attempt < 3) continue;
+      checkRV(rv, "C_GetInterfaceList");
+      if (count.value > capacity) throw new Error("Provider exceeded the interface buffer capacity");
+      for (let i = 0; i < Number(count.value); i++) {
+        const value = buffer[i];
+        interfaces.push(Object.freeze({ name: interfaceName(value.pInterfaceName), version: versionOf(value.pFunctionList, types), flags: value.flags, address: value.pFunctionList }));
+      }
+      break;
+    }
+  }
+  if (requested !== "2.40" && getInterfaceAddress !== null) {
+    const getInterface = types.CK_C_GetInterface(getInterfaceAddress);
+    const standard = interfaces.filter((entry) => entry.name === "PKCS 11" && versions.includes(entry.version));
+    const selected = requested === "auto" ? standard.sort((a, b) => versions.indexOf(b.version) - versions.indexOf(a.version))[0]?.version : requested;
+    if (selected !== undefined || getListAddress === null) {
+      const version = selected === undefined ? null : new types.CK_VERSION(...selected.split(".").map(Number));
+      const out = types.CK_INTERFACE_PTR.create();
+      const name = ctypes.create_string_buffer("PKCS 11");
+      checkRV(getInterface(name, version === null ? null : ctypes.byref(version), ctypes.byref(out), 0n), "C_GetInterface");
+      if (out.isNull) throw new Error("C_GetInterface returned NULL");
+      const value = out.contents;
+      const actual = versionOf(value.pFunctionList, types);
+      if (interfaceName(value.pInterfaceName) !== "PKCS 11" || (selected !== undefined && actual !== selected)) throw new Error("C_GetInterface returned a different interface than requested");
+      tableType(actual, types);
+      return { address: value.pFunctionList, version: actual, interfaces, flags: value.flags };
+    }
+  }
+  if (requested !== "auto" && requested !== "2.40") throw new Error(`Provider does not offer a Cryptoki ${requested} interface`);
+  const out = types.CK_FUNCTION_LIST_PTR.create();
+  checkRV(legacy(ctypes.byref(out)), "C_GetFunctionList");
+  const address = ctypes.cast(out, ctypes.c_void_p).value;
+  const actual = versionOf(address, types);
+  // C_GetFunctionList always returns the legacy table, even when its header
+  // advertises a newer Cryptoki version. Never read a 3.x tail through it.
+  if (!versions.includes(actual)) throw new Error(`Unsupported legacy function-list version ${actual}`);
+  return { address, version: "2.40", interfaces, flags: 0n };
+}
+
+export class Cryptoki {
+  #library;
+  #errcheck = null;
+  #active = 0;
+  #initialized = false;
+  #initializationOwners;
+  #sessions = new Map();
+  #pending = new Map();
+  #available = new Set();
+  #retained = new Set();
+
+  constructor(path, { version = "auto", types = defaultTypes, errcheck = null } = {}) {
+    if (typeof path !== "string" || path.length === 0) throw new TypeError("An explicit PKCS #11 library path is required");
+    if (version !== "auto" && !versions.includes(version)) throw new RangeError("version must be auto, 2.40, 3.0, 3.1 or 3.2");
+    if (!types || typeof types.CK_C_GetFunctionList !== "function") throw new TypeError("types must be a createTypes() result");
+    this.errcheck = errcheck;
+    this.#library = new ctypes.CDLL(path);
+    try {
+      const selected = discover(this.#library, types, version);
+      const Table = tableType(selected.version, types);
+      const table = ctypes.cast(selected.address, ctypes.POINTER(Table)).contents;
+      Object.defineProperties(this, {
+        version: { value: selected.version, enumerable: true },
+        types: { value: types, enumerable: true },
+        interfaces: { value: Object.freeze(selected.interfaces), enumerable: true },
+        interfaceFlags: { value: selected.flags, enumerable: true },
+      });
+      for (const [name] of defaultTypes.CK_FUNCTION_LIST_3_2._fields_.slice(1)) {
+        const present = Table._fields_.some(([field]) => field === name);
+        const raw = present ? table[name] : null;
+        if (raw !== null) this.#available.add(name);
+        let override;
+        const call = (...args) => this.#invoke(name, raw, args, false, override);
+        Object.defineProperties(call, {
+          funcName: { value: name },
+          restype: { value: types.CK_RV },
+          argtypes: { value: types[`CK_${name}`].argtypes },
+          callAsync: { value: (...args) => this.#invoke(name, raw, args, true, override) },
+          errcheck: {
+            get: () => (override === undefined ? this.#errcheck : override),
+            set: (value) => {
+              if (raw === null) throw new UnavailableFunctionError(name, this.version);
+              if (value !== undefined && value !== null && typeof value !== "function") throw new TypeError("Function errcheck must be a function, null or undefined");
+              override = value;
+            },
+          },
+        });
+        Object.defineProperty(this, name, { value: call, enumerable: true });
+      }
+    } catch (error) {
+      this.#library.close();
+      throw error;
+    }
+  }
+
+  get errcheck() {
+    return this.#errcheck;
+  }
+
+  set errcheck(value) {
+    if (value !== null && typeof value !== "function") throw new TypeError("errcheck must be a function or null");
+    this.#errcheck = value;
+  }
+
+  get loaded() {
+    return this.#library.loaded;
+  }
+
+  supports(name) {
+    return this.#available.has(name);
+  }
+
+  // Retain additional owners when a provider keeps memory beyond a raw call.
+  retain(...owners) {
+    if (!this.loaded) throw new Error("Cryptoki library is closed");
+    for (const owner of owners) this.#retained.add(owner);
+  }
+
+  release(...owners) {
+    for (const owner of owners) this.#retained.delete(owner);
+  }
+
+  #invoke(name, raw, args, async, checked) {
+    if (!this.loaded) throw new Error("Cryptoki library is closed");
+    if (raw === null) throw new UnavailableFunctionError(name, this.version);
+    const errcheck = checked === undefined ? this.#errcheck : checked;
+    this.#active++;
+    // Lifecycle accounting must observe CK_RV before a caller's errcheck can
+    // replace it, throw, or start a reentrant call.
+    const previous = raw.errcheck;
+    raw.errcheck = (rv) => {
+      this.#observe(name, rv, args);
+      return errcheck === null ? rv : errcheck(rv, this[name], args);
+    };
+    if (async) {
+      try {
+        return raw.callAsync(...args).finally(() => this.#active--);
+      } catch (error) {
+        this.#active--;
+        throw error;
+      } finally {
+        raw.errcheck = previous;
+      }
+    }
+    try {
+      return raw(...args);
+    } finally {
+      raw.errcheck = previous;
+      this.#active--;
+    }
+  }
+
+  #observe(name, rv, args) {
+    const first = args[0]?.value ?? args[0];
+    const session = typeof first === "bigint" || typeof first === "number" ? BigInt(first).toString() : "";
+    if (name.startsWith("C_Async") && (args[1] == null || args[1] === 0n || args[1]?.isNull === true || args[1]?.value === null || args[1]?.value === 0n)) return;
+    const functionName = name.startsWith("C_Async") ? ctypes.string_at(args[1]) : name;
+    const key = `${session}:${functionName}`;
+    if (rv === CKR_PENDING && name !== "C_AsyncComplete" && name !== "C_AsyncGetID") this.#pending.set(key, [...(this.#pending.get(key) ?? []), ...args]);
+    if ((name === "C_AsyncComplete" && rv !== CKR_PENDING) || (name === "C_AsyncGetID" && rv === CKR_OK)) this.#pending.delete(key);
+    if (rv !== CKR_OK && !(name === "C_Finalize" && rv === CKR_CRYPTOKI_NOT_INITIALIZED)) return;
+    if (name === "C_Initialize") {
+      this.#initialized = true;
+      this.#initializationOwners = args;
+    } else if (name === "C_Finalize") {
+      this.#initialized = false;
+      this.#initializationOwners = undefined;
+      this.#sessions.clear();
+      this.#pending.clear();
+      this.#retained.clear();
+    } else if (name === "C_OpenSession") {
+      const handle = ctypes.cast(args[4], ctypes.POINTER(this.types.CK_SESSION_HANDLE)).contents.value;
+      this.#sessions.set(handle.toString(), { slot: session, args });
+    } else if (name === "C_CloseSession") {
+      this.#sessions.delete(session);
+      for (const pending of this.#pending.keys()) if (pending.startsWith(`${session}:`)) this.#pending.delete(pending);
+    } else if (name === "C_CloseAllSessions") {
+      for (const [handle, owners] of this.#sessions) {
+        if (owners.slot === session) {
+          this.#sessions.delete(handle);
+          for (const pending of this.#pending.keys()) if (pending.startsWith(`${handle}:`)) this.#pending.delete(pending);
+        }
+      }
+    }
+    if (name === "C_AsyncJoin") this.#pending.set(key, args);
+  }
+
+  close() {
+    if (this.#active !== 0) throw new Error("Cannot close Cryptoki while calls are in progress");
+    if (this.#initialized) throw new Error("Call C_Finalize successfully before closing Cryptoki");
+    if (this.#sessions.size !== 0) throw new Error("Close owned sessions before closing Cryptoki");
+    if (this.#pending.size !== 0) throw new Error("Cannot close Cryptoki with pending operations");
+    if (this.#retained.size !== 0) throw new Error("Release retained owners before closing Cryptoki");
+    this.#library.close();
+  }
+
+  [Symbol.dispose]() {
+    this.close();
+  }
+}

@@ -4,6 +4,7 @@ children:
   - ./cross-platform/electron-app/README.md
   - ./cross-platform/python/README.md
   - ./cross-platform/smartcard/README.md
+  - ./cross-platform/cryptoki/README.md
   - ./macos/accessibility/README.md
   - ./windows/com/README.md
   - ./windows/controls/README.md
@@ -21,6 +22,7 @@ Real-world programs built with node-ctypes, written in the style of Python ctype
 | [Electron + React](cross-platform/electron-app/README.md) | macOS and Windows verified; Linux implementation included | Native system clock and process ID, typed sandboxed IPC, automatic synchronized native-memory mirrors, and ASAR packaging without an Electron-specific addon rebuild                                                                                |
 | [Embedded Python](cross-platform/python/README.md)        | Windows, macOS, Linux                                     | CPython loaded through its C API: code, modules and packages, callbacks, JavaScript objects by reference, shared memory with typed arrays and numpy, Temporal dates, threads, workers, asyncio, async iterators and cancellation in both directions |
 | [Smart card (PC/SC)](cross-platform/smartcard/README.md)  | Windows, macOS, Linux                                     | Reader enumeration, card connection, ATR and APDU exchange (`winscard`, `PCSC.framework`, `libpcsclite`)                                                                                                                                            |
+| [Cryptoki (PKCS #11)](cross-platform/cryptoki/README.md) | Windows verified; macOS ARM64 build included | Python-shaped PKCS #11 2.40-3.2 binding; temporary SoftHSM token, login, RSA, ECDSA, AES and SHA-256 |
 | [Accessibility](macos/accessibility/README.md)            | macOS                                                     | UI automation with the Accessibility API: find elements, read and set values, press buttons, browser content                                                                                                                                        |
 | [COM automation](windows/com/README.md)                   | Windows                                                   | comtypes-like vtable dispatch: shell shortcuts (`IShellLinkW`) and Active Directory (`IDirectorySearch`)                                                                                                                                            |
 | [Controls](windows/controls/README.md)                    | Windows                                                   | A window with the common Win32 controls and a message loop                                                                                                                                                                                          |
