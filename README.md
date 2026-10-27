@@ -845,7 +845,7 @@ Each example in `examples/` has its own README; see the [index](examples/README.
 - [Electron + React](examples/cross-platform/electron-app/README.md) — a native system clock through a sandboxed preload bridge, synchronized C-memory views and a packaged ASAR application
 - [Embedded Python](examples/cross-platform/python/README.md) — CPython through its C API: code, modules, callbacks, JavaScript objects by reference, shared memory, threads, asyncio and cancellation (Windows, macOS, Linux)
 - [Smart card (PC/SC)](examples/cross-platform/smartcard/README.md) — `winscard` on Windows, `PCSC.framework` on macOS, `libpcsclite` on Linux
-- [Cryptoki (PKCS #11)](examples/cross-platform/cryptoki/README.md) — complete 3.2 declarations with 2.40–3.2 dispatch and a standalone SoftHSM demo: temporary token, login, RSA, ECDSA, AES and SHA-256
+- [Cryptoki (PKCS #11)](examples/cross-platform/cryptoki/README.md) — complete 3.2 declarations with 2.20–3.2 dispatch and a standalone SoftHSM demo: temporary token, login, RSA, ECDSA, AES and SHA-256
 - [Accessibility](examples/macos/accessibility/README.md) — macOS UI automation with the Accessibility API
 - [COM automation](examples/windows/com/README.md) — shell shortcuts (`IShellLinkW`) and Active Directory (`IDirectorySearch`)
 - [Controls](examples/windows/controls/README.md) — Win32 common controls

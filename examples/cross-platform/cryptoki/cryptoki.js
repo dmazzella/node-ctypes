@@ -2114,6 +2114,7 @@ export const constants = Object.freeze({
   CKT_TRUST_MUST_VERIFY_TRUST,
 });
 
+/** @param {{ packing?: 1 | null }} [options] */
 export function createTypes({ packing = 1 } = {}) {
   if (packing !== 1 && packing !== null) throw new TypeError("packing must be 1 (specification) or null (native alignment)");
   class CryptokiStructure extends ctypes.Structure {}
@@ -4244,7 +4245,7 @@ const defaultTypes = types;
 export { CK_TRUE as TRUE, CK_FALSE as FALSE };
 export const NULL_PTR = null;
 
-const versions = ["2.40", "3.0", "3.1", "3.2"];
+const versions = ["2.20", "2.40", "3.0", "3.1", "3.2"];
 const errorNames = new Map(
   Object.entries(constants)
     .filter(([name]) => name.startsWith("CKR_"))
@@ -4278,7 +4279,7 @@ function optionalSymbol(library, name) {
   try {
     return library.symbol(name);
   } catch (error) {
-    // Missing discovery exports are expected for 2.40-only providers.
+    // Missing discovery exports are expected for 2.x-only providers.
     if (error instanceof Error && error.message.startsWith(`Symbol '${name}' not found:`)) return null;
     throw error;
   }
@@ -4291,10 +4292,10 @@ function versionOf(address, types) {
 }
 
 function tableType(version, types) {
-  if (version === "2.40") return types.CK_FUNCTION_LIST;
+  if (version === "2.20" || version === "2.40") return types.CK_FUNCTION_LIST;
   if (version === "3.0" || version === "3.1") return types.CK_FUNCTION_LIST_3_0;
   if (version === "3.2") return types.CK_FUNCTION_LIST_3_2;
-  throw new Error(`Unsupported provider interface version ${version}; supported range is 2.40-3.2`);
+  throw new Error(`Unsupported provider interface version ${version}; supported range is 2.20-3.2`);
 }
 
 function interfaceName(pointer) {
@@ -4326,7 +4327,8 @@ function discover(library, types, requested) {
       break;
     }
   }
-  if (requested !== "2.40" && getInterfaceAddress !== null) {
+  const legacyRequested = requested === "2.20" || requested === "2.40";
+  if (!legacyRequested && getInterfaceAddress !== null) {
     const getInterface = types.CK_C_GetInterface(getInterfaceAddress);
     const standard = interfaces.filter((entry) => entry.name === "PKCS 11" && versions.includes(entry.version));
     const selected = requested === "auto" ? standard.sort((a, b) => versions.indexOf(b.version) - versions.indexOf(a.version))[0]?.version : requested;
@@ -4343,7 +4345,7 @@ function discover(library, types, requested) {
       return { address: value.pFunctionList, version: actual, interfaces, flags: value.flags };
     }
   }
-  if (requested !== "auto" && requested !== "2.40") throw new Error(`Provider does not offer a Cryptoki ${requested} interface`);
+  if (requested !== "auto" && !legacyRequested) throw new Error(`Provider does not offer a Cryptoki ${requested} interface`);
   const out = types.CK_FUNCTION_LIST_PTR.create();
   checkRV(legacy(ctypes.byref(out)), "C_GetFunctionList");
   const address = ctypes.cast(out, ctypes.c_void_p).value;
@@ -4351,11 +4353,13 @@ function discover(library, types, requested) {
   // C_GetFunctionList always returns the legacy table, even when its header
   // advertises a newer Cryptoki version. Never read a 3.x tail through it.
   if (!versions.includes(actual)) throw new Error(`Unsupported legacy function-list version ${actual}`);
-  return { address, version: "2.40", interfaces, flags: 0n };
+  if (legacyRequested && versions.indexOf(actual) < versions.indexOf(requested)) throw new Error(`Provider does not offer a Cryptoki ${requested} interface`);
+  return { address, version: legacyRequested ? requested : actual === "2.20" ? "2.20" : "2.40", interfaces, flags: 0n };
 }
 
 export class Cryptoki {
   #library;
+  /** @type {null | ((rv: bigint, func: { funcName: string }, args: unknown[]) => unknown)} */
   #errcheck = null;
   #active = 0;
   #initialized = false;
@@ -4367,7 +4371,7 @@ export class Cryptoki {
 
   constructor(path, { version = "auto", types = defaultTypes, errcheck = null } = {}) {
     if (typeof path !== "string" || path.length === 0) throw new TypeError("An explicit PKCS #11 library path is required");
-    if (version !== "auto" && !versions.includes(version)) throw new RangeError("version must be auto, 2.40, 3.0, 3.1 or 3.2");
+    if (version !== "auto" && !versions.includes(version)) throw new RangeError("version must be auto, 2.20, 2.40, 3.0, 3.1 or 3.2");
     if (!types || typeof types.CK_C_GetFunctionList !== "function") throw new TypeError("types must be a createTypes() result");
     this.errcheck = errcheck;
     this.#library = new ctypes.CDLL(path);

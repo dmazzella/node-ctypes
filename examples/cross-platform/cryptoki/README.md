@@ -1,4 +1,4 @@
-# Cryptoki / PKCS #11 2.40-3.2
+# Cryptoki / PKCS #11 2.20-3.2
 
 A Python-ctypes-shaped **consumer binding**, not a cryptographic provider.
 The binding exposes the complete declarations from the OASIS PKCS #11 3.2
@@ -127,21 +127,27 @@ be modified or used after unloading it.
 
 ```javascript
 const module = new ck.Cryptoki(providerPath); // auto
+const older = new ck.Cryptoki(providerPath, { version: "2.20" }); // legacy 2.20 surface
 const legacy = new ck.Cryptoki(providerPath, { version: "2.40" }); // legacy only
 const modern = new ck.Cryptoki(providerPath, { version: "3.2" }); // exact, or error
 ```
 
-- Minimum supported function-list surface: **2.40**.
+- Minimum supported function-list surface: **2.20**.
 - Auto discovery chooses the highest known `"PKCS 11"` interface offered by
   `C_GetInterfaceList`, up to 3.2. Vendor interfaces are not substituted.
 - If only `C_GetInterface` exists, its default standard interface is validated.
 - A provider with only `C_GetFunctionList` remains usable.
 - An explicit version request never silently downgrades.
-- 2.40, 3.0/3.1 and 3.2 use their respective function-list layouts.
+- 2.20 and 2.40 share the same 68-function `CK_FUNCTION_LIST` layout;
+  3.0/3.1 and 3.2 use their respective extended layouts.
+- Auto discovery preserves a legacy table's 2.20 version. An explicit 2.20
+  request also works with a newer provider's legacy table; a 2.40 request
+  rejects a provider exposing only a 2.20 table. Selecting a surface does not
+  make newer mechanisms available on older providers.
 - `C_GetFunctionList` supplies the **legacy layout**, even when the version
   in its header advertises a newer specification. It must not be read as a
   longer 3.x table.
-- Unknown / pre-2.40 versions and NULL interface pointers are rejected.
+- Unknown / pre-2.20 versions and NULL interface pointers are rejected.
 
 `module.version` describes the selected **table surface**, not necessarily
 `CK_INFO.cryptokiVersion`. `module.interfaces` lists discovery results;
