@@ -231,4 +231,146 @@ describe("TestAsParameter", function () {
     );
     assert.equal(reads, 3);
   });
+
+  it("test_from_param_returns_stateful_adapter", function (t) {
+    const library = new c.CDLL(FIXTURE);
+    t.after(() => library.close());
+    for (const binding of ["attribute", "prototype"]) {
+      for (const count of [2, 3, 32, 129]) {
+        const events = [];
+        const argument = { _as_parameter_: 123 };
+        class Changing {
+          reads = 0;
+          get _as_parameter_() {
+            events.push("parameter");
+            return ++this.reads >= count ? 7 : this;
+          }
+        }
+        class Adapted extends c.c_int32 {
+          static from_param(value) {
+            assert.equal(value, argument);
+            events.push("from_param");
+            return new Changing();
+          }
+        }
+        let fn;
+        if (binding === "attribute") {
+          fn = library.fixture_scalar_i32;
+          fn.argtypes = [Adapted];
+          fn.restype = c.c_int32;
+        } else {
+          fn = c.CFUNCTYPE(c.c_int32, Adapted)(["fixture_scalar_i32", library]);
+        }
+        assert.equal(fn(argument), 7);
+        assert.deepEqual(events, ["from_param", ...Array(count).fill("parameter")]);
+      }
+    }
+  });
+
+  it("test_argument_conversion_order_and_failure", function () {
+    const expected = [
+      "from_param 0", "parameter 0",
+      "from_param 1", "parameter 1",
+      "from_param 2", "parameter 2",
+      "from_param 3", "parameter 3",
+    ];
+    for (const stage of [null, "from_param", "parameter"]) {
+      for (let failure = 0; failure < (stage === null ? 1 : 4); failure++) {
+        const events = [];
+        class Parameter {
+          constructor(value) {
+            this.value = value;
+          }
+          get _as_parameter_() {
+            events.push(`parameter ${this.value}`);
+            if (stage === "parameter" && this.value === failure) throw new Error("adapter sentinel");
+            return 1n << BigInt(this.value);
+          }
+        }
+        class Word extends c.c_uint64 {
+          static from_param(value) {
+            events.push(`from_param ${value}`);
+            if (stage === "from_param" && value === failure) throw new Error("adapter sentinel");
+            return new Parameter(value);
+          }
+        }
+        const fn = c.CFUNCTYPE(c.c_uint64, Word, Word, Word, Word)(["fixture_exact_u64_four", lib]);
+        fn.errcheck = (result, invoked, args) => {
+          events.push("errcheck");
+          assert.equal(invoked, fn);
+          assert.deepEqual(args, [0, 1, 2, 3]);
+          return result;
+        };
+        if (stage === null) {
+          assert.equal(fn(0, 1, 2, 3), 15n);
+          assert.deepEqual(events, [...expected, "errcheck"]);
+        } else {
+          assert.throws(
+            () => fn(0, 1, 2, 3),
+            (error) => error instanceof c.ArgumentError && new RegExp(`argument ${failure + 1}: .*adapter sentinel`).test(error.message),
+          );
+          const length = 2 * failure + (stage === "from_param" ? 1 : 2);
+          assert.deepEqual(events, expected.slice(0, length));
+        }
+      }
+    }
+  });
+
+  it("test_conversion_failure_prevents_native_write", function () {
+    for (const stage of ["from_param", "parameter"]) {
+      class Raising {
+        get _as_parameter_() {
+          throw new Error("adapter sentinel");
+        }
+      }
+      class Value extends c.c_int32 {
+        static from_param(value) {
+          if (value === 7) return value;
+          if (stage === "from_param") throw new Error("adapter sentinel");
+          return new Raising();
+        }
+      }
+      const fn = c.CFUNCTYPE(null, c.POINTER(c.c_int32), Value)(["fixture_fill_int4", lib]);
+      const values = c.ARRAY(c.c_int32, 4)(-99, -99, -99, -99);
+      assert.equal(fn(values, 7), undefined);
+      assert.deepEqual([...values], [7, 8, 9, 10]);
+      for (let index = 0; index < 4; index++) values[index] = -99;
+      assert.throws(
+        () => fn(values, 9),
+        (error) => error instanceof c.ArgumentError && /argument 2: .*adapter sentinel/.test(error.message),
+      );
+      assert.deepEqual([...values], [-99, -99, -99, -99]);
+    }
+  });
+
+  it("test_from_param_argument_error_wrapping", function (t) {
+    const library = new c.CDLL(FIXTURE);
+    t.after(() => library.close());
+    for (const binding of ["attribute", "prototype"]) {
+      for (const failure of [0, 1, 3]) {
+        const sentinel = new c.ArgumentError("adapter sentinel");
+        const calls = [];
+        class Word extends c.c_uint64 {
+          static from_param(value) {
+            calls.push(value);
+            if (value === failure) throw sentinel;
+            return BigInt(value);
+          }
+        }
+        let fn;
+        if (binding === "attribute") {
+          fn = library.fixture_exact_u64_four;
+          fn.argtypes = [Word, Word, Word, Word];
+          fn.restype = c.c_uint64;
+        } else {
+          fn = c.CFUNCTYPE(c.c_uint64, Word, Word, Word, Word)(["fixture_exact_u64_four", library]);
+        }
+        assert.throws(
+          () => fn(0, 1, 2, 3),
+          (error) => error instanceof c.ArgumentError && error !== sentinel && error.message === `argument ${failure + 1}: ArgumentError: adapter sentinel`,
+        );
+        assert.deepEqual(calls, Array.from({ length: failure + 1 }, (_, index) => index));
+      }
+    }
+  });
 });

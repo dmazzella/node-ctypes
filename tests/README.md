@@ -120,6 +120,26 @@ addresses across processes. Unbounded recursion uses the host stack guard:
 Original JS error identity through `cause`, `undefined`, Symbol and GC schedules
 are separate runtime coverage.
 
+The [parameter-adapter pairs](./cpython_parity/calls/test_as_parameter.py)
+check `from_param` results with stateful getters, left-to-right conversion,
+stopping at the first conversion error and skipping `errcheck` on failure.
+The existing `fixture_fill_int4` provides a positive write control and verifies
+that rejected conversions leave native output unchanged. Exceptions raised by
+`from_param`, including `ArgumentError`, receive the current argument's context;
+[Node-specific adapter tests](./node_specific/test_as_parameter.js) additionally
+check the original exception's `cause` through sync and async callers.
+
+The [call-lifetime](./node_specific/test_call_lifetime_runtime.js) and
+[result/error-hook lifetime](./node_specific/test_errcheck_lifetime_runtime.js)
+matrices exercise `.func()`, library attributes and library-bound `CFUNCTYPE`
+through sync and async calls. They check cleanup and callable reuse after
+conversion, result-constructor, `_check_retval_` and `errcheck` failures, plus
+owner retention across getter/callback reentry into the same callable.
+The synchronous GC probes establish their `WeakRef`s before an event-loop turn
+so V8's current-job protection does not mask a lost owner. Queued pointer calls
+also check the returned native address, retention while pending and release
+after completion. These are Node runtime checks, not CPython GC/scheduling parity.
+
 ## Running tests
 
 From the repository root:

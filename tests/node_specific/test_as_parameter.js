@@ -131,6 +131,35 @@ describe("Node-specific parameter adapters", function () {
     }
   });
 
+  it("from_param ArgumentError retains argument context and cause for all callers", async function () {
+    for (const failure of [0, 1, 3]) {
+      const sentinel = new c.ArgumentError("adapter sentinel");
+      class Word extends c.c_uint64 {
+        static from_param(value) {
+          if (value === failure) throw sentinel;
+          return BigInt(value);
+        }
+      }
+      const attribute = lib.fixture_exact_u64_four;
+      attribute.argtypes = [Word, Word, Word, Word];
+      attribute.restype = c.c_uint64;
+      const callers = [
+        attribute,
+        lib.func("fixture_exact_u64_four", c.c_uint64, [Word, Word, Word, Word]),
+        c.CFUNCTYPE(c.c_uint64, Word, Word, Word, Word)(["fixture_exact_u64_four", lib]),
+      ];
+      const check = (error) =>
+        error instanceof c.ArgumentError &&
+        error !== sentinel &&
+        error.cause === sentinel &&
+        error.message === `argument ${failure + 1}: ArgumentError: adapter sentinel`;
+      for (const fn of callers) {
+        assert.throws(() => fn(0, 1, 2, 3), check);
+        await assert.rejects(async () => fn.callAsync(0, 1, 2, 3), check);
+      }
+    }
+  });
+
   for (const async of [false, true]) {
     it(`recursive adapter getter errors preserve their cause for ${async ? "async" : "sync"} calls`, async function () {
       const fn = lib.func("fixture_scalar_i32", c.c_int32, [c.c_int32]);

@@ -228,6 +228,156 @@ class TestAsParameter(unittest.TestCase):
         self.assertIn("adapter sentinel", str(raised.exception))
         self.assertEqual(adapter.reads, 3)
 
+    def test_from_param_returns_stateful_adapter(self):
+        library = c.CDLL(str(FIXTURE))
+        for binding in ["attribute", "prototype"]:
+            for count in [2, 3, 32, 129]:
+                events = []
+                argument = Adapter(123)
+
+                class Changing:
+                    reads = 0
+
+                    @property
+                    def _as_parameter_(self):
+                        events.append("parameter")
+                        self.reads += 1
+                        return 7 if self.reads >= count else self
+
+                class Adapted(c.c_int32):
+                    @classmethod
+                    def from_param(cls, value):
+                        self.assertIs(value, argument)
+                        events.append("from_param")
+                        return Changing()
+
+                if binding == "attribute":
+                    function = library.fixture_scalar_i32
+                    function.argtypes = [Adapted]
+                    function.restype = c.c_int32
+                else:
+                    function = c.CFUNCTYPE(c.c_int32, Adapted)(
+                        ("fixture_scalar_i32", library)
+                    )
+                with self.subTest(binding=binding, count=count):
+                    self.assertEqual(function(argument), 7)
+                    self.assertEqual(events, ["from_param"] + ["parameter"] * count)
+
+    def test_argument_conversion_order_and_failure(self):
+        expected = [
+            "from_param 0", "parameter 0",
+            "from_param 1", "parameter 1",
+            "from_param 2", "parameter 2",
+            "from_param 3", "parameter 3",
+        ]
+        for stage in [None, "from_param", "parameter"]:
+            for failure in range(1 if stage is None else 4):
+                events = []
+
+                class Parameter:
+                    def __init__(self, value):
+                        self.value = value
+
+                    @property
+                    def _as_parameter_(self):
+                        events.append(f"parameter {self.value}")
+                        if stage == "parameter" and self.value == failure:
+                            raise RuntimeError("adapter sentinel")
+                        return 1 << self.value
+
+                class Word(c.c_uint64):
+                    @classmethod
+                    def from_param(cls, value):
+                        events.append(f"from_param {value}")
+                        if stage == "from_param" and value == failure:
+                            raise RuntimeError("adapter sentinel")
+                        return Parameter(value)
+
+                function = c.CFUNCTYPE(c.c_uint64, Word, Word, Word, Word)(
+                    ("fixture_exact_u64_four", self.lib)
+                )
+
+                def check(result, invoked, arguments):
+                    events.append("errcheck")
+                    self.assertIs(invoked, function)
+                    self.assertEqual(arguments, (0, 1, 2, 3))
+                    return result
+
+                function.errcheck = check
+                with self.subTest(stage=stage, failure=failure):
+                    if stage is None:
+                        self.assertEqual(function(0, 1, 2, 3), 15)
+                        self.assertEqual(events, expected + ["errcheck"])
+                    else:
+                        with self.assertRaisesRegex(
+                            c.ArgumentError, f"argument {failure + 1}: .*adapter sentinel"
+                        ):
+                            function(0, 1, 2, 3)
+                        length = 2 * failure + (1 if stage == "from_param" else 2)
+                        self.assertEqual(events, expected[:length])
+
+    def test_conversion_failure_prevents_native_write(self):
+        for stage in ["from_param", "parameter"]:
+            class Raising:
+                @property
+                def _as_parameter_(self):
+                    raise RuntimeError("adapter sentinel")
+
+            class Value(c.c_int32):
+                @classmethod
+                def from_param(cls, value):
+                    if value == 7:
+                        return value
+                    if stage == "from_param":
+                        raise RuntimeError("adapter sentinel")
+                    return Raising()
+
+            function = c.CFUNCTYPE(None, c.POINTER(c.c_int32), Value)(
+                ("fixture_fill_int4", self.lib)
+            )
+            values = (c.c_int32 * 4)(-99, -99, -99, -99)
+            with self.subTest(stage=stage):
+                self.assertIsNone(function(values, 7))
+                self.assertEqual(list(values), [7, 8, 9, 10])
+                for index in range(4):
+                    values[index] = -99
+                with self.assertRaisesRegex(c.ArgumentError, "argument 2: .*adapter sentinel"):
+                    function(values, 9)
+                self.assertEqual(list(values), [-99, -99, -99, -99])
+
+    def test_from_param_argument_error_wrapping(self):
+        library = c.CDLL(str(FIXTURE))
+        for binding in ["attribute", "prototype"]:
+            for failure in [0, 1, 3]:
+                sentinel = c.ArgumentError("adapter sentinel")
+                calls = []
+
+                class Word(c.c_uint64):
+                    @classmethod
+                    def from_param(cls, value):
+                        calls.append(value)
+                        if value == failure:
+                            raise sentinel
+                        return value
+
+                if binding == "attribute":
+                    function = library.fixture_exact_u64_four
+                    function.argtypes = [Word, Word, Word, Word]
+                    function.restype = c.c_uint64
+                else:
+                    function = c.CFUNCTYPE(c.c_uint64, Word, Word, Word, Word)(
+                        ("fixture_exact_u64_four", library)
+                    )
+                with self.subTest(binding=binding, failure=failure):
+                    with self.assertRaises(c.ArgumentError) as raised:
+                        function(0, 1, 2, 3)
+                    self.assertIsNot(raised.exception, sentinel)
+                    self.assertEqual(
+                        str(raised.exception),
+                        f"argument {failure + 1}: ArgumentError: adapter sentinel",
+                    )
+                    self.assertEqual(calls, list(range(failure + 1)))
+
 
 if __name__ == "__main__":
     unittest.main()

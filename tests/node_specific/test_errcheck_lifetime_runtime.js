@@ -45,6 +45,125 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
   const setCheck = (fn, kind, check) => (kind === "raw" ? fn.setErrcheck(check) : (fn.errcheck = check));
   const invoke = (fn, kind, ...args) => (kind === "raw" ? fn.call(...args) : fn(...args));
 
+  for (const kind of ["func", "attribute", "prototype"]) {
+    for (const [mode, checked] of [["sync", false], ["sync", true], ["async", false], ["async", true]]) {
+      it(`${kind} ${mode} ${checked ? "checked" : "unchecked"}: a throwing result constructor releases owners and allows reuse`, async function (t) {
+        const library = new c.CDLL(fixture);
+        t.after(() => library.close());
+        let owner = Buffer.alloc(4096, 65);
+        let reference = new WeakRef(owner);
+        let fail = true;
+        const sentinel = new Error("result constructor sentinel");
+        let checks = 0;
+        await new Promise(setImmediate);
+        class Temporary extends c.c_void_p {
+          static from_param() {
+            const buffer = owner;
+            owner = null;
+            return c.cast(new c.c_void_p(buffer), c.POINTER(c.c_uint8));
+          }
+        }
+        class Result extends c.Structure {
+          static _fields_ = [["x", c.c_int32], ["y", c.c_int32]];
+          constructor(bytes) {
+            super(bytes);
+            assert.deepEqual([this.x, this.y], [7, 8]);
+            for (let i = 0; i < 4; i++) gc();
+            assert.ok(reference.deref(), "the result constructor lost the argument owner");
+            if (fail) throw sentinel;
+          }
+        }
+        const fn = bind(library, kind, Result, [c.c_int32, c.c_int32, Temporary], "fixture_point_make_tail");
+        fn.errcheck = checked ? (result, invoked, args) => {
+          checks++;
+          assert.equal(invoked, fn);
+          assert.deepEqual(args, [7, 8, 0]);
+          return result;
+        } : null;
+        try {
+          if (mode === "async") await assert.rejects(fn.callAsync(7, 8, 0), (error) => error === sentinel);
+          else assert.throws(() => fn(7, 8, 0), (error) => error === sentinel);
+          assert.equal(checks, 0);
+          await collect();
+          assert.equal(reference.deref(), undefined, "a throwing constructor retained the argument owner");
+          fail = false;
+          owner = Buffer.alloc(4096, 65);
+          reference = new WeakRef(owner);
+          await new Promise(setImmediate);
+          const result = mode === "async" ? await fn.callAsync(7, 8, 0) : fn(7, 8, 0);
+          assert.ok(result instanceof Result);
+          assert.deepEqual([result.x, result.y], [7, 8]);
+          assert.equal(checks, checked ? 1 : 0);
+          await collect();
+          assert.equal(reference.deref(), undefined, "the returned structure retained an unrelated pointer argument");
+        } finally {
+          fn.errcheck = null;
+        }
+      });
+
+      for (const stage of checked ? ["result", "errcheck"] : ["result"]) {
+        it(`${kind} ${mode} ${checked ? "checked" : "unchecked"}: ${stage} failures retain owners until rejection and release them afterwards`, async function (t) {
+          const library = new c.CDLL(fixture);
+          t.after(() => library.close());
+          let owner = Buffer.alloc(4096, 65);
+          let reference = new WeakRef(owner);
+          let fail = true;
+          const sentinel = new Error(`${stage} sentinel`);
+          const events = [];
+          const input = { value: 65 };
+          await new Promise(setImmediate);
+          class Temporary extends c.c_void_p {
+            static from_param(value) {
+              assert.equal(value, input);
+              const buffer = owner;
+              owner = null;
+              return c.cast(new c.c_void_p(buffer), c.POINTER(c.c_uint8));
+            }
+          }
+          class Result extends c.c_int32 {
+            static _check_retval_(value) {
+              events.push("result");
+              assert.equal(value.value, 65);
+              for (let i = 0; i < 4; i++) gc();
+              assert.ok(reference.deref(), "result conversion lost the argument owner");
+              if (fail && stage === "result") throw sentinel;
+              return value.value;
+            }
+          }
+          const fn = bind(library, kind, Result, [Temporary, c.c_void_p]);
+          fn.errcheck = checked ? (result, invoked, args) => {
+            events.push("errcheck");
+            assert.equal(result, 65);
+            assert.equal(invoked, fn);
+            assert.deepEqual(args, [input, null]);
+            for (let i = 0; i < 4; i++) gc();
+            assert.ok(reference.deref(), "errcheck lost the argument owner");
+            if (fail && stage === "errcheck") throw sentinel;
+            return result;
+          } : null;
+          try {
+            if (mode === "async") await assert.rejects(fn.callAsync(input, null), (error) => error === sentinel);
+            else assert.throws(() => fn(input, null), (error) => error === sentinel);
+            assert.deepEqual(events, stage === "result" ? ["result"] : ["result", "errcheck"]);
+            await collect();
+            assert.equal(reference.deref(), undefined, "the failed result pipeline retained its argument owner");
+            fail = false;
+            events.length = 0;
+            owner = Buffer.alloc(4096, 65);
+            reference = new WeakRef(owner);
+            await new Promise(setImmediate);
+            assert.equal(mode === "async" ? await fn.callAsync(input, null) : fn(input, null), 65);
+            assert.deepEqual(events, checked ? ["result", "errcheck"] : ["result"]);
+            await collect();
+            assert.equal(reference.deref(), undefined, "reusing the callable retained its new argument owner");
+          } finally {
+            fn.errcheck = null;
+          }
+        });
+      }
+    }
+  }
+
   for (const kind of ["func", "attribute", "prototype", "raw"]) {
     if (kind !== "raw") {
       it(`${kind}: owner probes do not resnapshot hooks or run twice`, function () {

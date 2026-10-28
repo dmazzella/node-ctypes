@@ -258,6 +258,15 @@ describe("converted argument ownership", { skip: !existsSync(FIXTURE) && "native
   });
   after(() => lib.close());
 
+  function bind(binding, symbol, restype, argtypes) {
+    if (binding === "func") return lib.func(symbol, restype, argtypes);
+    if (binding === "prototype") return CFUNCTYPE(restype, ...argtypes)([symbol, lib]);
+    const fn = lib[symbol];
+    fn.argtypes = argtypes;
+    fn.restype = restype;
+    return fn;
+  }
+
   for (const binding of ["func", "attribute", "prototype"]) {
     it(`${binding} retains conversion temporaries before native entry and releases them afterwards`, async function () {
       let owner = Buffer.alloc(4096, 65);
@@ -280,39 +289,156 @@ describe("converted argument ownership", { skip: !existsSync(FIXTURE) && "native
           return null;
         }
       }
-      let fn;
-      if (binding === "func") fn = lib.func("fixture_first_char_after", c_int32, [Temporary, Collect]);
-      else if (binding === "prototype") fn = CFUNCTYPE(c_int32, Temporary, Collect)(["fixture_first_char_after", lib]);
-      else {
-        fn = lib.fixture_first_char_after;
-        fn.argtypes = [Temporary, Collect];
-        fn.restype = c_int32;
-      }
+      const fn = bind(binding, "fixture_first_char_after", c_int32, [Temporary, Collect]);
       assert.strictEqual(fn(0, null), 65);
       await collectGarbage();
       assert.strictEqual(weak.deref(), undefined, "completed conversions must not leak their owners");
     });
   }
 
-  it("releases conversion temporaries when a later converter throws", async function () {
-    let weak;
-    class Temporary extends c_void_p {
-      static from_param() {
-        const owner = Buffer.alloc(4096);
-        weak = new WeakRef(owner);
-        return ctypes.cast(new c_void_p(owner), ctypes.POINTER(c_uint8));
-      }
+  for (const binding of ["func", "attribute", "prototype"]) {
+    for (const mode of ["sync", "async"]) {
+      it(`${binding} ${mode}: later conversion failures release owners and allow reuse`, async function () {
+        for (const stage of ["from_param", "getter"]) {
+          let owner = Buffer.alloc(4096, 65);
+          const weak = new WeakRef(owner);
+          const sentinel = new RangeError("conversion stopped");
+          let fail = true;
+          let calls = 0;
+          let checks = 0;
+          await new Promise(setImmediate);
+          class Temporary extends c_void_p {
+            static from_param() {
+              const buffer = owner;
+              owner = null;
+              return ctypes.cast(new c_void_p(buffer), ctypes.POINTER(c_uint8));
+            }
+          }
+          const reject = () => {
+            for (let i = 0; i < 4; i++) gc();
+            assert.ok(weak.deref(), "the earlier argument must survive until the conversion fails");
+            throw sentinel;
+          };
+          class Later extends c_void_p {
+            static from_param(value) {
+              if (!fail) return value;
+              if (stage === "from_param") return reject();
+              return { get _as_parameter_() { return reject(); } };
+            }
+          }
+          const fn = bind(binding, "fixture_owner_check", c_int32, [Temporary, Later]);
+          const cb = threadSafeCallback(() => { calls++; return 17; }, c_int32, []);
+          fn.errcheck = (result) => { checks++; return result; };
+          try {
+            const check = (error) => error instanceof ctypes.ArgumentError && error.cause === sentinel && /argument 2:/.test(error.message);
+            if (mode === "async") await assert.rejects(async () => fn.callAsync(0, cb.pointer), check);
+            else assert.throws(() => fn(0, cb.pointer), check);
+            assert.strictEqual(calls, 0, "C must not invoke its callback after a conversion failure");
+            assert.strictEqual(checks, 0);
+            await collectGarbage();
+            assert.strictEqual(weak.deref(), undefined, "a rejected conversion retained its temporary");
+            fail = false;
+            owner = Buffer.alloc(4096, 66);
+            assert.strictEqual(mode === "async" ? await fn.callAsync(0, cb.pointer) : fn(0, cb.pointer), 17);
+            assert.strictEqual(calls, 1);
+            assert.strictEqual(checks, 1);
+          } finally {
+            fn.errcheck = null;
+            cb.release();
+          }
+        }
+      });
+
+      it(`${binding} ${mode}: a reentrant getter preserves both calls' temporaries`, async function () {
+        const owners = [Buffer.alloc(4096, 65), Buffer.alloc(4096, 66)];
+        const references = owners.map((owner) => new WeakRef(owner));
+        const addresses = owners.map((owner) => addressof(owner));
+        const events = [];
+        let nested;
+        let fn;
+        await new Promise(setImmediate);
+        class Temporary extends c_void_p {
+          static from_param(index) {
+            events.push(`convert ${index}`);
+            const buffer = owners[index];
+            owners[index] = null;
+            return ctypes.cast(new c_void_p(buffer), ctypes.POINTER(c_uint8));
+          }
+        }
+        class Reenter extends c_void_p {
+          static from_param(outer) {
+            return {
+              get _as_parameter_() {
+                events.push(outer ? "outer getter" : "inner getter");
+                if (outer) nested = fn(1, false);
+                for (let i = 0; i < 4; i++) gc();
+                const index = outer ? 0 : 1;
+                assert.ok(references[index].deref(), "reentrant conversion lost its active owner");
+                assert.strictEqual(readValue(addresses[index], c_uint8), 65 + index);
+                return null;
+              },
+            };
+          }
+        }
+        fn = bind(binding, "fixture_first_char_after", c_int32, [Temporary, Reenter]);
+        assert.strictEqual(mode === "async" ? await fn.callAsync(0, true) : fn(0, true), 65);
+        assert.strictEqual(nested, 66);
+        assert.deepStrictEqual(events, ["convert 0", "outer getter", "convert 1", "inner getter"]);
+        await collectGarbage();
+        assert.ok(references.every((reference) => reference.deref() === undefined), "completed reentrant calls retained owners");
+      });
+
+      it(`${binding} ${mode}: native callback reentrancy preserves and releases both owners`, async function () {
+        const owners = [Buffer.alloc(4096, 65), Buffer.alloc(4096, 66)];
+        const references = owners.map((owner) => new WeakRef(owner));
+        const addresses = owners.map((owner) => addressof(owner));
+        const errors = [];
+        const events = [];
+        let inside = false;
+        await new Promise(setImmediate);
+        class Temporary extends c_void_p {
+          static from_param(index) {
+            events.push(`convert ${index}`);
+            const buffer = owners[index];
+            owners[index] = null;
+            return ctypes.cast(new c_void_p(buffer), ctypes.POINTER(c_uint8));
+          }
+        }
+        const fn = bind(binding, "fixture_owner_check", c_int32, [Temporary, c_void_p]);
+        const cb = threadSafeCallback(() => {
+          if (inside) {
+            events.push("inner callback");
+            for (let i = 0; i < 4; i++) gc();
+            assert.ok(references[1].deref(), "the nested native call lost its owner");
+            return readValue(addresses[1], c_uint8);
+          }
+          events.push("outer callback");
+          inside = true;
+          let nested;
+          try {
+            nested = fn(1, cb.pointer);
+          } finally {
+            inside = false;
+          }
+          for (let i = 0; i < 4; i++) gc();
+          assert.ok(references[0].deref(), "the nested native call released the outer owner");
+          assert.strictEqual(readValue(addresses[0], c_uint8), 65);
+          assert.strictEqual(nested, 66);
+          return nested + 1;
+        }, c_int32, []);
+        cb._callback.setErrorHandler((message) => errors.push(message));
+        try {
+          assert.strictEqual(mode === "async" ? await fn.callAsync(0, cb.pointer) : fn(0, cb.pointer), 67);
+          assert.deepStrictEqual(errors, []);
+          assert.deepStrictEqual(events, ["convert 0", "outer callback", "convert 1", "inner callback"]);
+        } finally {
+          cb.release();
+        }
+        await collectGarbage();
+        assert.ok(references.every((reference) => reference.deref() === undefined), "completed native calls retained owners");
+      });
     }
-    class Fail extends c_void_p {
-      static from_param() {
-        throw new RangeError("conversion stopped");
-      }
-    }
-    const fn = lib.func("fixture_first_char_after", c_int32, [Temporary, Fail]);
-    assert.throws(() => fn(0, null), /conversion stopped/);
-    await collectGarbage();
-    assert.strictEqual(weak.deref(), undefined);
-  });
+  }
 
   it("prevents close() while native getters materialize async arguments", async function () {
     const isolated = new CDLL(FIXTURE);
@@ -373,14 +499,20 @@ describe("converted argument ownership", { skip: !existsSync(FIXTURE) && "native
           const Ptr = c.POINTER(c.c_uint8);
           const address = lib.func("fixture_address", c.c_size_t, [Ptr]);
           const proto = c.CFUNCTYPE(c.c_size_t, Ptr)(["fixture_address", lib]);
+          const attribute = lib.fixture_address;
+          attribute.argtypes = [Ptr];
+          attribute.restype = c.c_size_t;
           const cases = [];
           function queue(name, fn) {
             const owner = Buffer.alloc(4096);
             const pointer = c.cast(new c.c_void_p(owner), Ptr);
-            cases.push({ name, weak: new WeakRef(owner), promise: fn(pointer) });
+            const expected = c.addressof(owner);
+            const promise = fn(pointer).then(result => assert.equal(result, expected, name + " returned another address"));
+            cases.push({ name, weak: new WeakRef(owner), promise });
           }
           queue("CDLL pointer", pointer => address.callAsync(pointer));
           queue("prototype pointer", pointer => proto.callAsync(pointer));
+          queue("attribute pointer", pointer => attribute.callAsync(pointer));
           function queueCallback() {
             const callback = c.CFUNCTYPE(c.c_int32, c.c_int32)(value => value + 1);
             const address = lib.func("fixture_address", c.c_size_t, [c.c_void_p]);
