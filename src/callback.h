@@ -52,9 +52,8 @@ class Callback : public Napi::ObjectWrap<Callback> {
 // ThreadSafeCallback - Supporta chiamate da qualsiasi thread
 // ========================================================================
 
-// Una chiamata da un thread esterno: vive sullo stack del thread chiamante,
-// che resta bloccato finché il main thread non ha scritto il risultato in
-// `ret`. args e ret sono quelli di libffi (validi per tutta l'attesa).
+// Condiviso tra chiamante, lista delle chiamate pendenti e TSFN. args/ret sono validi
+// solo fino al completamento; le consegne TSFN successive non devono piu accedervi.
 struct PendingCallbackCall {
   PendingCallbackCall(void** call_args, void* call_ret) : args(call_args), ret(call_ret) {}
   PendingCallbackCall(const PendingCallbackCall&) = delete;
@@ -65,6 +64,23 @@ struct PendingCallbackCall {
   std::mutex mutex;
   std::condition_variable cv;
   bool done = false;
+  std::atomic<bool> claimed{false};
+  void* native_error = nullptr;
+};
+using PendingCallback = std::shared_ptr<PendingCallbackCall>;
+
+struct NativeCallbackContext {
+  using State = void*;
+  using Error = void*;
+  using Suspend = State (*)();
+  using Resume = void (*)(State);
+  using ErrorHandler = void (*)(Error);
+  using Notify = void (*)();
+
+  Suspend suspend;
+  Resume resume;
+  ErrorHandler on_error;
+  Notify notify = nullptr;
 };
 
 struct ThreadSafeCallbackData {
@@ -81,6 +97,11 @@ struct ThreadSafeCallbackData {
   std::atomic<bool> released{false};
   std::string last_error;  // Ultimo errore catturato
   std::mutex error_mutex;  // Protezione per last_error
+  std::optional<NativeCallbackContext> native_context;
+  PendingCallbackCall* active_call = nullptr;  // Accessibile solo dal thread host Node.
+  std::atomic<size_t> active_calls{0};
+  std::mutex pending_mutex;
+  std::vector<PendingCallback> pending;
 };
 
 // Eseguita sul main thread per ogni chiamata in coda (env nullo quando la
@@ -88,10 +109,10 @@ struct ThreadSafeCallbackData {
 void CallThreadSafeCallback(Napi::Env env,
                             Napi::Function js_callback,
                             ThreadSafeCallbackData* data,
-                            PendingCallbackCall* call);
+                            PendingCallback* call);
 
 using ThreadSafeCallbackFunction =
-  Napi::TypedThreadSafeFunction<ThreadSafeCallbackData, PendingCallbackCall, CallThreadSafeCallback>;
+  Napi::TypedThreadSafeFunction<ThreadSafeCallbackData, PendingCallback, CallThreadSafeCallback>;
 
 struct ThreadSafeCallbackState : ThreadSafeCallbackData {
   ThreadSafeCallbackFunction tsfn;
@@ -112,6 +133,8 @@ class ThreadSafeCallback : public Napi::ObjectWrap<ThreadSafeCallback> {
   Napi::Value GetLastError(const Napi::CallbackInfo& info);
   Napi::Value Ref(const Napi::CallbackInfo& info);
   Napi::Value Unref(const Napi::CallbackInfo& info);
+  Napi::Value SetNativeError(const Napi::CallbackInfo& info);
+  Napi::Value Drain(const Napi::CallbackInfo& info);
 
  private:
   // Libera closure e riferimenti e rilascia la TSFN: release() o GC del wrapper.

@@ -329,6 +329,57 @@ const onEvent = threadSafeCallback((code) => console.log("event", code), null, [
 startWorker(onEvent); // a native library calling onEvent from its own thread
 ```
 
+For an embedding runtime that must detach its native thread state before waiting,
+the optional fourth argument can be `{ abi, nativeContext: { suspend, resume, onError, notify? } }`
+instead of the existing ABI string. Each hook accepts a ctypes native function,
+a low-level function handle, or a nonzero BigInt function address:
+
+```javascript
+const onRequest = threadSafeCallback(handleRequest, c_int, [c_int], {
+  nativeContext: {
+    suspend: runtime.func("save_context", c_void_p, []),
+    resume: runtime.func("restore_context", null, [c_void_p]),
+    onError: runtime.func("install_error", null, [c_void_p]),
+    notify: runtime.func("wake_host", null, []),
+  },
+});
+```
+
+Function objects resolve through `_as_parameter_` or `address` once, when the
+callback is constructed. The hooks are called directly using the default C ABI;
+the function wrapper's JS converters and `errcheck` are not invoked:
+
+- `void *suspend(void)` runs on a foreign caller before queueing.
+- `void resume(void *)` restores that caller's saved state after dispatch, including
+  queue failure or environment shutdown. Neither hook runs on the Node host fast path.
+- `void onError(void *)` consumes an opaque error pointer on the original caller
+  thread, after restoration. During the JS callback, use
+  `callback.setNativeError(pointer)` once and return the native API's required error
+  sentinel (`NULL`, `-1`, etc.). Error payloads belong to each invocation, including
+  concurrent and nested calls; JS exceptions are still reported as documented above.
+- Optional `void notify(void)` runs on the foreign caller after successful queueing,
+  while its native state is detached. It may wake the host through the consumer's
+  runtime, but must not execute JavaScript itself.
+
+`callback.drain()` executes a snapshot of pending calls **on the owning Node
+thread**, returning the number it claimed. Each call executes at most once,
+whether the TSFN or a drain gets there first. Delayed TSFN deliveries retain
+only the shared request state and do not touch completed calls' native arguments.
+The consumer must provide a safe way to reenter the host and call `drain()`;
+calling it before entering a blocking native wait is not sufficient.
+
+Hooks must not throw or execute JavaScript. Plain JS functions and known
+JS-backed callback wrappers are rejected; an address cannot prove a function's
+signature, validity or implementation. Supplied function objects are retained by
+the native dispatcher through release and queued delivery cleanup. This does not
+prevent explicitly closing their libraries or releasing their underlying resources;
+raw addresses carry no owner. Keep the callback and the hook libraries
+alive until all native calls have returned; explicit release is rejected while a
+native-context call is active. These hooks do not acquire the host runtime context,
+pump a blocked host event loop automatically, or implement interpreter ownership/subinterpreters.
+The host JS handler must acquire/release its own runtime context around native API
+operations. The ordinary callback path is unchanged when no hooks are supplied.
+
 Both callback implementations store narrow integer results in a complete
 libffi `ffi_arg`, with the declared signedness; failures zero that complete
 slot. Floating-point results retain their own storage width. The native

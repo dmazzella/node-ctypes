@@ -12,6 +12,18 @@ static constexpr size_t kMaxInlineCallbackArgs = 8;
 
 namespace {
 
+uintptr_t NativeContextAddress(Napi::Env env, const Napi::Value& value) {
+  if (!value.IsBigInt()) {
+    throw Napi::TypeError::New(env, "Native context addresses must be nonzero pointer-sized BigInts");
+  }
+  bool lossless = false;
+  const uint64_t address = value.As<Napi::BigInt>().Uint64Value(&lossless);
+  if (!lossless || address == 0 || address > UINTPTR_MAX) {
+    throw Napi::RangeError::New(env, "Native context addresses must be nonzero pointer-sized BigInts");
+  }
+  return static_cast<uintptr_t>(address);
+}
+
 bool StoreJSCallbackResult(const Napi::Value& result, CType type, void* destination) {
   const size_t size = CTypeSize(type);
   if (ReturnStorageSize(type) == size) {
@@ -257,7 +269,7 @@ Callback::Callback(const Napi::CallbackInfo& info) : Napi::ObjectWrap<Callback>(
 
   ParseCallbackTypes(info, data_->return_type, data_->arg_types);
 
-  // Parse optional 4th argument: calling convention string
+  // Legge il quarto argomento opzionale: la stringa della convenzione di chiamata.
   ffi_abi abi = FFI_DEFAULT_ABI;
   if (info.Length() > 3 && info[3].IsString()) {
     abi = CallConvToFFI(StringToCallConv(info[3].As<Napi::String>().Utf8Value()));
@@ -392,8 +404,14 @@ void InvokeThreadSafeCallback(Napi::Env env,
                               ThreadSafeCallbackData* data,
                               void** args,
                               void* ret,
-                              const char* default_error) {
+                              const char* default_error,
+                              PendingCallbackCall* call = nullptr) {
   Napi::HandleScope scope(env);
+  struct ActiveCall {
+    ThreadSafeCallbackData* data;
+    PendingCallbackCall* previous;
+    ~ActiveCall() { data->active_call = previous; }
+  } active{data, std::exchange(data->active_call, call)};
 
   // SBO: usa stack buffer per callback comuni, heap solo se necessario
   const size_t nargs = data->arg_types.size();
@@ -442,43 +460,93 @@ void InvokeThreadSafeCallback(Napi::Env env,
   }
 }
 
-}  // namespace
-
-void CallThreadSafeCallback(Napi::Env env,
-                            Napi::Function js_callback,
-                            ThreadSafeCallbackData* data,
-                            PendingCallbackCall* call) {
-  if (call == nullptr) {
-    return;
+bool DispatchThreadSafeCallback(Napi::Env env,
+                                Napi::Function js_callback,
+                                ThreadSafeCallbackData* data,
+                                PendingCallbackCall* call) {
+  if (call->claimed.exchange(true, std::memory_order_acq_rel)) {
+    return false;
   }
 
   // Il thread chiamante è sbloccato in ogni caso, anche se la funzione JS non
   // può essere eseguita.
   struct Complete {
+    ThreadSafeCallbackData* data;
     PendingCallbackCall* call;
     ~Complete() {
+      {
+        std::lock_guard<std::mutex> lock(data->pending_mutex);
+        std::erase_if(data->pending, [this](const PendingCallback& pending) { return pending.get() == call; });
+      }
       std::lock_guard<std::mutex> lock(call->mutex);
       call->done = true;
       call->cv.notify_one();
     }
-  } complete{call};
+  } complete{data, call};
 
   // Ambiente in chiusura, o callback rilasciato (anche dal GC) con chiamate
   // ancora in coda: nessun JS, risultato zero.
   if (static_cast<napi_env>(env) == nullptr || js_callback.IsEmpty() ||
       data->released.load(std::memory_order_acquire)) {
     ZeroResult(data->return_type, call->ret);
-    return;
+    return true;
   }
   try {
     InvokeThreadSafeCallback(env, js_callback, data, call->args, call->ret,
-                             "Unknown error in thread-safe callback (external thread)");
+                             "Unknown error in thread-safe callback (external thread)", call);
   } catch (...) {
     ZeroResult(data->return_type, call->ret);
+  }
+  return true;
+}
+
+}  // namespace
+
+void CallThreadSafeCallback(Napi::Env env,
+                            Napi::Function js_callback,
+                            ThreadSafeCallbackData* data,
+                            PendingCallback* payload) {
+  std::unique_ptr<PendingCallback> owner(payload);
+  if (owner) {
+    DispatchThreadSafeCallback(env, js_callback, data, owner->get());
   }
 }
 
 namespace {
+
+class NativeCallbackScope final {
+ public:
+  NativeCallbackScope(ThreadSafeCallbackData& data, PendingCallbackCall& call, bool foreign)
+    : data_(data), call_(call) {
+    data_.active_calls.fetch_add(1, std::memory_order_acq_rel);
+    if (foreign && data_.native_context) {
+      suspended_state_.emplace(data_.native_context->suspend());
+    }
+  }
+
+  ~NativeCallbackScope() noexcept {
+    // Anche uno stato sospeso nullo va ripristinato prima di impostare l'errore del chiamante.
+    if (suspended_state_.has_value()) {
+      data_.native_context->resume(*suspended_state_);
+    }
+    if (call_.native_error != nullptr) {
+      data_.native_context->on_error(call_.native_error);
+    }
+    data_.active_calls.fetch_sub(1, std::memory_order_release);
+  }
+
+  NativeCallbackScope(const NativeCallbackScope&) = delete;
+  NativeCallbackScope& operator=(const NativeCallbackScope&) = delete;
+  NativeCallbackScope(NativeCallbackScope&&) = delete;
+  NativeCallbackScope& operator=(NativeCallbackScope&&) = delete;
+
+ private:
+  ThreadSafeCallbackData& data_;
+  PendingCallbackCall& call_;
+  std::optional<NativeCallbackContext::State> suspended_state_;
+};
+
+static_assert(!std::copyable<NativeCallbackScope> && !std::movable<NativeCallbackScope>);
 
 // Handler per ThreadSafeCallback
 void ThreadSafeCallbackHandler(ffi_cif* /*cif*/, void* ret, void** args, void* user_data) {
@@ -489,7 +557,8 @@ void ThreadSafeCallbackHandler(ffi_cif* /*cif*/, void* ret, void** args, void* u
     return;
   }
 
-  if (std::this_thread::get_id() == data->main_thread_id) {
+  const bool host_thread = std::this_thread::get_id() == data->main_thread_id;
+  if (host_thread && !data->native_context) {
     // Percorso veloce: chiamata diretta
     InvokeThreadSafeCallback(data->js_function_ref.Env(), data->js_function_ref.Value(), data, args, ret,
                              "Unknown error in thread-safe callback");
@@ -498,16 +567,32 @@ void ThreadSafeCallbackHandler(ffi_cif* /*cif*/, void* ret, void** args, void* u
 
   // Thread esterno: ogni invocazione ha il proprio stato, quindi chiamate
   // concorrenti dello stesso callback ricevono ciascuna il proprio risultato.
-  PendingCallbackCall call(args, ret);
-  const napi_status status = data->tsfn.BlockingCall(&call);
-  if (status != napi_ok) {
-    RecordThreadSafeError(data, std::format("Failed to queue callback (napi_status: {})", static_cast<int>(status)));
-    ZeroResult(data->return_type, ret);
+  auto call = std::make_shared<PendingCallbackCall>(args, ret);
+  NativeCallbackScope context(*data, *call, !host_thread);
+
+  if (host_thread) {
+    InvokeThreadSafeCallback(data->js_function_ref.Env(), data->js_function_ref.Value(), data, args, ret,
+                             "Unknown error in thread-safe callback", call.get());
     return;
   }
+  {
+    std::lock_guard<std::mutex> lock(data->pending_mutex);
+    data->pending.push_back(call);
+  }
+  auto payload = std::make_unique<PendingCallback>(call);
+  const napi_status status = data->tsfn.BlockingCall(payload.get());
+  if (status != napi_ok) {
+    RecordThreadSafeError(data, std::format("Failed to queue callback (napi_status: {})", static_cast<int>(status)));
+    DispatchThreadSafeCallback(nullptr, Napi::Function(), data, call.get());
+  } else {
+    payload.release();
+    if (data->native_context && data->native_context->notify != nullptr) {
+      data->native_context->notify();
+    }
+  }
 
-  std::unique_lock<std::mutex> lock(call.mutex);
-  call.cv.wait(lock, [&call] { return call.done; });
+  std::unique_lock<std::mutex> lock(call->mutex);
+  call->cv.wait(lock, [&call] { return call->done; });
 }
 
 }  // namespace
@@ -521,6 +606,8 @@ Napi::Function ThreadSafeCallback::GetClass(Napi::Env env) {
                        InstanceMethod("getLastError", &ThreadSafeCallback::GetLastError),
                        InstanceMethod("ref", &ThreadSafeCallback::Ref),
                        InstanceMethod("unref", &ThreadSafeCallback::Unref),
+                       InstanceMethod("setNativeError", &ThreadSafeCallback::SetNativeError),
+                       InstanceMethod("drain", &ThreadSafeCallback::Drain),
                      });
 }
 
@@ -546,7 +633,25 @@ ThreadSafeCallback::ThreadSafeCallback(const Napi::CallbackInfo& info) : Napi::O
 
   ParseCallbackTypes(info, data_->return_type, data_->arg_types);
 
-  // Parse optional 4th argument: calling convention string
+  if (info.Length() > 5 && !info[5].IsUndefined()) {
+    if (!info[5].IsObject() || info[5].IsNull()) {
+      throw Napi::TypeError::New(env, "nativeContext must contain suspend, resume and onError addresses");
+    }
+    const auto context = info[5].As<Napi::Object>();
+    NativeCallbackContext native_context{
+      .suspend = reinterpret_cast<NativeCallbackContext::Suspend>(NativeContextAddress(env, context.Get("suspend"))),
+      .resume = reinterpret_cast<NativeCallbackContext::Resume>(NativeContextAddress(env, context.Get("resume"))),
+      .on_error =
+        reinterpret_cast<NativeCallbackContext::ErrorHandler>(NativeContextAddress(env, context.Get("onError"))),
+    };
+    const auto notify = context.Get("notify");
+    if (!notify.IsUndefined()) {
+      native_context.notify = reinterpret_cast<NativeCallbackContext::Notify>(NativeContextAddress(env, notify));
+    }
+    data_->native_context = native_context;
+  }
+
+  // Legge il quarto argomento opzionale: la stringa della convenzione di chiamata.
   ffi_abi abi = FFI_DEFAULT_ABI;
   if (info.Length() > 3 && info[3].IsString()) {
     abi = CallConvToFFI(StringToCallConv(info[3].As<Napi::String>().Utf8Value()));
@@ -699,8 +804,46 @@ Napi::Value ThreadSafeCallback::Unref(const Napi::CallbackInfo& info) {
 }
 
 Napi::Value ThreadSafeCallback::Release(const Napi::CallbackInfo& info) {
+  if (data_ && data_->native_context && data_->active_calls.load(std::memory_order_acquire) != 0) {
+    throw Napi::Error::New(info.Env(), "Cannot release a native-context callback while calls are active");
+  }
   ReleaseResources();
   return info.Env().Undefined();
+}
+
+Napi::Value ThreadSafeCallback::SetNativeError(const Napi::CallbackInfo& info) {
+  const auto env = info.Env();
+  if (!data_ || data_->released.load()) {
+    throw Napi::Error::New(env, "ThreadSafeCallback has been released");
+  }
+  if (!data_->native_context || data_->active_call == nullptr) {
+    throw Napi::Error::New(env, "setNativeError requires an active native-context callback");
+  }
+  if (data_->active_call->native_error != nullptr) {
+    throw Napi::Error::New(env, "A native error is already set for this callback invocation");
+  }
+  data_->active_call->native_error =
+    reinterpret_cast<void*>(NativeContextAddress(env, info.Length() > 0 ? info[0] : env.Undefined()));
+  return env.Undefined();
+}
+
+Napi::Value ThreadSafeCallback::Drain(const Napi::CallbackInfo& info) {
+  if (!data_ || data_->released.load()) {
+    throw Napi::Error::New(info.Env(), "ThreadSafeCallback has been released");
+  }
+  std::vector<PendingCallback> pending;
+  {
+    std::lock_guard<std::mutex> lock(data_->pending_mutex);
+    pending = data_->pending;
+  }
+  size_t count = 0;
+  const auto fn = data_->js_function_ref.Value();
+  for (const auto& call : pending) {
+    if (DispatchThreadSafeCallback(info.Env(), fn, data_.get(), call.get())) {
+      ++count;
+    }
+  }
+  return Napi::Number::New(info.Env(), static_cast<double>(count));
 }
 
 }  // namespace ctypes

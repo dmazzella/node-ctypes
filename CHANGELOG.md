@@ -7,8 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-10-30
+
 ### Added
 
+- **Native callback contexts**: opt into `suspend`, `resume` and `onError`
+  hooks through the fourth `threadSafeCallback()` argument. Foreign callers
+  detach their native state before waiting and restore it on the original
+  thread before consuming an opaque error supplied with `setNativeError()`.
+  Error payloads are isolated per invocation, including concurrent and nested
+  calls.
+- **Cooperative callback dispatch**: optional native `notify` hooks can wake
+  the consumer's host runtime; `drain()` processes a snapshot of pending calls
+  on the owning Node thread. Atomic claiming prevents duplicate execution
+  between drains and TSFN delivery, and late deliveries do not access completed
+  calls' native arguments. These primitives do not pump a blocked event loop
+  automatically.
 - **Electron + React example**: a real native system clock and process-ID check
   in `examples/cross-platform/electron-app`, with node-ctypes confined to the main process,
   typed sandboxed IPC and no renderer Node polyfill. Native `malloc`/clock/view/
@@ -16,6 +30,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   external buffers. Local dependency packaging keeps the addon outside ASAR;
   real macOS ARM64 development and standalone packaged-app checks passed without
   an Electron-specific addon rebuild.
+
+### Changed
+
+- **Explicit native hook functions**: accept ctypes native function objects,
+  low-level function handles and raw BigInt addresses. Resolve hook addresses
+  once and retain supplied function objects through release and queued delivery
+  cleanup. Plain JavaScript functions and known JavaScript-backed callback
+  wrappers are rejected; native hooks bypass JavaScript converters and
+  `errcheck`. Explicit library closure remains the consumer's responsibility.
+- **Callback lifecycle**: represent validated native contexts with C++20
+  `std::optional` and restore caller state through a noncopyable, nonmovable
+  RAII scope, including a saved state equal to `nullptr`. Reject explicit
+  release while a native-context invocation is active.
+- **Public types and documentation**: expose the native-context options,
+  error-transfer and drain methods, and native address metadata on library
+  attribute functions. Document ownership, thread constraints and dispatch
+  flows, with regressions for concurrency, reentry, GC and null-state
+  restoration. Existing ABI-string options and callbacks without native
+  contexts retain their behavior; the new hooks require a matching rebuilt
+  addon, not only updated JavaScript wrappers.
 
 ## [2.5.0] - 2026-10-26
 
@@ -984,7 +1018,8 @@ It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-
 
 Initial releases.
 
-[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.5.0...HEAD
+[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.6.0...HEAD
+[2.6.0]: https://github.com/dmazzella/node-ctypes/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/dmazzella/node-ctypes/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/dmazzella/node-ctypes/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/dmazzella/node-ctypes/compare/v2.2.0...v2.3.0

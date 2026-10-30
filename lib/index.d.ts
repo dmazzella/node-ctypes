@@ -464,6 +464,10 @@ export interface FunctionWrapper {
   /** Call the function. */
   (...args: any[]): any;
 
+  /** Resolve the native function address. */
+  readonly address: bigint;
+  readonly _as_parameter_: bigint;
+
   /** Call the function asynchronously on a worker thread. */
   callAsync(...args: any[]): Promise<any>;
 
@@ -636,6 +640,49 @@ export interface ThreadSafeCallbackWrapper extends CallbackWrapper {
    * callback exists. Calls from other threads are delivered while it runs.
    */
   unref(): this;
+  /**
+   * Transfer a nonzero opaque error pointer to nativeContext.onError on the
+   * original caller thread, after resume. Only during this callback; once per
+   * invocation. The callback must also return its ABI's error sentinel.
+   * Ownership transfers to onError, which must consume the pointer.
+   */
+  setNativeError(error: bigint): void;
+  /** Execute a snapshot of queued calls on the owning Node thread; return the number claimed. */
+  drain(): number;
+}
+
+/**
+ * A raw function address, ctypes callable or low-level native function handle.
+ * JavaScript-backed callbacks are not valid hooks. Object targets are retained
+ * by the native dispatcher until release and queued delivery cleanup.
+ * @category Callbacks
+ */
+export type NativeCallbackHook = bigint | (({ readonly _as_parameter_: bigint } | { readonly address: bigint }) & { readonly _callback?: never });
+
+/**
+ * Opt-in native runtime hooks. Addresses are resolved once at construction.
+ * Keep the callback and hook libraries alive until every invocation returns;
+ * retaining a function does not prevent explicit close()/release().
+ * Hooks use the default C ABI directly, bypassing JS argument conversion and
+ * errcheck. They must not throw or execute JavaScript and do not provide
+ * subinterpreter support.
+ * @category Callbacks
+ */
+export interface NativeCallbackContext {
+  /** `void *suspend(void)`: detach caller state before a foreign thread waits. */
+  suspend: NativeCallbackHook;
+  /** `void resume(void *)`: restore that state on the same thread, even on dispatch failure. */
+  resume: NativeCallbackHook;
+  /** `void onError(void *)`: consume setNativeError's pointer on the original thread. */
+  onError: NativeCallbackHook;
+  /** `void notify(void)`: after queueing on a foreign thread, while suspended; may wake the host, never run JS. */
+  notify?: NativeCallbackHook;
+}
+
+/** @category Callbacks */
+export interface ThreadSafeCallbackOptions {
+  abi?: FunctionOptions["abi"];
+  nativeContext?: NativeCallbackContext;
 }
 
 /**
@@ -677,6 +724,10 @@ export class ThreadSafeCallback extends Callback {
   ref(): this;
   /** Do not keep the Node.js event loop alive. */
   unref(): this;
+  /** See {@link ThreadSafeCallbackWrapper.setNativeError}. */
+  setNativeError(error: bigint): void;
+  /** See {@link ThreadSafeCallbackWrapper.drain}. */
+  drain(): number;
 }
 
 // =============================================================================
@@ -1593,7 +1644,12 @@ export function callback<TRet extends CallbackRestype, const TArgs extends reado
  *
  * @category Callbacks
  */
-export function threadSafeCallback<TRet extends CallbackRestype, const TArgs extends readonly FFIType[] = readonly []>(fn: (...args: CallbackArgs<TArgs>) => CallbackResult<TRet>, returnType: TRet, argTypes?: TArgs): ThreadSafeCallbackWrapper;
+export function threadSafeCallback<TRet extends CallbackRestype, const TArgs extends readonly FFIType[] = readonly []>(
+  fn: (...args: CallbackArgs<TArgs>) => CallbackResult<TRet>,
+  returnType: TRet,
+  argTypes?: TArgs,
+  options?: FunctionOptions["abi"] | ThreadSafeCallbackOptions,
+): ThreadSafeCallbackWrapper;
 
 /**
  * Create a function pointer type with cdecl calling convention.

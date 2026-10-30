@@ -40,6 +40,61 @@ FIXTURE_API void fixture_clear_global_pointer(void) {
 static int32_t fixture_increment(int32_t value) {
   return value + 1;
 }
+
+#ifdef _MSC_VER
+#define FIXTURE_THREAD_LOCAL __declspec(thread)
+#else
+#define FIXTURE_THREAD_LOCAL _Thread_local
+#endif
+
+static FIXTURE_THREAD_LOCAL intptr_t fixture_context;
+static FIXTURE_THREAD_LOCAL intptr_t fixture_native_error;
+static FIXTURE_THREAD_LOCAL int fixture_notifications;
+
+FIXTURE_API void fixture_notify_context(void) {
+  fixture_notifications += fixture_context == -1 ? 1 : -1000;
+}
+
+FIXTURE_API void* fixture_suspend_context(void) {
+  intptr_t state = fixture_context;
+  fixture_context = -1;
+  return (void*)state;
+}
+FIXTURE_API void fixture_resume_context(void* state) {
+  fixture_context = fixture_context == -1 ? (intptr_t)state : -2;
+}
+FIXTURE_API void fixture_set_native_error(void* error) {
+  fixture_native_error = (intptr_t)error;
+}
+FIXTURE_API intptr_t fixture_current_context(void) {
+  return fixture_context;
+}
+FIXTURE_API int32_t fixture_context_callback(int32_t (*callback)(int32_t), int32_t value) {
+  intptr_t previous_context = fixture_context;
+  intptr_t previous_error = fixture_native_error;
+  fixture_context = value;
+  fixture_native_error = 0;
+  int32_t result = callback(value);
+  if (fixture_context != value) {
+    result = -999;
+  } else if (fixture_native_error != 0) {
+    result = -(int32_t)fixture_native_error;
+  }
+  fixture_context = previous_context;
+  fixture_native_error = previous_error;
+  return result;
+}
+FIXTURE_API int32_t fixture_notified_context_callback(int32_t (*callback)(int32_t), int32_t value) {
+  int previous = fixture_notifications;
+  fixture_notifications = 0;
+  int32_t result = fixture_context_callback(callback, value);
+  if (fixture_notifications != 1) {
+    result = -998;
+  }
+  fixture_notifications = previous;
+  return result;
+}
+
 struct FixtureFunctionRecord {
   int32_t (*function)(int32_t);
 };

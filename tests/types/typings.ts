@@ -50,6 +50,7 @@ import {
   CType,
   callback,
   type ErrcheckCallback,
+  type FunctionWrapper,
   type PointerInstance,
   type PointerTypeDef,
   type SimpleCDataInstance,
@@ -135,6 +136,35 @@ const pointerCallback = callback(
 );
 pointerCallback.release();
 const pointerThreadCallback = threadSafeCallback((value) => (value === null ? 0 : value[0]), c_int32, [POINTER(c_int32)]);
+const contextCallback = threadSafeCallback((value) => value, c_int32, [c_int32], { abi: "cdecl", nativeContext: { suspend: 1n, resume: 2n, onError: 3n, notify: 4n } });
+const attributeHook: FunctionWrapper = libc.restore_context;
+check(expectType<bigint>()(attributeHook.address));
+check(expectType<bigint>()(attributeHook._as_parameter_));
+const functionContextCallback = threadSafeCallback(() => 0, c_int32, [], {
+  nativeContext: {
+    suspend: libc.func("save_context", c_void_p, []),
+    resume: attributeHook,
+    onError: new Library(null).func("install_error", CType.VOID, [CType.POINTER]),
+    notify: CFUNCTYPE(null)(1n),
+  },
+});
+functionContextCallback.release();
+// @ts-expect-error a plain JavaScript function is not a native hook.
+threadSafeCallback(() => 0, c_int32, [], { nativeContext: { suspend: () => 1n, resume: 2n, onError: 3n } });
+// @ts-expect-error callback wrappers execute JavaScript and are not native hooks.
+threadSafeCallback(() => 0, c_int32, [], { nativeContext: { suspend: pointerThreadCallback, resume: 2n, onError: 3n } });
+// @ts-expect-error callable callbacks also execute JavaScript.
+threadSafeCallback(() => 0, c_int32, [], { nativeContext: { suspend: CFUNCTYPE(c_void_p)(() => null), resume: 2n, onError: 3n } });
+// @ts-expect-error object targets must resolve to a BigInt address.
+threadSafeCallback(() => 0, c_int32, [], { nativeContext: { suspend: { address: 1 }, resume: 2n, onError: 3n } });
+check(expectType<number>()(contextCallback.drain()));
+contextCallback.setNativeError(4n);
+// @ts-expect-error native error payloads must be pointer BigInts.
+contextCallback.setNativeError(4);
+// @ts-expect-error every native runtime hook is required.
+threadSafeCallback(() => 0, c_int32, [], { nativeContext: { suspend: 1n, resume: 2n } });
+// @ts-expect-error invalid calling convention.
+threadSafeCallback(() => 0, c_int32, [], { abi: "invalid" });
 check(expectType<bigint>()(pointerThreadCallback._callback.getPointer()));
 pointerThreadCallback.release();
 const callbackFactory = CFUNCTYPE(c_int32, POINTER(c_int32));
