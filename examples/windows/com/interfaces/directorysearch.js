@@ -37,7 +37,9 @@ export const IDirectorySearch = COMInterface({
     // slot 9: GetNextColumnName(ADS_SEARCH_HANDLE, LPWSTR*)
     STDMETHOD(HRESULT, "GetNextColumnName", [HANDLE, LPVOID]),
     // slot 10: GetColumn(ADS_SEARCH_HANDLE, LPWSTR, PADS_SEARCH_COLUMN)
-    STDMETHOD(HRESULT, "GetColumn", [HANDLE, LPCWSTR, LPVOID]),
+    // The column name is the raw pointer returned by GetNextColumnName, so it
+    // is declared LPVOID: c_wchar_p rejects integer addresses, as in CPython.
+    STDMETHOD(HRESULT, "GetColumn", [HANDLE, LPVOID, LPVOID]),
     // slot 11: FreeColumn(PADS_SEARCH_COLUMN)
     STDMETHOD(HRESULT, "FreeColumn", [LPVOID]),
     // slot 12: CloseSearchHandle(ADS_SEARCH_HANDLE)
