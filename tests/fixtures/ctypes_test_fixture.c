@@ -279,6 +279,20 @@ FIXTURE_API uint32_t fixture_variadic_wchar(int32_t unused, ...) {
   return (uint32_t)first;
 }
 
+/* Variadic callee that Python code commonly declares with fixed argtypes
+   (argtypes = [c_int, c_double, ...]). libffi still sets up the variadic ABI
+   on x86-64: floats mirrored into integer registers on Win64, AL on SysV. */
+FIXTURE_API double fixture_variadic_double_sum(int32_t count, ...) {
+  va_list arguments;
+  va_start(arguments, count);
+  double total = 0.0;
+  for (int32_t i = 0; i < count; i++) {
+    total += va_arg(arguments, double);
+  }
+  va_end(arguments);
+  return total;
+}
+
 struct FixturePointerValue {
   const void* value;
 };

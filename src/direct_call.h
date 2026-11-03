@@ -8,6 +8,12 @@ namespace ctypes::direct {
 namespace {
 
 inline constexpr size_t kMaxDirectArgs = 4;
+// x86-64: una funzione variadica dichiarata con argtypes fissi (pattern Python
+// ctypes) funziona con libffi, che su Win64 copia i float anche nei registri
+// interi e su SysV imposta AL al numero di registri vettoriali. Una chiamata
+// C++ con prototipo fisso non fa né l'uno né l'altro, e la callee legge con
+// va_arg valori spazzatura. Gli interi viaggiano negli stessi registri in
+// entrambi i casi, quindi restano ammessi.
 #if defined(__x86_64__) || defined(_M_X64)
 inline constexpr bool kFloatArgsAllowed = false;
 #else

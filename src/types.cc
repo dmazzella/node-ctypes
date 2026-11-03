@@ -3,6 +3,8 @@
 #include <cerrno>
 #include <cstdlib>
 
+#include "napi_fast.h"
+
 namespace ctypes {
 CType CTypeFromJS(const Napi::Value& value) {
   if (!value.IsNumber()) {
@@ -24,18 +26,20 @@ namespace {
 
 // Bit di un valore intero: BigInt troncato, number intero mascherato o boolean.
 uint64_t IntegerBits(const Napi::Value& value) {
-  if (value.IsBigInt()) {
-    bool lossless;
-    return value.As<Napi::BigInt>().Uint64Value(&lossless);
-  }
-  if (value.IsBoolean()) {
-    return value.As<Napi::Boolean>().Value() ? 1 : 0;
-  }
-  if (!value.IsNumber()) {
+  // Un number (il caso comune, es. il risultato di un callback) con una sola
+  // chiamata a V8; i tipi sono disgiunti, quindi l'ordine non cambia il risultato.
+  double d;
+  if (!napi_fast::TryDouble(value, d)) {
+    if (value.IsBigInt()) {
+      bool lossless;
+      return value.As<Napi::BigInt>().Uint64Value(&lossless);
+    }
+    if (value.IsBoolean()) {
+      return value.As<Napi::Boolean>().Value() ? 1 : 0;
+    }
     throw Napi::TypeError::New(value.Env(),
                                std::format("'{}' object cannot be interpreted as an integer", JSTypeName(value)));
   }
-  const double d = value.As<Napi::Number>().DoubleValue();
   if (d >= -9223372036854775808.0 && d < 9223372036854775808.0) {
     if (const auto v = static_cast<int64_t>(d); static_cast<double>(v) == d) {
       return static_cast<uint64_t>(v);
@@ -463,10 +467,10 @@ Napi::Value CToJS(Napi::Env env, const void* buffer, CType type) {
       return Napi::Number::New(env, LoadAs<uint16_t>(buffer));
 
     case CType::CTYPES_INT32:
-      return Napi::Number::New(env, LoadAs<int32_t>(buffer));
+      return napi_fast::Int32(env, LoadAs<int32_t>(buffer));
 
     case CType::CTYPES_UINT32:
-      return Napi::Number::New(env, LoadAs<uint32_t>(buffer));
+      return napi_fast::Uint32(env, LoadAs<uint32_t>(buffer));
 
     case CType::CTYPES_INT64:
       return Napi::BigInt::New(env, LoadAs<int64_t>(buffer));

@@ -143,16 +143,8 @@ describe("Node-specific parameter adapters", function () {
       const attribute = lib.fixture_exact_u64_four;
       attribute.argtypes = [Word, Word, Word, Word];
       attribute.restype = c.c_uint64;
-      const callers = [
-        attribute,
-        lib.func("fixture_exact_u64_four", c.c_uint64, [Word, Word, Word, Word]),
-        c.CFUNCTYPE(c.c_uint64, Word, Word, Word, Word)(["fixture_exact_u64_four", lib]),
-      ];
-      const check = (error) =>
-        error instanceof c.ArgumentError &&
-        error !== sentinel &&
-        error.cause === sentinel &&
-        error.message === `argument ${failure + 1}: ArgumentError: adapter sentinel`;
+      const callers = [attribute, lib.func("fixture_exact_u64_four", c.c_uint64, [Word, Word, Word, Word]), c.CFUNCTYPE(c.c_uint64, Word, Word, Word, Word)(["fixture_exact_u64_four", lib])];
+      const check = (error) => error instanceof c.ArgumentError && error !== sentinel && error.cause === sentinel && error.message === `argument ${failure + 1}: ArgumentError: adapter sentinel`;
       for (const fn of callers) {
         assert.throws(() => fn(0, 1, 2, 3), check);
         await assert.rejects(async () => fn.callAsync(0, 1, 2, 3), check);
@@ -257,6 +249,32 @@ describe("Node-specific parameter adapters", function () {
         await new Promise((resolve) => setImmediate(resolve));
       }
       assert.equal(weak.deref(), undefined);
+    } finally {
+      callback.release();
+    }
+  });
+
+  // CPython passes a function pointer's own address and ignores an
+  // _as_parameter_ added by a subclass or instance attribute.
+  it("callback wrappers pass their own pointer despite an overridden _as_parameter_", async function () {
+    const prototype = c.CFUNCTYPE(c.c_int32);
+    const callback = c.callback(() => 0, c.c_int32, []);
+    const instance = prototype(() => 0);
+    try {
+      const callers = [lib.func("fixture_address", c.c_size_t, [c.c_void_p]), lib.func("fixture_address", c.c_size_t, [prototype])];
+      for (const [target, expected] of [
+        [callback, callback.pointer],
+        [instance, instance._as_parameter_],
+      ]) {
+        const derived = Object.create(target, { _as_parameter_: { value: 0x1234n } });
+        const proxied = new Proxy(target, { get: (object, key) => (key === "_as_parameter_" ? 0x5678n : Reflect.get(object, key)) });
+        for (const fn of callers) {
+          for (const value of [target, derived, proxied]) {
+            assert.equal(fn(value), expected);
+            assert.equal(await fn.callAsync(value), expected);
+          }
+        }
+      }
     } finally {
       callback.release();
     }

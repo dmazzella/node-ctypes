@@ -59,12 +59,12 @@ inline constexpr size_t kMaxUtf8CharBytes = 4;
 // all'avvio dell'addon (Electron può includere un Node più vecchio).
 inline std::atomic<bool> buffer_info_checks_type{true};
 
-[[nodiscard]] inline void* TryViewData(const Napi::Value& value) {
+[[nodiscard]] inline void* TryViewData(const Napi::Value& value, size_t* length = nullptr) {
   if (!buffer_info_checks_type.load(std::memory_order_relaxed) && !value.IsBuffer()) [[unlikely]] {
     return nullptr;
   }
   void* data = nullptr;
-  if (napi_get_buffer_info(value.Env(), value, &data, nullptr) != napi_ok) {
+  if (napi_get_buffer_info(value.Env(), value, &data, length) != napi_ok) {
     return nullptr;
   }
   return data;
@@ -115,6 +115,31 @@ inline std::atomic<bool> buffer_info_checks_type{true};
   const napi_status status = napi_create_uint32(env, value, &result);
   NAPI_THROW_IF_FAILED(env, status, Napi::Value());
   return Napi::Value(env, result);
+}
+
+// Funzione JS con una napi_callback grezza. Napi::Function::New<cb> passa da
+// details::TemplatedCallback, che costruisce un Napi::CallbackInfo (legge
+// anche `this`) dentro il wrapper delle eccezioni: ~13 ns su una chiamata
+// FFI semplice da ~40 ns. La callback deve gestire da sé le eccezioni C++.
+[[nodiscard]] inline Napi::Function NewFunction(Napi::Env env, const char* name, napi_callback cb, void* data) {
+  napi_value result;
+  const napi_status status = napi_create_function(env, name, NAPI_AUTO_LENGTH, cb, data, &result);
+  NAPI_THROW_IF_FAILED(env, status, Napi::Function());
+  return Napi::Function(env, result);
+}
+
+// Argomenti (fino a argv.size()) e data della callback con una sola
+// napi_get_cb_info, senza `this`. `argc` è il numero reale di argomenti, che
+// può superare argv.size(): in quel caso argv contiene solo i primi.
+[[nodiscard]] inline bool GetArguments(napi_env env,
+                                       napi_callback_info info,
+                                       std::span<napi_value> argv,
+                                       size_t& argc,
+                                       void*& data) {
+  argc = argv.size();
+  const napi_status status = napi_get_cb_info(env, info, &argc, argv.data(), nullptr, &data);
+  NAPI_THROW_IF_FAILED(env, status, false);
+  return true;
 }
 
 }  // namespace ctypes::napi_fast

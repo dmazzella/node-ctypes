@@ -108,6 +108,22 @@ struct FunctionArguments {
   bool HasResultHandler() const noexcept { return first != 0; }
 };
 
+// Argomenti letti da napi_fast::GetArguments (vedi FFIFunction::FastCall):
+// index < Length() e la memoria di argv vive per tutta la chiamata.
+struct RawArguments {
+  const Napi::Env env;
+  const napi_value* argv;
+  const size_t argc;
+
+  Napi::Env Env() const { return env; }
+  size_t Length() const { return argc; }
+  Napi::Value operator[](size_t index) const { return Napi::Value(env, argv[index]); }
+};
+
+template <typename T>
+concept ArgumentList =
+  std::same_as<T, Napi::CallbackInfo> || std::same_as<T, FunctionArguments> || std::same_as<T, RawArguments>;
+
 #if defined(_MSC_VER)
 // The inline return/string buffers require alignas(16); class padding is intentional.
 #pragma warning(push)
@@ -174,6 +190,7 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
 
   // Static helpers shared between sync Call() and async CallWorker
   [[nodiscard]] static CType InferTypeFromJS(const Napi::Value& val);
+  [[nodiscard]] static CType VariadicNumberType(double d);
   // Tipo e valore di un argomento oltre gli argtypes.
   [[nodiscard]] static VariadicValue InferVariadic(const Napi::Value& val);
   [[nodiscard]] static Napi::Value ConvertReturn(Napi::Env env,
@@ -208,7 +225,8 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
 
   // Entry point of the per-instance `call` function: the FFIFunction* is the
   // function's N-API data, so the hot path skips the napi_unwrap of InstanceMethod.
-  static Napi::Value FastCall(const Napi::CallbackInfo& info);
+  static napi_value FastCall(napi_env env, napi_callback_info info);
+  Napi::Value CallFromInfo(const Napi::CallbackInfo& info);
   static Napi::Value FastCheckedCall(const Napi::CallbackInfo& info);
   void InstallFastCall(Napi::Env env);
   void SetupDirectCall();
@@ -220,8 +238,7 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
   bool simple_call_ = false;
   // Percorso veloce delle firme semplici; false (senza effetti) se un
   // argomento richiede Call(): stringa lunga o chiamata rientrante.
-  template <typename Args, bool HasErrcheck = true>
-    requires(std::same_as<Args, Napi::CallbackInfo> || std::same_as<Args, FunctionArguments>)
+  template <ArgumentList Args, bool HasErrcheck = true>
   [[nodiscard]] bool SimpleCall(const Args& info, Napi::Value& result, const Napi::Function* errcheck);
   template <typename Args, bool HasErrcheck = true>
     requires(std::same_as<Args, Napi::CallbackInfo> || std::same_as<Args, FunctionArguments>)

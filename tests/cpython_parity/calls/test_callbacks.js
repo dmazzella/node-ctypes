@@ -56,4 +56,27 @@ describe("TestCallbacks", function () {
     assert.equal(callback(null, null), 0);
     assert.ok(c.cast(callback, c.c_void_p).value);
   });
+
+  it("test_callback_ignores_instance_call_attribute", function () {
+    // The handler is invoked directly, like CPython's tp_call: own call/apply are ignored.
+    const add = (first, second) => first + second;
+    add.call = () => 99;
+    add.apply = () => 99;
+    const callback = c.CFUNCTYPE(c.c_int, c.c_int, c.c_int)(add);
+    assert.equal(callback(3, 4), 7);
+  });
+
+  it("test_function_pointer_ignores_as_parameter_attribute", function () {
+    const callback = c.CFUNCTYPE(c.c_int, c.c_int, c.c_int)((first, second) => first + second);
+    const address = c.cast(callback, c.c_void_p).value;
+    // _as_parameter_ is a read-only getter on the instance, so the override
+    // lives on an object derived from it.
+    const overridden = Object.create(callback, { _as_parameter_: { value: 0x1234n } });
+    // memmove(dst, src, 0) copies nothing and returns dst.
+    const memmove = libc.memmove;
+    memmove.argtypes = [c.c_void_p, c.c_void_p, c.c_size_t];
+    memmove.restype = c.c_void_p;
+    assert.equal(memmove(overridden, null, 0), address);
+    assert.equal(callback(3, 4), 7);
+  });
 });

@@ -58,3 +58,23 @@ class TestCallbacks(unittest.TestCase):
         self.assertTrue(callable(callback))
         self.assertEqual(callback(None, None), 0)
         self.assertTrue(c.cast(callback, c.c_void_p).value)
+
+    def test_callback_ignores_instance_call_attribute(self):
+        # The callable is invoked through its type (tp_call), not an attribute.
+        def add(first, second):
+            return first + second
+
+        add.__call__ = lambda *args: 99
+        callback = c.CFUNCTYPE(c.c_int, c.c_int, c.c_int)(add)
+        self.assertEqual(callback(3, 4), 7)
+
+    def test_function_pointer_ignores_as_parameter_attribute(self):
+        callback = c.CFUNCTYPE(c.c_int, c.c_int, c.c_int)(lambda first, second: first + second)
+        address = c.cast(callback, c.c_void_p).value
+        callback._as_parameter_ = 0x1234
+        # memmove(dst, src, 0) copies nothing and returns dst.
+        memmove = self.libc.memmove
+        memmove.argtypes = [c.c_void_p, c.c_void_p, c.c_size_t]
+        memmove.restype = c.c_void_p
+        self.assertEqual(memmove(callback, None, 0), address)
+        self.assertEqual(callback(3, 4), 7)

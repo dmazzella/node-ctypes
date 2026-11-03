@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-11-03
+
+### Changed
+
+- **Callback dispatch**: `callback()` and `threadSafeCallback()` invoke the
+  JavaScript handler directly, like CPython's `tp_call`. Own `call` or `apply`
+  properties on the handler are no longer consulted. The receiver stays
+  `undefined` and the handler gets exactly the declared arguments.
+- **Callback wrappers as arguments**: a `callback()` / `threadSafeCallback()`
+  wrapper passes its own code pointer even through an object derived with
+  `Object.create()` or a Proxy that redefines `_as_parameter_`. This matches
+  CPython and `CFUNCTYPE` instances.
+
+### Performance
+
+- **Native entry point**: `FFIFunction` calls use a raw Node-API callback that
+  reads up to eight arguments with one `napi_get_cb_info` and tries the simple
+  call path before building a `Napi::CallbackInfo`.
+- **Structures by value**: plain-object arguments of scalar-only `struct()`
+  definitions are written by precompiled field writers into an off-heap
+  transient buffer. Structures up to 16 bytes use the simple call path. Scalar-only
+  results are read in place without a copy, unless `toObject` is overridden.
+  Measured `{x,y}` argument: about 1.3x Koffi, down from 4.3x. Return: about 0.9x,
+  down from 1.3x.
+- **Argument owners**: synchronous calls keep conversion owners on a LIFO stack
+  instead of a `Set`. Calls with one to three owner-bearing arguments skip
+  intermediate arrays.
+- **Callbacks**: wrappers are resolved through an internal brand. Handlers with
+  up to three arguments are called without a rest array. Numeric results are
+  converted with a single V8 read.
+- **Variadic numbers**: classified and written to the argument slot with a
+  single read.
+
 ## [2.6.0] - 2026-10-30
 
 ### Added
@@ -1018,7 +1051,8 @@ It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-
 
 Initial releases.
 
-[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.6.0...HEAD
+[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.7.0...HEAD
+[2.7.0]: https://github.com/dmazzella/node-ctypes/compare/v2.6.0...v2.7.0
 [2.6.0]: https://github.com/dmazzella/node-ctypes/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/dmazzella/node-ctypes/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/dmazzella/node-ctypes/compare/v2.3.0...v2.4.0

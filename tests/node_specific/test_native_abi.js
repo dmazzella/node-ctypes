@@ -89,30 +89,32 @@ describe("native ABI across Node callback and async modes", { skip: !existsSync(
   }
 
   for (const mode of ["ordinary", "thread-safe", "worker"]) {
-    it(`${mode} callbacks preserve arity, receiver and C-data result conversion`, async function () {
-      for (const values of [[], [3], [3, 4], [3, 4, 5], [1, 2, 3, 4, 5, 6, 7, 8, 9]]) {
-        const types = values.map(() => c.c_int32);
-        const make = mode === "ordinary" ? c.callback : c.threadSafeCallback;
-        const handler = function (...args) {
-          assert.equal(this, undefined);
-          assert.deepEqual(args, values);
-          return new c.c_int32(args.reduce((sum, value) => sum + value, 0));
-        };
-        handler.call = () => 99;
-        handler.apply = function (receiver, args) {
-          assert.equal(this, handler);
-          assert.ok(Array.isArray(args));
-          return Reflect.apply(handler, receiver, args);
-        };
-        const callback = make(handler, c.c_int32, types);
-        const fn = c.CFUNCTYPE(c.c_int32, ...types)(callback.pointer);
-        try {
-          assert.equal(
-            mode === "worker" ? await fn.callAsync(...values) : fn(...values),
-            values.reduce((sum, value) => sum + value, 0),
-          );
-        } finally {
-          callback.release();
+    // CPython calls the handler through its type (tp_call): an instance-level
+    // __call__ is ignored, so own call/apply properties must be ignored too.
+    it(`${mode} callbacks invoke the handler directly with exact arity, undefined receiver and C-data result conversion`, async function () {
+      class Subclassed extends c.c_int32 {}
+      for (const type of [c.c_int32, Subclassed]) {
+        for (const values of [[], [3], [3, 4], [3, 4, 5], [1, 2, 3, 4, 5, 6, 7, 8, 9]]) {
+          const types = values.map(() => type);
+          const make = mode === "ordinary" ? c.callback : c.threadSafeCallback;
+          const handler = function (...args) {
+            assert.equal(this, undefined);
+            const received = type === c.c_int32 ? args : args.map((arg) => (assert.ok(arg instanceof Subclassed), arg.value));
+            assert.deepEqual(received, values);
+            return new c.c_int32(received.reduce((sum, value) => sum + value, 0));
+          };
+          handler.call = () => 99;
+          handler.apply = () => 99;
+          const callback = make(handler, c.c_int32, types);
+          const fn = c.CFUNCTYPE(c.c_int32, ...types)(callback.pointer);
+          try {
+            assert.equal(
+              mode === "worker" ? await fn.callAsync(...values) : fn(...values),
+              values.reduce((sum, value) => sum + value, 0),
+            );
+          } finally {
+            callback.release();
+          }
         }
       }
     });

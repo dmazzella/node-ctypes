@@ -436,13 +436,44 @@ CTYPES_ALWAYS_INLINE Napi::Value FFIFunction::InvokeCall(const Args& args, const
   return CallArguments(FunctionArguments{args}, errcheck);
 }
 
-Napi::Value FFIFunction::FastCall(const Napi::CallbackInfo& info) {
-  FFIFunction* self = static_cast<FFIFunction*>(info.Data());
-  if (self->errcheck_callback_.IsEmpty()) [[likely]] {
-    return self->InvokeCall<Napi::CallbackInfo, false>(info, nullptr);
+// Firme semplici senza errcheck: argomenti letti con una sola napi_get_cb_info
+// e SimpleCall diretta. Il resto (più argomenti, errcheck, stringhe lunghe,
+// rientranza) passa a CallFromInfo, che rilegge gli argomenti. Fuori da
+// node-addon-api, quindi le eccezioni C++ si convertono qui come in
+// details::WrapCallback (NODE_ADDON_API_CPP_EXCEPTIONS_ALL).
+napi_value FFIFunction::FastCall(napi_env env, napi_callback_info info) {
+  try {
+    std::array<napi_value, kMaxSimpleArgs> argv;
+    size_t argc = 0;
+    void* data = nullptr;
+    if (!napi_fast::GetArguments(env, info, argv, argc, data)) [[unlikely]] {
+      return nullptr;
+    }
+    FFIFunction* self = static_cast<FFIFunction*>(data);
+    if (self->simple_call_ && argc <= argv.size() && argc >= self->arg_types_.size() &&
+        self->errcheck_callback_.IsEmpty()) [[likely]] {
+      if (Napi::Value result; self->SimpleCall<RawArguments, false>(RawArguments{Napi::Env(env), argv.data(), argc},
+                                                                    result, nullptr)) [[likely]] {
+        return result;
+      }
+    }
+    return self->CallFromInfo(Napi::CallbackInfo(env, info));
+  } catch (const Napi::Error& e) {
+    e.ThrowAsJavaScriptException();
+  } catch (const std::exception& e) {
+    Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
+  } catch (...) {
+    Napi::Error::New(env, "A native exception was thrown").ThrowAsJavaScriptException();
   }
-  const Napi::Function errcheck = self->SnapshotErrcheck();
-  return self->InvokeCall(info, errcheck.IsEmpty() ? nullptr : &errcheck);
+  return nullptr;
+}
+
+Napi::Value FFIFunction::CallFromInfo(const Napi::CallbackInfo& info) {
+  if (errcheck_callback_.IsEmpty()) [[likely]] {
+    return InvokeCall<Napi::CallbackInfo, false>(info, nullptr);
+  }
+  const Napi::Function errcheck = SnapshotErrcheck();
+  return InvokeCall(info, errcheck.IsEmpty() ? nullptr : &errcheck);
 }
 
 Napi::Value FFIFunction::CallChecked(const Napi::CallbackInfo& info) {
@@ -479,7 +510,7 @@ Napi::Value FFIFunction::MakeCheckedCall(const Napi::CallbackInfo& info) {
 // object, so the native instance outlives any detached reference to `call`.
 void FFIFunction::InstallFastCall(Napi::Env env) {
   Napi::Object self = Value();
-  Napi::Function fast_call = Napi::Function::New<&FFIFunction::FastCall>(env, "call", this);
+  Napi::Function fast_call = napi_fast::NewFunction(env, "call", &FFIFunction::FastCall, this);
   fast_call.DefineProperty(Napi::PropertyDescriptor::Value("_ffiFunction", self, napi_default));
   self.DefineProperty(Napi::PropertyDescriptor::Value(
     "call", fast_call, static_cast<napi_property_attributes>(napi_writable | napi_configurable)));
@@ -555,8 +586,13 @@ bool FFIFunction::PrepareFFI(Napi::Env env) {
     return_type_ == CType::CTYPES_STRUCT
       ? struct_result_data_ != nullptr && return_struct_info_->GetSize() <= kMaxSimpleStructReturn
       : return_type_ != CType::CTYPES_ARRAY && return_type_ != CType::CTYPES_UNION;
-  simple_call_ =
-    arg_types_.size() <= kMaxSimpleArgs && simple_return && std::ranges::all_of(arg_types_, IsSimpleArgumentType);
+  simple_call_ = arg_types_.size() <= kMaxSimpleArgs && simple_return;
+  for (size_t i = 0; simple_call_ && i < arg_types_.size(); i++) {
+    // Una struct per valore è semplice se i suoi byte stanno in uno slot.
+    simple_call_ =
+      IsSimpleArgumentType(arg_types_[i]) || (arg_types_[i] == CType::CTYPES_STRUCT && i < arg_struct_infos_.size() &&
+                                              arg_struct_infos_[i] && arg_struct_infos_[i]->GetSize() <= ARG_SLOT_SIZE);
+  }
 
   return true;
 }
@@ -624,12 +660,30 @@ std::optional<VariadicValue> SimpleCDataArgument(const Napi::Value& val) {
 }  // namespace
 
 VariadicValue FFIFunction::InferVariadic(const Napi::Value& val) {
+  // Un number (il caso comune) con una sola chiamata a V8, senza napi_typeof.
+  if (double number; napi_fast::TryDouble(val, number)) {
+    return {VariadicNumberType(number), val};
+  }
   if (val.IsObject() && !val.IsBuffer()) {
     if (std::optional<VariadicValue> instance = SimpleCDataArgument(val)) {
       return *instance;
     }
   }
   return {InferTypeFromJS(val), val};
+}
+
+// Tipo C di un number variadico: intero in int32 → INT32 (il caso comune di
+// sprintf("%d", …)), intero esatto oltre int32 (entro 2^53) → INT64, così che
+// per esempio 5_000_000_000 con %lld non arrivi come double; il resto DOUBLE.
+// Il range è verificato prima di qualunque cast (NaN o fuori range è UB).
+CType FFIFunction::VariadicNumberType(double d) {
+  if (d >= -2147483648.0 && d <= 2147483647.0 && d == std::trunc(d)) {
+    return CType::CTYPES_INT32;
+  }
+  if (d == std::trunc(d) && std::isfinite(d) && d >= -9007199254740992.0 && d <= 9007199254740992.0) {
+    return CType::CTYPES_INT64;
+  }
+  return CType::CTYPES_DOUBLE;
 }
 
 // ============================================================================
@@ -641,23 +695,8 @@ CType FFIFunction::InferTypeFromJS(const Napi::Value& val) {
   switch (val.Type()) {
     case napi_string:
       return CType::CTYPES_STRING;
-    case napi_number: {
-      const double d = val.As<Napi::Number>().DoubleValue();
-      // Integer fits in int32 → INT32 (the common sprintf("%d", …) case).
-      // Range checked before the cast (NaN or out of range is UB).
-      if (d >= -2147483648.0 && d <= 2147483647.0 && d == std::trunc(d)) {
-        return CType::CTYPES_INT32;
-      }
-      // Integer that overflows int32 but is still an exact integer (within
-      // JS's 2^53 safe range) → INT64. Without this, values such as
-      // 5_000_000_000 used with %lld would be silently passed as doubles and
-      // observed as garbage on the C side. We intentionally keep non-integer
-      // numbers as DOUBLE.
-      if (d == std::trunc(d) && std::isfinite(d) && d >= -9007199254740992.0 && d <= 9007199254740992.0) {
-        return CType::CTYPES_INT64;
-      }
-      return CType::CTYPES_DOUBLE;
-    }
+    case napi_number:
+      return VariadicNumberType(val.As<Napi::Number>().DoubleValue());
     case napi_bigint:
       return CType::CTYPES_INT64;
     case napi_object:
@@ -1407,8 +1446,7 @@ VariadicCifCache* FFIFunction::AcquireVariadicCif(Napi::Env env,
 // CallContext, scratch e cache variadica. Le stringhe corte vanno nel buffer
 // inline dell'istanza, come in Call(); una stringa che non ci sta e le chiamate
 // rientranti passano a Call() prima di qualunque effetto.
-template <typename Args, bool HasErrcheck>
-  requires(std::same_as<Args, Napi::CallbackInfo> || std::same_as<Args, FunctionArguments>)
+template <ArgumentList Args, bool HasErrcheck>
 bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::Function* errcheck) {
   // Chiamata rientrante: il buffer inline delle stringhe è della chiamata esterna.
   if (call_depth_ != 0) [[unlikely]] {
@@ -1436,6 +1474,22 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
     if (i < expected_argc) [[likely]] {
       type = arg_types_[i];
     } else {
+      // Number variadico: tipo e valore da una sola lettura (il tipo dedotto
+      // è esatto per il valore, quindi il cast non perde nulla).
+      if (double number; napi_fast::TryDouble(val, number)) [[likely]] {
+        type = VariadicNumberType(number);
+        extra_types[i - expected_argc] = type;
+        if (type == CType::CTYPES_INT32) {
+          const int32_t v = static_cast<int32_t>(number);
+          memcpy(slot, &v, sizeof(v));
+        } else if (type == CType::CTYPES_INT64) {
+          const int64_t v = static_cast<int64_t>(number);
+          memcpy(slot, &v, sizeof(v));
+        } else {
+          memcpy(slot, &number, sizeof(number));
+        }
+        continue;
+      }
       const VariadicValue extra = InferVariadic(val);
       type = extra.type;
       val = extra.value;
@@ -1446,6 +1500,18 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
     }
     try {
       if (MarshalPrimitive(val, type, slot)) [[likely]] {
+        continue;
+      }
+      // Struct per valore che sta in uno slot: solo i byte di una vista di
+      // memoria (il Buffer prodotto dal JS); il resto passa a Call().
+      if (type == CType::CTYPES_STRUCT) {
+        const size_t struct_size = arg_struct_infos_[i]->GetSize();
+        size_t length = 0;
+        const void* data = napi_fast::TryViewData(val, &length);
+        if (data == nullptr || length < struct_size) {
+          return false;
+        }
+        memcpy(slot, data, struct_size);
         continue;
       }
       // Puntatori e stringhe con il minimo di chiamate a V8 (napi_typeof è

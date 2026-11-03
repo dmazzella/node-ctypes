@@ -99,6 +99,29 @@ describe("CDLL.func conversion entry-point regressions", function () {
     });
   });
 
+  // Scalar signatures may skip libffi, but on x64 a variadic callee declared with
+  // fixed argtypes still needs the variadic register setup for its double arguments
+  // (Win64 mirrors them in GPRs, SysV sets AL). Elsewhere this declaration is not
+  // ABI-compatible: Apple ARM64 reads variadic arguments from the stack and Windows
+  // ARM64 from integer registers, so CPython ctypes fails there as well.
+  describe("variadic callee declared with fixed double argtypes", { skip: (!fixtureAvailable && "native fixture not built") || (process.arch !== "x64" && "fixed argtypes match the variadic ABI only on x64") }, function () {
+    it("CDLL.func with one to three doubles", function () {
+      const sum1 = fixture.func("fixture_variadic_double_sum", ctypes.c_double, [ctypes.c_int32, ctypes.c_double]);
+      assert.strictEqual(sum1(1, 2.5), 2.5);
+      const sum2 = fixture.func("fixture_variadic_double_sum", ctypes.c_double, [ctypes.c_int32, ctypes.c_double, ctypes.c_double]);
+      assert.strictEqual(sum2(2, 1.5, 2.5), 4);
+      const sum3 = fixture.func("fixture_variadic_double_sum", ctypes.c_double, [ctypes.c_int32, ctypes.c_double, ctypes.c_double, ctypes.c_double]);
+      assert.strictEqual(sum3(3, 0.25, -1.5, 8), 6.75);
+    });
+
+    it("attribute call with argtypes and restype", function () {
+      const sum = fixture.fixture_variadic_double_sum;
+      sum.argtypes = [ctypes.c_int32, ctypes.c_double, ctypes.c_double];
+      sum.restype = ctypes.c_double;
+      for (let i = 0; i < 3; i++) assert.strictEqual(sum(2, 1.25, i), 1.25 + i);
+    });
+  });
+
   describe("strings that overflow the inline buffer", function () {
     it("single long string", function () {
       const strlen = libc.func("strlen", ctypes.c_size_t, [ctypes.c_char_p]);
