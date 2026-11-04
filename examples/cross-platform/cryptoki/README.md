@@ -1,3 +1,7 @@
+---
+title: "Cryptoki (PKCS #11)"
+---
+
 # Cryptoki / PKCS #11 2.20-3.2
 
 A Python-ctypes-shaped **consumer binding**, not a cryptographic provider.
@@ -16,7 +20,7 @@ a demo, documentation and the supplied native libraries:
   library loading, interface discovery and calls.
 - [demo_softhsm2.js](./demo_softhsm2.js): standalone SoftHSM setup, explicit PKCS #11 calls, cryptographic operations and cleanup.
 - [softhsm2.conf](./softhsm2/config/softhsm2.conf): ready-to-use SoftHSM configuration shared by the supplied builds.
-- [softhsm2/](./softhsm2/): supplied SoftHSM builds and their build/license notes.
+- `softhsm2/`: supplied SoftHSM builds and their build/license notes.
 
 The declarations are adapted from the
 [OASIS PKCS #11 3.2 Standard headers](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.2/os/include/pkcs11-v3.2/).

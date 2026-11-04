@@ -631,6 +631,12 @@ As in Python, `from_param` receives the argument as passed (also with
 `CFUNCTYPE` prototypes), its result is converted as the declared type, and
 an error it throws becomes `ArgumentError` (`"argument 1: RangeError: ..."`).
 
+Non-pointer scalar CData arguments are read from their backing bytes, not an
+overridden public `.value` getter. Each value is snapshotted before converting
+the next argument, even without `argtypes`. A scalar `from_param` converter may
+return a CData instance of another class when its native scalar kind matches
+the declared type.
+
 Objects passed through argument adapters and the objects produced by their
 conversions stay alive while later arguments are converted and until the
 result and `errcheck` have been processed. With `callAsync()`, those temporary

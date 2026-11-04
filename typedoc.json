@@ -6,17 +6,7 @@
   "readme": "README.md",
   "includeVersion": true,
   "categorizeByGroup": true,
-  "categoryOrder": [
-    "Library Loading",
-    "Structures",
-    "Callbacks",
-    "Pointers",
-    "Memory",
-    "Types",
-    "Error Handling",
-    "Constants",
-    "*"
-  ],
+  "categoryOrder": ["Library Loading", "Structures", "Callbacks", "Pointers", "Memory", "Types", "Error Handling", "Constants", "*"],
   "sort": ["source-order"],
   "projectDocuments": ["examples/README.md"],
   "navigationLinks": {
@@ -26,5 +16,5 @@
   "exclude": ["**/node_modules/**", "**/tests/**"],
   "excludePrivate": true,
   "excludeInternal": true,
-  "highlightLanguages": ["javascript", "typescript", "python", "bash", "json"]
+  "highlightLanguages": ["javascript", "typescript", "python", "bash", "powershell", "json"]
 }

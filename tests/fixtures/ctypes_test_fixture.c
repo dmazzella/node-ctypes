@@ -230,6 +230,12 @@ FIXTURE_API uint64_t fixture_exact_u64_four(uint64_t a, uint64_t b, uint64_t c, 
   return a ^ b ^ c ^ d;
 }
 
+FIXTURE_API uint64_t fixture_u64_pair_callback(uint64_t (*callback)(uint64_t, uint64_t),
+                                               uint64_t first,
+                                               uint64_t second) {
+  return callback(first, second);
+}
+
 FIXTURE_API int32_t fixture_exact_fallback(int16_t a, int32_t b, uint64_t c) {
   return a + b + (int32_t)c;
 }

@@ -1,3 +1,7 @@
+---
+title: Electron + React
+---
+
 # node-ctypes + Electron + React
 
 A real native system-clock example, not a browser mock.

@@ -129,6 +129,15 @@ that rejected conversions leave native output unchanged. Exceptions raised by
 [Node-specific adapter tests](./node_specific/test_as_parameter.js) additionally
 check the original exception's `cause` through sync and async callers.
 
+The [scalar-marshalling pairs](./cpython_parity/calls/test_scalar_marshalling.py)
+check that non-pointer scalar arguments read backing storage, not overridden
+`.value` getters, and snapshot each value before the next converter runs,
+including calls without `argtypes`. They also cover a subclass `from_param`
+returning a base CData with the same native scalar kind.
+[Node-specific storage tests](./node_specific/test_scalar_marshalling.js)
+cover storage getter failures, buffer aliases, native errcheck and callback
+reentry, async calls and mirrored memory.
+
 The [call-lifetime](./node_specific/test_call_lifetime_runtime.js) and
 [result/error-hook lifetime](./node_specific/test_errcheck_lifetime_runtime.js)
 matrices exercise `.func()`, library attributes and library-bound `CFUNCTYPE`

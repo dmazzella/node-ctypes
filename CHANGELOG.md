@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-11-04
+
+### Fixed
+
+- **Scalar argument marshalling**: read genuine non-pointer CData arguments from
+  their backing bytes instead of overridden `.value` getters. Snapshot each
+  scalar before converting later arguments, including calls without `argtypes`,
+  matching CPython's conversion order.
+- **Scalar adapters**: accept `from_param` results whose native scalar kind
+  matches the declared type, even when the CData instance belongs to a different
+  JavaScript class.
+- **Examples navigation**: use explicit Electron and Cryptoki page titles
+  instead of duplicate `README` labels in the generated documentation.
+
+### Performance
+
+- **Cached library symbols**: reuse attribute-function wrappers with a single
+  cache lookup instead of separate `Map.has()` and `Map.get()` calls, preserving
+  wrapper identity, signature changes and lazy symbol resolution.
+
 ## [2.7.0] - 2026-11-03
 
 ### Changed
@@ -1051,7 +1071,8 @@ It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-
 
 Initial releases.
 
-[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.7.0...HEAD
+[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.8.0...HEAD
+[2.8.0]: https://github.com/dmazzella/node-ctypes/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/dmazzella/node-ctypes/compare/v2.6.0...v2.7.0
 [2.6.0]: https://github.com/dmazzella/node-ctypes/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/dmazzella/node-ctypes/compare/v2.4.0...v2.5.0
