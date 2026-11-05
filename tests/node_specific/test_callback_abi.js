@@ -17,8 +17,8 @@ const scalars = [
   ["u64", c.c_uint64, [0n, 1n << 63n, (1n << 64n) - 1n]],
   ["size", c.c_size_t, size64 ? [0n, (1n << 64n) - 1n] : [0, 4294967295]],
   ["ssize", c.c_ssize_t, size64 ? [-(1n << 63n), (1n << 63n) - 1n] : [-2147483648, 2147483647]],
-  ["long", c.c_long, [c.sizeof(c.c_long) === 8 ? -(1n << 63n) : -2147483648]],
-  ["ulong", c.c_ulong, [c.sizeof(c.c_ulong) === 8 ? (1n << 64n) - 1n : 4294967295]],
+  ["long", c.c_long, [-2147483648, -1, 0, 2147483647, ...(c.sizeof(c.c_long) === 8 ? [-(1n << 63n), (1n << 63n) - 1n] : [])]],
+  ["ulong", c.c_ulong, [0, 1, 2147483648, 4294967295, ...(c.sizeof(c.c_ulong) === 8 ? [1n << 63n, (1n << 64n) - 1n] : [])]],
   ["float", c.c_float, [-0, 1.5, Math.PI, NaN, Infinity, -Infinity]],
   ["double", c.c_double, [-0, Math.PI, NaN, Infinity, -Infinity]],
   ["char", c.c_char, ["\0", "A", "\x7f", "\x80", "\xff"]],
@@ -61,7 +61,8 @@ describe("Native callback ABI", { skip: !existsSync(fixture) && "native fixture 
           );
           const call = caller(`fixture_callback_${name}`, type, [type]);
           for (const value of values) {
-            const expected = name === "float" ? Math.fround(value) : value;
+            // long/ulong keep their BigInt representation even when C long is 32 bits.
+            const expected = name === "long" || name === "ulong" ? BigInt(value) : name === "float" ? Math.fround(value) : value;
             assert.equal(call(callback, value), expected);
             assert.equal(received.at(-1), expected);
             if (safe) {

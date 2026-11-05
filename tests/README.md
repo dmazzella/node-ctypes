@@ -211,6 +211,11 @@ uses independently compiled C callers for scalar aliases, 32/33-argument
 signatures, GP/HFA/large arguments and private snapshots, for both ordinary
 and thread-safe callbacks. These suites run without any runtime backend opt-in.
 
+Scalar callback assertions check JavaScript representations independently of
+native storage widths: `c_long` and `c_ulong` always produce `BigInt`, including
+32-bit C longs on Windows. Their 32-bit boundary values are exercised on every
+host, with 64-bit extremes added only when the native type supports them.
+
 The libffi submodule is temporarily pinned to upstream
 `d02afc25e8ea3aac9e78e227748e1fd7c9f14c82`, including the Darwin GP stack-slot fix.
 Its remaining Darwin ARM64 indirect-pointer alignment limitation is documented
