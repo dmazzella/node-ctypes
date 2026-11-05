@@ -153,6 +153,16 @@ if(MSVC)
     target_link_options(ctypes_test_fixture PRIVATE /IGNORE:4199)
 endif()
 
+add_executable(ctypes_variadic_abi_repro EXCLUDE_FROM_ALL
+               ${CMAKE_SOURCE_DIR}/tests/fixtures/libffi_variadic_abi_repro.c)
+set_target_properties(
+    ctypes_variadic_abi_repro
+    PROPERTIES C_STANDARD 11
+               C_STANDARD_REQUIRED ON
+               RUNTIME_OUTPUT_DIRECTORY "$<1:${CMAKE_BINARY_DIR}/diagnostics>")
+target_link_libraries(ctypes_variadic_abi_repro PRIVATE ffi_static)
+target_compile_definitions(ctypes_variadic_abi_repro PRIVATE FFI_STATIC_BUILD)
+
 # ============================================================================
 # Info
 # ============================================================================

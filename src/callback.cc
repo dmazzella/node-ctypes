@@ -128,7 +128,7 @@ Napi::FunctionReference CallbackBufferAllocator(const Napi::CallbackInfo& info) 
     const size_t size = type.struct_info ? type.struct_info->GetSize() : CTypeSize(type.type);
     // Il pool JS allinea a 8 byte; i layout sovra-allineati mantengono l'allocatore nativo.
     if (!allocator.IsEmpty() && (!type.struct_info || type.struct_info->GetAlignment() <= 8)) {
-      const Napi::Value value = allocator.Call({Napi::Number::New(env, size)});
+      const Napi::Value value = allocator.Call({Napi::Number::New(env, static_cast<double>(size))});
       if (!value.IsBuffer()) {
         throw Napi::TypeError::New(env, "Callback buffer allocator must return a Buffer");
       }

@@ -244,6 +244,33 @@ Keep the final ordinary build direct-enabled. Run TypeScript declarations,
 Python reference parity and TypeDoc validation using the commands above.
 Native CI is still required to certify other operating systems/architectures.
 
+### Windows ARM64 variadic diagnostics
+
+If the ordinary test step fails on Windows ARM64, CI builds the standalone
+[C reproducer](./fixtures/libffi_variadic_abi_repro.c) against the same
+`ffi_static` target as the addon, then runs the
+[isolated diagnostic runner](../.github/scripts/diagnose-variadic-abi.mjs).
+It compares direct C references, fixed-signature HFA calls, variadic scalar
+stack arguments and variadic HFA calls. The two corresponding JavaScript tests
+also run separately with the TAP reporter.
+
+Each case runs in its own process with a 30-second limit. A native crash does
+not prevent the remaining cases from running; exit codes (including hexadecimal
+Windows exception codes) and signals are reported explicitly. Any failing case
+keeps the diagnostic step failed, and the original test failure is not suppressed.
+No tests are skipped and the vendored libffi is unchanged.
+
+To run the same diagnostics locally after configuring the ordinary source build:
+
+```sh
+cmake --build build --config Release --target ctypes_variadic_abi_repro
+node .github/scripts/diagnose-variadic-abi.mjs
+```
+
+The executable is written to `build/diagnostics/`. Its individual modes are
+`reference`, `fixed-hfa`, `variadic-stack` and `variadic-hfa`. Passing on a
+different operating system does not certify Windows ARM64.
+
 [benchmark_koffi.js](./benchmarks/benchmark_koffi.js) retains the matched
 scalar/CFUNCTYPE, narrow GP/FP stack, struct/HFA/large-value, inferred/variadic
 and ordinary/thread-safe callback workloads. The C-loop row performs 64 i32
