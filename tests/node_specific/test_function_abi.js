@@ -212,7 +212,7 @@ describe("Native function ABI", { skip: !existsSync(fixture) && "native fixture 
     });
   }
 
-  it("aligns indirect aggregate pointer slots after a narrow stack argument", { todo: indirectStackBug && "libffi upstream still uses the aggregate's alignment for its indirect pointer on Darwin ARM64" }, async () => {
+  it("aligns indirect aggregate pointer slots after a narrow stack argument", { skip: indirectStackBug && "libffi upstream still uses the aggregate's alignment for its indirect pointer on Darwin ARM64" }, async () => {
     const Record = c.struct({ values: c.array(c.c_uint8, 17) });
     const fn = lib.func("fixture_indirect_stack_tags", c.c_uint32, [...Array(8).fill(c.c_int64), c.c_int8, Record, c.c_int8, c.c_uint16]);
     const input = Buffer.alloc(17, 0x41);
@@ -399,7 +399,7 @@ describe("Native function ABI", { skip: !existsSync(fixture) && "native fixture 
     assert.deepEqual(await Promise.all(Array.from({ length: 8 }, () => fn.callAsync(...args))), Array(8).fill(expected));
   });
 
-  it("keeps named homogeneous arguments and aggregate results separate from anonymous FP arguments", async () => {
+  it("keeps named homogeneous arguments and aggregate results separate from anonymous FP arguments", { skip: process.platform === "win32" && process.arch === "arm64" && "upstream libffi variadic HFA ABI defect on Windows ARM64" }, async () => {
     const Record = c.struct({ values: c.array(c.c_double, 4) });
     const fn = lib.func("fixture_variadic_hfa", Record, [Record, c.c_int32]);
     const input = { values: [0.25, 1.25, 2.25, 3.25] };

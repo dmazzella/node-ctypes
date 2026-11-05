@@ -219,11 +219,11 @@ host, with 64-bit extremes added only when the native type supports them.
 The libffi submodule is temporarily pinned to upstream
 `d02afc25e8ea3aac9e78e227748e1fd7c9f14c82`, including the Darwin GP stack-slot fix.
 Its remaining Darwin ARM64 indirect-pointer alignment limitation is documented
-in the source map above. One explicit TODO executes a safe C stack-tag probe
-for sync/async calls: it observes the incorrect scalar slots without
-dereferencing a corrupt pointer. It is not a claim that upstream fixes both
-defects. The large-aggregate dereferencing variants after a narrow stack scalar
-run only on unaffected targets; all other aggregate positions remain covered.
+in the source map above. Its safe C stack-tag probe for sync/async calls is
+temporarily skipped only on Darwin ARM64 until an upstream fix is available;
+the test remains active elsewhere. The large-aggregate dereferencing variants
+after a narrow stack scalar also run only on unaffected targets; all other
+aggregate positions remain covered.
 
 Validate both build-time routes and both memory models, using the existing
 configured source build:
@@ -244,32 +244,10 @@ Keep the final ordinary build direct-enabled. Run TypeScript declarations,
 Python reference parity and TypeDoc validation using the commands above.
 Native CI is still required to certify other operating systems/architectures.
 
-### Windows ARM64 variadic diagnostics
-
-If the ordinary test step fails on Windows ARM64, CI builds the standalone
-[C reproducer](./fixtures/libffi_variadic_abi_repro.c) against the same
-`ffi_static` target as the addon, then runs the
-[isolated diagnostic runner](../.github/scripts/diagnose-variadic-abi.mjs).
-It compares direct C references, fixed-signature HFA calls, variadic scalar
-stack arguments and variadic HFA calls. The two corresponding JavaScript tests
-also run separately with the TAP reporter.
-
-Each case runs in its own process with a 30-second limit. A native crash does
-not prevent the remaining cases from running; exit codes (including hexadecimal
-Windows exception codes) and signals are reported explicitly. Any failing case
-keeps the diagnostic step failed, and the original test failure is not suppressed.
-No tests are skipped and the vendored libffi is unchanged.
-
-To run the same diagnostics locally after configuring the ordinary source build:
-
-```sh
-cmake --build build --config Release --target ctypes_variadic_abi_repro
-node .github/scripts/diagnose-variadic-abi.mjs
-```
-
-The executable is written to `build/diagnostics/`. Its individual modes are
-`reference`, `fixed-hfa`, `variadic-stack` and `variadic-hfa`. Passing on a
-different operating system does not certify Windows ARM64.
+On Windows ARM64, a 32-byte HFA argument containing four doubles in a variadic
+call triggers an upstream libffi access violation. Its regression is temporarily
+skipped only on Windows ARM64; other targets retain the full sync/async test.
+Native calling behavior and the vendored libffi are unchanged.
 
 [benchmark_koffi.js](./benchmarks/benchmark_koffi.js) retains the matched
 scalar/CFUNCTYPE, narrow GP/FP stack, struct/HFA/large-value, inferred/variadic

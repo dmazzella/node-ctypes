@@ -1096,15 +1096,22 @@ Return to an official tag containing these fixes when released. After changing
 the submodule revision, run `npm run generate-ffi-headers`, rebuild and repeat
 the ABI/parity tests. Do not patch the vendored libffi internals.
 
-**Remaining upstream limitation.** On Darwin ARM64, when all GP registers are
+**Darwin ARM64 upstream limitation.** When all GP registers are
 occupied, a byte-aligned non-HFA struct larger than 16 bytes after a narrow
 stack scalar can still misalign its indirect pointer and subsequent arguments.
 A callee dereferencing that pointer can crash. The upstream update does not
 resolve this case and this project does not disguise it by altering layouts.
-[test_function_abi.js](./tests/node_specific/test_function_abi.js) reports an
-explicit TODO and executes a safe C stack-tag probe for sync/async calls,
-without dereferencing the misplaced pointer. Other GP/HFA/large-aggregate
-regressions and ordinary/thread-safe callback ABI tests run normally.
+[test_function_abi.js](./tests/node_specific/test_function_abi.js) retains a
+safe C stack-tag probe for sync/async calls, temporarily skipped only on Darwin
+ARM64 until an upstream fix is available. The test remains active on other
+targets. Other supported GP/HFA/large-aggregate cases and ordinary/thread-safe
+callback ABI tests run normally.
+
+**Windows ARM64 variadic HFA limitation.** A named HFA argument containing four
+doubles (32 bytes) in a variadic call triggers an access violation in upstream
+libffi, independently of the Node wrapper. Avoid this signature until an upstream
+fix is available. Its regression is temporarily skipped only on Windows ARM64
+and still runs on other targets. Native calling behavior is unchanged.
 
 `CTYPES_ENABLE_DIRECT_CALLS` remains a build-time control, default ON. Fixed
 direct calls and workers need no CIF; unsupported fixed signatures use libffi,

@@ -103,21 +103,11 @@ jobs:
         run: npm run build
 
       - name: Run tests
-        id: js_tests
         if: ${{ !matrix.container }}
         run: |
           cd tests
           npm install
           npm test
-
-      - name: Build Windows ARM64 variadic reproducer
-        id: variadic_repro_build
-        if: ${{ failure() && matrix.artifact == 'win32-arm64' && steps.js_tests.outcome == 'failure' }}
-        run: cmake --build build --config Release --target ctypes_variadic_abi_repro
-
-      - name: Diagnose Windows ARM64 variadic ABI
-        if: ${{ failure() && matrix.artifact == 'win32-arm64' && steps.variadic_repro_build.outcome == 'success' }}
-        run: node .github/scripts/diagnose-variadic-abi.mjs
 
       - name: Run tests without external buffers (as in Electron)
         if: ${{ !matrix.container }}

@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Backend-independent ABI regressions**: compiled C callers verify scalar
   aliases, narrow GP/FP stack arguments, small/large aggregates and homogeneous
   float/double aggregates for sync/async calls and ordinary/thread-safe callbacks.
-  Include Darwin stack-slot coverage and a safe indirect-pointer alignment TODO.
+  Include Darwin stack-slot coverage and a safe indirect-pointer alignment probe.
 - **Koffi C-loop callback comparison**: check 64 consecutive i32 callbacks per
   native call with the same C fixture, reporting batch latency separately from
   the single-callback workload and normalizing both int64 results to Number.
@@ -55,6 +55,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   slices; raw native and over-aligned arguments retain Node-API copies.
   Cache standard handlers and readers, not individual views, while respecting
   custom definition getters and mirrored synchronization.
+
+### Known limitations
+
+- **Darwin ARM64 indirect arguments**: libffi can misalign a large aggregate's
+  indirect pointer after a narrow stack scalar. Temporarily skip the stack-tag
+  regression only on Darwin ARM64 until an upstream fix is available.
+- **Windows ARM64 variadic HFAs**: a named four-double HFA argument (32 bytes)
+  crashes in upstream libffi. Temporarily skip its regression only on Windows
+  ARM64, retaining coverage on other targets.
+  This is not a runtime fix.
 
 ## [2.8.0] - 2026-11-04
 
