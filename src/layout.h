@@ -1,9 +1,9 @@
 #pragma once
 
-// Descrittori dei tipi C composti: layout, ffi_type e conversioni JS <-> C di
-// struct, union e array. I wrapper JS (StructType, ArrayType) sono in
-// struct.h e array.h.
+// Layout e conversioni JS <-> C dei tipi composti. La cache libffi e' lazy;
+// la sua costruzione e' in libffi_types.cc, separata dal layout comune.
 
+#include "libffi_type_cache.h"
 #include "shared.h"
 #include "types.h"
 
@@ -30,8 +30,7 @@ class StructInfo {
 
     void Finalize();
 
-    // Crea ffi_type custom per questo array
-    [[nodiscard]] ffi_type* GetFFIType();
+    LibffiAggregateType& GetLibffiTypeCache() noexcept { return libffi_; }
 
     // Converte JS array → C array buffer
     [[nodiscard]] bool JSToArray(Napi::Env env,
@@ -49,8 +48,7 @@ class StructInfo {
     size_t size_;  // count * element_size
     size_t alignment_;
     std::shared_ptr<StructInfo> element_struct_;  // Se element_type == STRUCT
-    std::unique_ptr<ffi_type> ffi_type_;
-    std::vector<ffi_type*> ffi_element_types_;  // Per ffi_type.elements
+    LibffiAggregateType libffi_;
   };
 
   // Field descriptor - singolo campo di struct/union
@@ -96,7 +94,7 @@ class StructInfo {
   void SetMemoryClass(bool memory_class) {
     EnsureMutable();
     memory_class_ = memory_class;
-    ffi_type_.reset();
+    libffi_.Reset();
   }
 
   // Getter
@@ -104,9 +102,9 @@ class StructInfo {
   size_t GetAlignment() const { return alignment_; }
   const std::vector<FieldInfo>& GetFields() const { return fields_; }
   bool IsUnion() const { return is_union_; }
+  bool HasMemoryClass() const { return memory_class_; }
 
-  // Crea ffi_type custom per questa struct (necessario per libffi)
-  ffi_type* GetFFIType();
+  LibffiAggregateType& GetLibffiTypeCache() noexcept { return libffi_; }
 
   // Converte JS object -> C struct buffer
   [[nodiscard]] bool JSToStruct(Napi::Env env,
@@ -129,8 +127,7 @@ class StructInfo {
   bool memory_class_ = false;
   bool finalized_ = false;
   std::vector<FieldInfo> fields_;
-  std::unique_ptr<ffi_type> ffi_type_;
-  std::vector<ffi_type*> ffi_field_types_;  // per ffi_type.elements
+  LibffiAggregateType libffi_;
 
   void EnsureMutable() const;
 

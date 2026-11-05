@@ -55,8 +55,6 @@
 using ssize_t = SSIZE_T;
 #endif
 
-#include <ffi.h>
-
 // Force-inline portable. Applicato agli helper di FFIFunction::Call
 // (MarshalArguments, SelectReturnPtr, CaptureErrorState, FinalizeCall):
 // unico caller, call-overhead misurato ~5% sui bench primitive.

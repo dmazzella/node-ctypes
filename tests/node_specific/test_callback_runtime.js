@@ -9,6 +9,7 @@ import { spawnSync } from "node:child_process";
 import os from "node:os";
 import { describe, it, before, after } from "node:test";
 import * as ctypes from "node-ctypes";
+import { FIXTURE } from "../cpython_parity/_support.js";
 
 const platform = os.platform();
 
@@ -318,6 +319,216 @@ describe("Callbacks", function () {
 
       assert.strictEqual(w.name, "CallbackError");
       assert.match(w.message, /compare exploded/);
+    });
+  });
+
+  describe("Owned callback argument snapshots", function () {
+    it("retains independent snapshots across pool rotation, reentry and release", async function () {
+      using fixture = new ctypes.CDLL(FIXTURE);
+      const Point = ctypes.struct({ x: ctypes.c_int32, y: ctypes.c_int32 });
+      const invoke = fixture.func("fixture_point_callback", ctypes.c_int32, [ctypes.c_void_p, ctypes.c_int32, ctypes.c_int32]);
+      for (const create of [ctypes.callback, ctypes.threadSafeCallback]) {
+        const saved = [];
+        let callback;
+        let nested = false;
+        callback = create(
+          (value) => {
+            saved.push(value);
+            assert.ok(Buffer.isBuffer(value._buffer));
+            strictEqual(value._buffer.length, 8);
+            const result = value.x + value.y;
+            if (!nested && value.x === -1) {
+              nested = true;
+              strictEqual(invoke(callback.pointer, 3, 7), 10);
+              nested = false;
+              strictEqual(value.x, -1);
+            }
+            return result;
+          },
+          ctypes.c_int32,
+          [Point],
+        );
+        try {
+          for (let i = 0; i < 1100; i++) strictEqual(invoke(callback.pointer, i, 7), i + 7);
+          if (create === ctypes.threadSafeCallback) strictEqual(await invoke.callAsync(callback.pointer, 1100, 7), 1107);
+          strictEqual(invoke(callback.pointer, -1, 7), 6);
+        } finally {
+          callback.release();
+        }
+        for (let i = 0; i < 1100; i++) {
+          strictEqual(saved[i].x, i);
+          strictEqual(saved[i].y, 7);
+        }
+        saved[0].x = 99;
+        strictEqual(saved[1].x, 1);
+        assert.notStrictEqual(saved[0]._buffer, saved[1]._buffer);
+      }
+    });
+
+    for (const [name, create] of [
+      ["ordinary", ctypes.callback],
+      ["thread-safe", ctypes.threadSafeCallback],
+    ]) {
+      it(`preserves fresh retained array views and direct invocation in ${name} callbacks`, async function () {
+        using fixture = new ctypes.CDLL(FIXTURE);
+        const Bytes = ctypes.struct({ values: ctypes.array(ctypes.c_uint8, 33) });
+        const saved = [];
+        const handler = function (value) {
+          strictEqual(this, undefined);
+          strictEqual(arguments.length, 1);
+          const first = value.values;
+          const second = value.values;
+          assert.notStrictEqual(first, second);
+          strictEqual(first.length, 33);
+          strictEqual(first[0], 1);
+          strictEqual(second[32], 33);
+          first[0] = 90;
+          strictEqual(second[0], 90);
+          saved.push([value, first, second]);
+          return BigInt(second[0] + second[32]);
+        };
+        const unexpected = () => {
+          throw new Error("callback call/apply properties must not be consulted");
+        };
+        Object.defineProperties(handler, { call: { get: unexpected }, apply: { get: unexpected } });
+        using callback = create(handler, ctypes.c_int64, [Bytes]);
+        const invoke = fixture.func("fixture_bytes_33_callback", ctypes.c_int64, [ctypes.c_void_p]);
+        strictEqual(invoke(callback.pointer), 123n);
+        if (create === ctypes.threadSafeCallback) strictEqual(await invoke.callAsync(callback.pointer), 123n);
+        callback.release();
+        const [value, first, second] = saved[0];
+        const third = value.values;
+        assert.notStrictEqual(first, third);
+        second[32] = 5;
+        strictEqual(third[32], 5);
+        first[0] = 13;
+        strictEqual(second[0], 13);
+        strictEqual(value.values[0], 13);
+        if (saved.length > 1) strictEqual(saved[1][1][0], 90);
+      });
+    }
+
+    it("preserves definition getter overrides before and after the first callback", function () {
+      using fixture = new ctypes.CDLL(FIXTURE);
+      const invoke = fixture.func("fixture_hfa_f64_4_callback", ctypes.c_double, [ctypes.c_void_p]);
+      for (const create of [ctypes.callback, ctypes.threadSafeCallback]) {
+        const HFA = ctypes.struct({ values: ctypes.array(ctypes.c_double, 4) });
+        const get = HFA.get;
+        let reads = 0;
+        HFA.get = function (buffer, field) {
+          strictEqual(this, HFA);
+          reads++;
+          return get.call(this, buffer, field);
+        };
+        using callback = create((value) => value.values[0] + value.values[3], ctypes.c_double, [HFA]);
+        strictEqual(invoke(callback), 3.75);
+        strictEqual(reads, 2);
+        HFA.get = get;
+        strictEqual(invoke(callback), 3.75);
+        strictEqual(reads, 2);
+        HFA.get = function (buffer, field) {
+          strictEqual(this, HFA);
+          reads++;
+          return get.call(this, buffer, field);
+        };
+        strictEqual(invoke(callback), 3.75);
+        strictEqual(reads, 4);
+      }
+    });
+
+    it("uses captured allocation intrinsics without consulting later Buffer/ArrayBuffer patches", function () {
+      using fixture = new ctypes.CDLL(FIXTURE);
+      const Point = ctypes.struct({ x: ctypes.c_int32, y: ctypes.c_int32 });
+      using callback = ctypes.callback((value) => value.x + value.y, ctypes.c_int32, [Point]);
+      const pointer = callback.pointer;
+      const invoke = fixture.func("fixture_point_callback", ctypes.c_int32, [ctypes.c_void_p, ctypes.c_int32, ctypes.c_int32]);
+      const from = Buffer.from;
+      const alloc = Buffer.alloc;
+      const arrayBuffer = globalThis.ArrayBuffer;
+      const patched = () => {
+        throw new Error("patched buffer allocation must not run");
+      };
+      try {
+        Buffer.from = patched;
+        Buffer.alloc = patched;
+        globalThis.ArrayBuffer = patched;
+        for (let i = 0; i < 1100; i++) strictEqual(invoke(pointer, i, 7), i + 7);
+      } finally {
+        Buffer.from = from;
+        Buffer.alloc = alloc;
+        globalThis.ArrayBuffer = arrayBuffer;
+      }
+    });
+
+    it("validates internal allocator metadata and rejects invalid snapshots without invoking the handler", async function () {
+      using fixture = new ctypes.CDLL(FIXTURE);
+      const Point = new ctypes.StructType();
+      Point.addField("x", ctypes.CType.INT32);
+      Point.addField("y", ctypes.CType.INT32);
+      const invoke = fixture.func("fixture_point_callback", ctypes.c_int32, [ctypes.c_void_p, ctypes.c_int32, ctypes.c_int32]);
+      for (const Constructor of [ctypes.Callback, ctypes.ThreadSafeCallback]) {
+        throws(() => new Constructor(() => 0, ctypes.CType.INT32, [Point], "default", [false], undefined, 7), /allocator must be a function/);
+        for (const [allocator, message] of [
+          [() => ({}), /must return a Buffer/],
+          [() => Buffer.alloc(7), /wrong size/],
+          [
+            () => {
+              throw new Error("snapshot allocation failed");
+            },
+            /snapshot allocation failed/,
+          ],
+        ]) {
+          let calls = 0;
+          const callback = new Constructor(
+            () => {
+              calls++;
+              return 10;
+            },
+            ctypes.CType.INT32,
+            [Point],
+            "default",
+            [false],
+            undefined,
+            allocator,
+          );
+          try {
+            strictEqual(Constructor === ctypes.ThreadSafeCallback ? await invoke.callAsync(callback.pointer, 3, 7) : invoke(callback.pointer, 3, 7), 0);
+            strictEqual(calls, 0);
+            assert.match(callback.getLastError(), message);
+          } finally {
+            callback.release();
+          }
+        }
+      }
+    });
+
+    it("keeps over-aligned aggregate snapshots on the native allocator", function () {
+      using fixture = new ctypes.CDLL(FIXTURE);
+      const Aligned = new ctypes.StructType({ alignment: 16 });
+      Aligned.addField("a", ctypes.CType.UINT8);
+      Aligned.addField("b", ctypes.CType.UINT32);
+      const invoke = fixture.func("fixture_aligned_callback", ctypes.c_uint32, [ctypes.c_void_p, ctypes.c_uint8, ctypes.c_uint32]);
+      const callback = new ctypes.Callback(
+        (value) => {
+          assert.ok(Buffer.isBuffer(value));
+          strictEqual(ctypes.addressof(value) % 16n, 0n);
+          return value[0] * 1000 + value.readUInt32LE(4);
+        },
+        ctypes.CType.UINT32,
+        [Aligned],
+        "default",
+        [false],
+        undefined,
+        () => {
+          throw new Error("8-byte pool must not serve over-aligned snapshots");
+        },
+      );
+      try {
+        strictEqual(invoke(callback.pointer, 3, 7), 3007);
+        strictEqual(callback.getLastError(), null);
+      } finally {
+        callback.release();
+      }
     });
   });
 

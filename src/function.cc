@@ -3,6 +3,10 @@
 #include "addon.h"  // CTypesAddon per gli slot captured_last_error / captured_errno
 #include "array.h"  // TypeSpecFromJS
 
+#ifndef CTYPES_DISABLE_DIRECT_CALLS
+#include "direct_call.h"
+#endif
+
 namespace ctypes {
 
 namespace {
@@ -241,6 +245,18 @@ CTYPES_ALWAYS_INLINE double DoubleArg(const Napi::Value& val) {
   return DoubleArgSlow(val);
 }
 
+CTYPES_ALWAYS_INLINE void StoreVariadicNumber(double number, CType type, uint8_t* slot) {
+  if (type == CType::CTYPES_INT32) {
+    const int32_t value = static_cast<int32_t>(number);
+    memcpy(slot, &value, sizeof(value));
+  } else if (type == CType::CTYPES_INT64) {
+    const int64_t value = static_cast<int64_t>(number);
+    memcpy(slot, &value, sizeof(value));
+  } else {
+    memcpy(slot, &number, sizeof(number));
+  }
+}
+
 }  // namespace
 
 CallConv StringToCallConv(std::string_view name) {
@@ -257,23 +273,6 @@ CallConv StringToCallConv(std::string_view name) {
     return CallConv::CTYPES_THISCALL;
   }
   return CallConv::CTYPES_DEFAULT;
-}
-
-ffi_abi CallConvToFFI(CallConv conv) {
-  switch (conv) {
-#if defined(_WIN32) && defined(__i386__)
-    case CallConv::CTYPES_STDCALL:
-      return FFI_STDCALL;
-    case CallConv::CTYPES_FASTCALL:
-      return FFI_FASTCALL;
-    case CallConv::CTYPES_THISCALL:
-      return FFI_THISCALL;
-#endif
-    case CallConv::CTYPES_CDECL:
-    case CallConv::CTYPES_DEFAULT:
-    default:
-      return FFI_DEFAULT_ABI;
-  }
 }
 
 Napi::Function FFIFunction::GetClass(Napi::Env env) {
@@ -303,10 +302,7 @@ Napi::Value FFIFunction::GetErrnoCaptured(const Napi::CallbackInfo& info) {
 FFIFunction::FFIFunction(const Napi::CallbackInfo& info)
   : Napi::ObjectWrap<FFIFunction>(info),
     fn_ptr_(nullptr),
-    cif_prepared_(false),
-    abi_(FFI_DEFAULT_ABI),
     return_type_(CType::CTYPES_VOID),
-    ffi_return_type_(nullptr),
     next_cache_slot_(0),
     capture_last_error_(false),
     capture_errno_(false),
@@ -384,7 +380,7 @@ FFIFunction::FFIFunction(const Napi::CallbackInfo& info)
   if (info.Length() > 4 && info[4].IsObject()) {
     Napi::Object opts = info[4].As<Napi::Object>();
     if (opts.Has("abi")) {
-      abi_ = CallConvToFFI(StringToCallConv(opts.Get("abi").As<Napi::String>().Utf8Value()));
+      SetCallConv(StringToCallConv(opts.Get("abi").As<Napi::String>().Utf8Value()));
     }
     if (opts.Has("use_last_error")) {
       capture_last_error_ = opts.Get("use_last_error").ToBoolean().Value();
@@ -413,7 +409,7 @@ FFIFunction::FFIFunction(const Napi::CallbackInfo& info)
     scratch_.arg_values.resize(arg_types_.size());
   }
 
-  if (!PrepareFFI(env)) {
+  if (!PrepareCall(env)) {
     return;
   }
 
@@ -524,58 +520,33 @@ FFIFunction::~FFIFunction() {
 
   // Free reusable call plan della signature fissa (le entry variadiche
   // liberano il proprio nel distruttore).
-  if (call_plan_) {
-    ffi_call_plan_free(call_plan_);
-    call_plan_ = nullptr;
-  }
+  call_plan_.reset();
 }
 
-bool FFIFunction::PrepareFFI(Napi::Env env) {
-  // Return type FFI
-  if (return_type_ == CType::CTYPES_STRUCT && return_struct_info_) {
-    ffi_return_type_ = return_struct_info_->GetFFIType();
-  } else if (return_type_ == CType::CTYPES_ARRAY && return_array_info_) {
-    ffi_return_type_ = return_array_info_->GetFFIType();
-  } else {
-    ffi_return_type_ = CTypeToFFI(return_type_);
+bool FFIFunction::PrepareCall(Napi::Env env) {
+  // Il layout catturato resta immutabile anche senza costruire i tipi libffi.
+  if (return_struct_info_) {
+    return_struct_info_->Finalize();
   }
-
-  // Argument types FFI
-  ffi_arg_types_.clear();
-  ffi_arg_types_.reserve(arg_types_.size());
+  if (return_array_info_) {
+    return_array_info_->Finalize();
+  }
   for (size_t i = 0; i < arg_types_.size(); i++) {
-    if (arg_types_[i] == CType::CTYPES_STRUCT && arg_struct_infos_[i]) {
-      ffi_arg_types_.push_back(arg_struct_infos_[i]->GetFFIType());
-    } else if (arg_types_[i] == CType::CTYPES_ARRAY && arg_array_infos_[i]) {
-      ffi_arg_types_.push_back(arg_array_infos_[i]->GetFFIType());
-    } else {
-      ffi_arg_types_.push_back(CTypeToFFI(arg_types_[i]));
+    if (arg_struct_infos_[i]) {
+      arg_struct_infos_[i]->Finalize();
+    }
+    if (arg_array_infos_[i]) {
+      arg_array_infos_[i]->Finalize();
     }
   }
 
-  ffi_status status = ffi_prep_cif(&cif_, abi_, static_cast<unsigned int>(ffi_arg_types_.size()), ffi_return_type_,
-                                   ffi_arg_types_.empty() ? nullptr : ffi_arg_types_.data());
-
-  if (status != FFI_OK) {
-    const char* msg = "Failed to prepare FFI call interface";
-    Napi::Error::New(env, msg).ThrowAsJavaScriptException();
-    return false;
+  SetupFixedCall();
+  if (!fixed_invoker_) {
+    if (!PrepareFFI(env)) {
+      return false;
+    }
+    PreparePlan();
   }
-
-  cif_prepared_ = true;
-
-  // Reusable call plan (libffi 3.7+): cattura una volta il posizionamento degli
-  // argomenti così le chiamate ripetute saltano la riclassificazione per-call che
-  // ffi_call rifarebbe ogni volta. Su x86-64 attiva il fast path di libffi;
-  // altrove ffi_call_plan_invoke ricade in sicurezza su ffi_call. Ricostruito
-  // in modo difensivo se PrepareFFI venisse rieseguito.
-  if (call_plan_) {
-    ffi_call_plan_free(call_plan_);
-    call_plan_ = nullptr;
-  }
-  call_plan_ = ffi_call_plan_alloc(&cif_);
-
-  SetupDirectCall();
 
   if (struct_as_buffer_ && return_type_ == CType::CTYPES_STRUCT && return_struct_info_) {
     Napi::Buffer<uint8_t> result = Napi::Buffer<uint8_t>::New(env, return_struct_info_->GetSize());
@@ -593,21 +564,24 @@ bool FFIFunction::PrepareFFI(Napi::Env env) {
       IsSimpleArgumentType(arg_types_[i]) || (arg_types_[i] == CType::CTYPES_STRUCT && i < arg_struct_infos_.size() &&
                                               arg_struct_infos_[i] && arg_struct_infos_[i]->GetSize() <= ARG_SLOT_SIZE);
   }
-
   return true;
 }
 
-void FFIFunction::SetupDirectCall() {
-  direct_invoker_ = nullptr;
+void FFIFunction::SetupFixedCall() {
+  fixed_invoker_ = nullptr;
 
   if constexpr (sizeof(void*) != 8 || std::endian::native != std::endian::little) {
     return;
   }
-  if (abi_ != FFI_DEFAULT_ABI || arg_types_.size() > direct::kMaxDirectArgs) {
+  if (!UsesDefaultABI()) {
     return;
   }
 
-  direct_invoker_ = direct::Select(return_type_, arg_types_);
+#ifndef CTYPES_DISABLE_DIRECT_CALLS
+  if (arg_types_.size() <= direct::kMaxDirectArgs) {
+    fixed_invoker_ = direct::Select(return_type_, arg_types_);
+  }
+#endif
 }
 
 namespace {
@@ -1069,7 +1043,7 @@ CTYPES_ALWAYS_INLINE bool FFIFunction::ValidateAndResolveArgc(Napi::Env env,
                                                               const FunctionArguments& info,
                                                               size_t& out_argc,
                                                               bool& out_is_variadic) const {
-  if (!cif_prepared_) [[unlikely]] {
+  if (!fixed_invoker_ && !cif_prepared_) [[unlikely]] {
     Napi::Error::New(env, "FFI call interface not prepared").ThrowAsJavaScriptException();
     return false;
   }
@@ -1105,6 +1079,9 @@ CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalArguments(CallContext& ctx) {
   for (size_t i = 0; i < argc; i++) {
     uint8_t* slot = arg_storage + (i * ARG_SLOT_SIZE);
     arg_values[i] = slot;
+    if (i >= expected_argc && i - expected_argc < ctx.num_marshaled_extra) {
+      continue;
+    }
     const Napi::Value val = i < expected_argc ? info[i] : ctx.extra_values[i - expected_argc];
 
     CType type;
@@ -1387,24 +1364,21 @@ CTYPES_ALWAYS_INLINE Napi::Value FFIFunction::FinalizeCall(CallContext& ctx) {
   return ApplyErrcheck(ctx.env, result, ctx.info, *ctx.errcheck);
 }
 
-VariadicCifCache* FFIFunction::AcquireVariadicCif(Napi::Env env,
-                                                  size_t argc,
-                                                  const CType* extra_types,
-                                                  size_t num_extra,
-                                                  std::optional<VariadicCifCache>& fallback) {
-  for (VariadicCifCache& entry : variadic_cache_) {
-    if (entry.valid && entry.total_args == argc && entry.extra_types.size() == num_extra &&
-        std::equal(extra_types, extra_types + num_extra, entry.extra_types.begin())) {
+ExtraCallCache* FFIFunction::AcquireExtraCall(size_t argc,
+                                              std::span<const CType> extra_types,
+                                              std::optional<ExtraCallCache>& fallback) {
+  for (ExtraCallCache& entry : extra_call_cache_) {
+    if (entry.valid && entry.total_args == argc && std::ranges::equal(extra_types, entry.extra_types)) {
       return &entry;
     }
   }
 
   // Cache miss: ricostruisce uno slot (round-robin) non usato da una chiamata
-  // in corso; se sono tutti in uso (chiamate rientranti) il CIF è locale.
-  VariadicCifCache* target = nullptr;
-  for (size_t attempt = 0; attempt < MAX_CACHED_VARIADIC_CIFS && target == nullptr; attempt++) {
-    VariadicCifCache& candidate = variadic_cache_[next_cache_slot_];
-    next_cache_slot_ = (next_cache_slot_ + 1) % MAX_CACHED_VARIADIC_CIFS;
+  // in corso; se sono tutti in uso (chiamate rientranti) la firma è locale.
+  ExtraCallCache* target = nullptr;
+  for (size_t attempt = 0; attempt < MAX_CACHED_EXTRA_CALLS && target == nullptr; attempt++) {
+    ExtraCallCache& candidate = extra_call_cache_[next_cache_slot_];
+    next_cache_slot_ = (next_cache_slot_ + 1) % MAX_CACHED_EXTRA_CALLS;
     if (candidate.in_use == 0) {
       target = &candidate;
     }
@@ -1413,37 +1387,19 @@ VariadicCifCache* FFIFunction::AcquireVariadicCif(Napi::Env env,
     target = &fallback.emplace();
   }
 
-  VariadicCifCache& entry = *target;
-  const size_t fixed_args = arg_types_.size();
+  ExtraCallCache& entry = *target;
   entry.valid = false;
+  entry.cif_prepared = false;
   entry.ResetPlan();
+  entry.ffi_types.clear();
   entry.total_args = argc;
-  entry.extra_types.assign(extra_types, extra_types + num_extra);
-  entry.ffi_types.resize(argc);
-  std::copy(ffi_arg_types_.begin(), ffi_arg_types_.end(), entry.ffi_types.begin());
-  for (size_t i = 0; i < num_extra; i++) {
-    entry.ffi_types[fixed_args + i] = CTypeToFFI(extra_types[i]);
-  }
-
-  // Python ctypes: senza argtypes gli argomenti sono fissi (ffi_prep_cif),
-  // altrimenti quelli oltre gli argtypes sono variadici.
-  ffi_status status =
-    fixed_args == 0
-      ? ffi_prep_cif(&entry.cif, abi_, static_cast<unsigned int>(argc), ffi_return_type_, entry.ffi_types.data())
-      : ffi_prep_cif_var(&entry.cif, abi_, static_cast<unsigned int>(fixed_args), static_cast<unsigned int>(argc),
-                         ffi_return_type_, entry.ffi_types.data());
-  if (status != FFI_OK) {
-    Napi::Error::New(env, "Failed to prepare variadic FFI call").ThrowAsJavaScriptException();
-    return nullptr;
-  }
-
-  entry.plan = ffi_call_plan_alloc(&entry.cif);
+  entry.extra_types.assign(extra_types.begin(), extra_types.end());
   entry.valid = true;
   return &entry;
 }
 
 // Firme semplici (simple_call_): slot e risultato sullo stack, senza
-// CallContext, scratch e cache variadica. Le stringhe corte vanno nel buffer
+// CallContext o scratch. Le stringhe corte vanno nel buffer
 // inline dell'istanza, come in Call(); una stringa che non ci sta e le chiamate
 // rientranti passano a Call() prima di qualunque effetto.
 template <ArgumentList Args, bool HasErrcheck>
@@ -1479,15 +1435,7 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
       if (double number; napi_fast::TryDouble(val, number)) [[likely]] {
         type = VariadicNumberType(number);
         extra_types[i - expected_argc] = type;
-        if (type == CType::CTYPES_INT32) {
-          const int32_t v = static_cast<int32_t>(number);
-          memcpy(slot, &v, sizeof(v));
-        } else if (type == CType::CTYPES_INT64) {
-          const int64_t v = static_cast<int64_t>(number);
-          memcpy(slot, &v, sizeof(v));
-        } else {
-          memcpy(slot, &number, sizeof(number));
-        }
+        StoreVariadicNumber(number, type, slot);
         continue;
       }
       const VariadicValue extra = InferVariadic(val);
@@ -1552,13 +1500,13 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
     }
   }
 
-  // CIF della chiamata variadica: dalla cache, con lo slot segnato in uso così
+  // Firma concreta dalla cache, con lo slot segnato in uso così
   // che una chiamata rientrante (da un callback) non lo ricostruisca.
-  VariadicCifCache* cache_entry = nullptr;
-  std::optional<VariadicCifCache> fallback_entry;
+  ExtraCallCache* cache_entry = nullptr;
+  std::optional<ExtraCallCache> fallback_entry;
   if (num_extra != 0) {
-    cache_entry = AcquireVariadicCif(env, argc, extra_types.data(), num_extra, fallback_entry);
-    if (cache_entry == nullptr) {
+    cache_entry = AcquireExtraCall(argc, {extra_types.data(), num_extra}, fallback_entry);
+    if (!PrepareExtraFFI(env, *cache_entry)) {
       result = env.Undefined();
       return true;
     }
@@ -1570,18 +1518,12 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
   alignas(16) std::array<std::byte, kMaxSimpleStructReturn> return_storage{};
   void* const return_value = return_storage.data();
   const SavedErrorState saved_errors = SwapInErrorState();
-  if (cache_entry != nullptr) {
-    if (cache_entry->plan) {
-      ffi_call_plan_invoke(cache_entry->plan, FFI_FN(fn_ptr_), return_value, values.data());
-    } else {
-      ffi_call(&cache_entry->cif, FFI_FN(fn_ptr_), return_value, values.data());
-    }
-  } else if (direct_invoker_) [[likely]] {
-    direct_invoker_(fn_ptr_, values.data(), return_value);
-  } else if (call_plan_) {
-    ffi_call_plan_invoke(call_plan_, FFI_FN(fn_ptr_), return_value, values.data());
+  if (cache_entry == nullptr && fixed_invoker_) [[likely]] {
+    fixed_invoker_(fn_ptr_, values.data(), return_value);
+  } else if (cache_entry != nullptr) {
+    InvokeLibffi(*cache_entry, fn_ptr_, return_value, values.data());
   } else {
-    ffi_call(&cif_, FFI_FN(fn_ptr_), return_value, values.data());
+    InvokeLibffi(*this, fn_ptr_, return_value, values.data());
   }
   CaptureErrorState(saved_errors);
 
@@ -1652,14 +1594,16 @@ Napi::Value FFIFunction::CallArguments(const FunctionArguments& info, const Napi
   const CountScope depth_scope(&call_depth_);
   scratch->Reset();
 
+  alignas(16) std::array<uint8_t, MAX_INLINE_ARGS * ARG_SLOT_SIZE> inline_arg_storage;
+
   // =====================================================================
   // Gestione variadic ottimizzata (ispirata a CPython ctypes)
   // =====================================================================
-  ffi_cif* active_cif = &cif_;
-  ffi_call_plan* active_plan = call_plan_;
-  VariadicCifCache* cache_entry = nullptr;
-  std::optional<VariadicCifCache> fallback_entry;
+  LibffiCallContext libffi = GetLibffiContext(fixed_invoker_ == nullptr);
+  ExtraCallCache* cache_entry = nullptr;
+  std::optional<ExtraCallCache> fallback_entry;
   size_t num_extra = 0;  // Numero di argomenti extra variadic
+  size_t num_marshaled_extra = 0;
 
   // Stack-allocated array per piccoli numeri di argomenti extra (come alloca in CPython)
   std::array<CType, MAX_VARIADIC_EXTRA_ARGS> extra_types_stack;
@@ -1682,24 +1626,33 @@ Napi::Value FFIFunction::CallArguments(const FunctionArguments& info, const Napi
       extra_values = extra_values_heap.data();
     }
     for (size_t i = 0; i < num_extra; i++) {
-      const VariadicValue extra = InferVariadic(info[expected_argc + i]);
+      const Napi::Value value = info[expected_argc + i];
+      if (argc <= MAX_INLINE_ARGS && i == num_marshaled_extra) {
+        if (double number; napi_fast::TryDouble(value, number)) {
+          const CType type = VariadicNumberType(number);
+          extra_types[i] = type;
+          extra_values[i] = value;
+          StoreVariadicNumber(number, type, inline_arg_storage.data() + (expected_argc + i) * ARG_SLOT_SIZE);
+          num_marshaled_extra++;
+          continue;
+        }
+      }
+      const VariadicValue extra = InferVariadic(value);
       extra_types[i] = extra.type;
       extra_values[i] = extra.value;
     }
 
-    cache_entry = AcquireVariadicCif(env, argc, extra_types, num_extra, fallback_entry);
-    if (cache_entry == nullptr) {
+    cache_entry = AcquireExtraCall(argc, {extra_types, num_extra}, fallback_entry);
+    if (!PrepareExtraFFI(env, *cache_entry)) {
       return env.Undefined();
     }
-    active_cif = &cache_entry->cif;
-    active_plan = cache_entry->plan;
+    libffi = cache_entry->GetLibffiContext();
   }
   const CountScope cache_scope(cache_entry != nullptr ? &cache_entry->in_use : nullptr);
 
   // =====================================================================
   // Stato della chiamata: slot e return value sullo stack.
   // =====================================================================
-  alignas(16) std::array<uint8_t, MAX_INLINE_ARGS * ARG_SLOT_SIZE> inline_arg_storage;
   std::array<void*, MAX_INLINE_ARGS> inline_arg_values;
   alignas(16) ReturnValue return_value{};
 
@@ -1707,10 +1660,10 @@ Napi::Value FFIFunction::CallArguments(const FunctionArguments& info, const Napi
   ctx.errcheck = errcheck;
   ctx.argc = argc;
   ctx.expected_argc = expected_argc;
-  ctx.active_cif = active_cif;
-  ctx.active_plan = active_plan;
+  ctx.libffi = libffi;
   ctx.cache_entry = cache_entry;
   ctx.num_extra = num_extra;
+  ctx.num_marshaled_extra = num_marshaled_extra;
   ctx.extra_types_ptr = extra_types;
   ctx.extra_values = extra_values;
   ctx.scratch = scratch;
@@ -1742,20 +1695,16 @@ Napi::Value FFIFunction::CallArguments(const FunctionArguments& info, const Napi
   SelectReturnPtr(ctx);
 
   // ---- ffi_call + capture errno/GetLastError -----------------------
-  // Signature fisse semplici: chiamata diretta senza libffi (direct_call.h).
+  // Firme coperte: invoker direct fisso.
   // Altrimenti reusable call plan quando disponibile (fast path su x86-64;
   // fallback sicuro a ffi_call altrove e se l'allocazione del plan è fallita).
-  if (direct_invoker_ && ctx.active_cif == &cif_) [[likely]] {
+  if (cache_entry == nullptr && fixed_invoker_) [[likely]] {
     const SavedErrorState saved_errors = SwapInErrorState();
-    direct_invoker_(fn_ptr_, ctx.arg_values, ctx.return_ptr);
+    fixed_invoker_(fn_ptr_, ctx.arg_values, ctx.return_ptr);
     CaptureErrorState(saved_errors);
   } else {
     const SavedErrorState saved_errors = SwapInErrorState();
-    if (ctx.active_plan) [[likely]] {
-      ffi_call_plan_invoke(ctx.active_plan, FFI_FN(fn_ptr_), ctx.return_ptr, ctx.arg_values);
-    } else {
-      ffi_call(ctx.active_cif, FFI_FN(fn_ptr_), ctx.return_ptr, ctx.arg_values);
-    }
+    InvokeLibffi(ctx.libffi, fn_ptr_, ctx.return_ptr, ctx.arg_values);
     CaptureErrorState(saved_errors);
   }
 
@@ -1815,7 +1764,7 @@ Napi::Value FFIFunction::GetAddress(const Napi::CallbackInfo& info) {
 }
 
 // ============================================================================
-// CallAsync - Esegue ffi_call su un worker thread, ritorna Promise
+// CallAsync - Esegue l'invoker fisso o libffi su un worker, ritorna Promise
 // Supporta variadic, buffer pinning, string fixup
 // ============================================================================
 
@@ -1854,41 +1803,15 @@ Napi::Value FFIFunction::CallAsyncArguments(const FunctionArguments& info, const
     }
   }
 
-  // =====================================================================
-  // ---- Variadic CIF (owned by the worker thread) -------------------
-  // Variadic CIF (owned dal worker)
-  //
-  // Per il path sincrono possiamo usare la cache perché CIF e ffi_types
-  // vivono nell'istanza. Per async, il worker gira su un altro thread e
-  // deve possedere tutto → allochiamo su heap con unique_ptr.
-  // =====================================================================
-  std::unique_ptr<ffi_cif> owned_cif;
-  std::vector<ffi_type*> owned_ffi_types;
+  // Le firme extra hanno un CIF/array di tipi propri, preparati sul thread JS.
+  LibffiAsyncCallState libffi;
 
   if (is_variadic) {
-    owned_cif = std::make_unique<ffi_cif>();
-    owned_ffi_types.resize(argc);
-
-    // Copia tipi fissi
-    for (size_t i = 0; i < expected_argc; i++) {
-      owned_ffi_types[i] = ffi_arg_types_[i];
-    }
-    // Tipi extra (inferiti)
-    for (size_t i = 0; i < extra_types.size(); i++) {
-      owned_ffi_types[expected_argc + i] = CTypeToFFI(extra_types[i]);
-    }
-
-    // Python ctypes: senza argtypes gli argomenti sono fissi (vedi Call()).
-    ffi_status status =
-      expected_argc == 0
-        ? ffi_prep_cif(owned_cif.get(), abi_, static_cast<unsigned int>(argc), ffi_return_type_, owned_ffi_types.data())
-        : ffi_prep_cif_var(owned_cif.get(), abi_, static_cast<unsigned int>(expected_argc),
-                           static_cast<unsigned int>(argc), ffi_return_type_, owned_ffi_types.data());
-
-    if (status != FFI_OK) {
-      Napi::Error::New(env, "Failed to prepare variadic FFI call for async").ThrowAsJavaScriptException();
+    if (!PrepareAsyncFFI(env, argc, extra_types, libffi)) {
       return env.Undefined();
     }
+  } else if (!is_variadic && !fixed_invoker_ && !PrepareFFI(env)) {
+    return env.Undefined();
   }
 
   // =====================================================================
@@ -2087,9 +2010,9 @@ Napi::Value FFIFunction::CallAsyncArguments(const FunctionArguments& info, const
   // =====================================================================
 
   auto worker = std::make_unique<CallWorker>(
-    env, this, &cif_, fn_ptr_, return_type_, return_struct_info_, return_array_info_, std::move(async_arg_storage),
-    std::move(async_arg_values), std::move(async_string_buffer), std::move(string_fixups), std::move(wstring_fixups),
-    std::move(buffer_refs), std::move(owned_cif), std::move(owned_ffi_types), std::move(large_arg_buffers),
+    env, this, is_variadic ? nullptr : fixed_invoker_, fn_ptr_, return_type_, return_struct_info_, return_array_info_,
+    std::move(async_arg_storage), std::move(async_arg_values), std::move(async_string_buffer), std::move(string_fixups),
+    std::move(wstring_fixups), std::move(buffer_refs), std::move(libffi), std::move(large_arg_buffers),
     std::move(large_arg_indices), errcheck, info.HasResultHandler());
 
   if (errcheck != nullptr && !info.HasResultHandler()) {
@@ -2109,7 +2032,7 @@ Napi::Value FFIFunction::CallAsyncArguments(const FunctionArguments& info, const
 
 FFIFunction::CallWorker::CallWorker(Napi::Env env,
                                     FFIFunction* parent,
-                                    ffi_cif* cif,
+                                    FixedInvoker invoker,
                                     void* fn_ptr,
                                     CType return_type,
                                     std::shared_ptr<StructInfo> return_struct_info,
@@ -2120,14 +2043,15 @@ FFIFunction::CallWorker::CallWorker(Napi::Env env,
                                     std::vector<std::pair<size_t, size_t>>&& string_fixups,
                                     std::vector<std::pair<size_t, size_t>>&& wstring_fixups,
                                     std::vector<Napi::ObjectReference>&& buffer_refs,
-                                    std::unique_ptr<ffi_cif>&& owned_cif,
-                                    std::vector<ffi_type*>&& owned_ffi_types,
+                                    LibffiAsyncCallState&& libffi,
                                     std::vector<std::vector<uint8_t>>&& large_arg_buffers,
                                     std::vector<size_t>&& large_arg_indices,
                                     const Napi::Function* errcheck,
                                     bool result_handler)
   : Napi::AsyncWorker(env),
+    LibffiAsyncCallState(std::move(libffi)),
     ffi_function_(parent),
+    invoker_(invoker),
     fn_ptr_(fn_ptr),
     return_type_(return_type),
     return_struct_info_(std::move(return_struct_info)),
@@ -2138,8 +2062,6 @@ FFIFunction::CallWorker::CallWorker(Napi::Env env,
     string_fixups_(std::move(string_fixups)),
     wstring_fixups_(std::move(wstring_fixups)),
     buffer_refs_(std::move(buffer_refs)),
-    owned_cif_(std::move(owned_cif)),
-    owned_ffi_types_(std::move(owned_ffi_types)),
     large_arg_buffers_(std::move(large_arg_buffers)),
     large_arg_indices_(std::move(large_arg_indices)),
     return_ptr_(nullptr),
@@ -2157,8 +2079,7 @@ FFIFunction::CallWorker::CallWorker(Napi::Env env,
 
   return_value_ = {};
 
-  // Seleziona il CIF attivo: owned (variadic) o esterno (fisso)
-  active_cif_ = owned_cif_ ? owned_cif_.get() : cif;
+  Activate(*parent, invoker_ != nullptr);
 
   // Allocate return buffer for large struct/array returns
   return_ptr_ = &return_value_;
@@ -2178,6 +2099,7 @@ FFIFunction::CallWorker::CallWorker(Napi::Env env,
 
   // Ricalcola tutti i puntatori dopo il move
   FixupPointers();
+  // Il parent trattiene libreria e metadata.
   ffi_function_->Ref();
   if (ffi_function_->library_ != nullptr) {
     ffi_function_->library_->BeginCall();
@@ -2234,7 +2156,12 @@ void FFIFunction::CallWorker::Execute() {
   // *** WORKER THREAD - Nessun accesso a V8! ***
   try {
     const SavedErrorState saved = SwapErrorStateIn(capture_last_error_, capture_errno_, last_error_in_, errno_in_);
-    ffi_call(active_cif_, FFI_FN(fn_ptr_), return_ptr_, arg_values_.empty() ? nullptr : arg_values_.data());
+    void** args = arg_values_.empty() ? nullptr : arg_values_.data();
+    if (invoker_) {
+      invoker_(fn_ptr_, args, return_ptr_);
+    } else {
+      InvokeLibffi(*this, fn_ptr_, return_ptr_, args);
+    }
     // Snapshot su questo thread, subito dopo la chiamata (come CaptureErrorState).
     SwapErrorStateOut(capture_last_error_, capture_errno_, saved, last_error_, last_errno_);
   } catch (...) {

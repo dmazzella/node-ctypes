@@ -192,3 +192,70 @@ python3.15 -B -m unittest discover -s cpython_parity -t . -p 'test_*.py'
 Prefix JS commands with `NODE_CTYPES_NO_EXTERNAL_BUFFERS=1` to validate mirrored
 native memory. Native operating-system/architecture CI is still needed to
 certify those targets; a local run is not a cross-platform result.
+
+## Native backends and ABI regressions
+
+The [native source map](../README.md#native-backends-and-upstream-libffi)
+separates direct invokers and `libffi_*` descriptors/CIFs/plans/closures from
+shared Node-API conversions, sync/async ownership and TSFN delivery. CMake
+discovers sources recursively with `GLOB_RECURSE`/`CONFIGURE_DEPENDS`.
+Scalar/direct headers do not include libffi; shared return-word widths are
+checked against libffi and return-slot tests preserve sign extension and bounds.
+Layout metadata intentionally keeps a concrete owned libffi aggregate cache.
+
+[test_function_abi.js](./node_specific/test_function_abi.js) checks scalar
+register/stack overflow, 1-16-byte GP aggregates, nested/homogeneous float/double
+aggregates, large value copies, inferred signatures and variadic named prefixes
+in sync/async calls. [test_callback_abi.js](./node_specific/test_callback_abi.js)
+uses independently compiled C callers for scalar aliases, 32/33-argument
+signatures, GP/HFA/large arguments and private snapshots, for both ordinary
+and thread-safe callbacks. These suites run without any runtime backend opt-in.
+
+The libffi submodule is temporarily pinned to upstream
+`d02afc25e8ea3aac9e78e227748e1fd7c9f14c82`, including the Darwin GP stack-slot fix.
+Its remaining Darwin ARM64 indirect-pointer alignment limitation is documented
+in the source map above. One explicit TODO executes a safe C stack-tag probe
+for sync/async calls: it observes the incorrect scalar slots without
+dereferencing a corrupt pointer. It is not a claim that upstream fixes both
+defects. The large-aggregate dereferencing variants after a narrow stack scalar
+run only on unaffected targets; all other aggregate positions remain covered.
+
+Validate both build-time routes and both memory models, using the existing
+configured source build:
+
+```sh
+npx --no-install cmake-js configure --CDCTYPES_ENABLE_DIRECT_CALLS=OFF
+cmake --build build --target ctypes ctypes_test_fixture
+node --test --test-timeout=5000 tests/node_specific/test_function_abi.js tests/node_specific/test_callback_abi.js
+npm --prefix tests run test:js
+NODE_CTYPES_NO_EXTERNAL_BUFFERS=1 npm --prefix tests run test:js
+npx --no-install cmake-js configure --CDCTYPES_ENABLE_DIRECT_CALLS=ON
+cmake --build build --target ctypes ctypes_test_fixture
+npm --prefix tests run test:js
+NODE_CTYPES_NO_EXTERNAL_BUFFERS=1 npm --prefix tests run test:js
+```
+
+Keep the final ordinary build direct-enabled. Run TypeScript declarations,
+Python reference parity and TypeDoc validation using the commands above.
+Native CI is still required to certify other operating systems/architectures.
+
+[benchmark_koffi.js](./benchmarks/benchmark_koffi.js) retains the matched
+scalar/CFUNCTYPE, narrow GP/FP stack, struct/HFA/large-value, inferred/variadic
+and ordinary/thread-safe callback workloads. The C-loop row performs 64 i32
+callbacks per native invocation, checking the int64 sum 2080 in both APIs and
+reporting ns/op per batch, not per callback. Async rows include scheduling and
+Promise completion at concurrency 1/8; unsupported competitor APIs are reported
+as not compared. Run benchmarks serially; use `--filter "C-loop"`,
+`--filter "struct,HFA,double5"` or `--filter "async"` to select workloads.
+`npm run bench:koffi -- --duration 500 --output comparison.json` keeps at
+least nine samples per library and saves JSON plus the HTML report.
+
+[benchmark_node_ffi.js](./benchmarks/benchmark_node_ffi.js) covers 25 workloads:
+narrow scalars, GP/FP stack arguments, CFUNCTYPE callers, strings/buffers,
+field reads, scalar/C-loop callbacks, host-thread-safe dispatch and inferred
+mixed/10-integer calls. Its bool row uses numeric 0/1 input/output; inferred
+rows use explicitly typed node:ffi bindings, not automatic inference.
+Aggregate values/callbacks, true variadic signatures and async calls remain
+not compared rather than emulated. For example,
+`npm run bench:ffi -- --filter "narrow,C-loop,inferred" --output node-ffi.json`
+selects the stack, C-loop and inferred workloads with the same sampling rules.

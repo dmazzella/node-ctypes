@@ -41,36 +41,7 @@ size_t StructInfo::GetTypeAlignment(CType type, std::shared_ptr<StructInfo> nest
     return nested->GetAlignment();
   }
 
-  switch (type) {
-    case CType::CTYPES_INT8:
-    case CType::CTYPES_UINT8:
-    case CType::CTYPES_CHAR:
-    case CType::CTYPES_BOOL:
-      return 1;
-    case CType::CTYPES_INT16:
-    case CType::CTYPES_UINT16:
-      return 2;
-    case CType::CTYPES_WCHAR:
-      return alignof(wchar_t);  // 2 su Windows, 4 su Unix
-    case CType::CTYPES_INT32:
-    case CType::CTYPES_UINT32:
-    case CType::CTYPES_FLOAT:
-      return 4;
-    case CType::CTYPES_LONG:
-    case CType::CTYPES_ULONG:
-      return sizeof(long);  // 4 su Windows (LLP64), 8 su Unix 64-bit (LP64)
-    case CType::CTYPES_INT64:
-    case CType::CTYPES_UINT64:
-    case CType::CTYPES_DOUBLE:
-    case CType::CTYPES_POINTER:
-    case CType::CTYPES_STRING:
-    case CType::CTYPES_WSTRING:
-    case CType::CTYPES_SIZE_T:
-    case CType::CTYPES_SSIZE_T:
-      return sizeof(void*);  // 8 su x64, 4 su x86
-    default:
-      return 1;
-  }
+  return CTypeAlignment(type);
 }
 
 void StructInfo::AddField(const std::string& name, CType type, std::shared_ptr<StructInfo> nested, bool is_anonymous) {
@@ -154,132 +125,6 @@ void StructInfo::CalculateLayout() {
   // Padding finale per allineare la struct stessa
   size_t final_padding = (alignment_ - (size_ % alignment_)) % alignment_;
   size_ += final_padding;
-}
-
-#if defined(__x86_64__) && !defined(_WIN32)
-namespace {
-
-// libffi classifica le struct per i loro elementi e non applica la regola
-// System V "campo non allineato → MEMORY"; un elemento più grande di 32 byte è
-// sempre MEMORY. size e alignment della struct restano quelli dichiarati (libffi
-// non li ricalcola), quindi la copia sullo stack o tramite il puntatore nascosto
-// del risultato riguarda solo i byte della struct.
-ffi_type* kMemoryClassElements[] = {&ffi_type_uint8, nullptr};
-ffi_type kMemoryClassMarker = {64, 1, FFI_TYPE_STRUCT, kMemoryClassElements};
-
-// libffi non ha un tipo union: con i membri come elementi li dispone in
-// sequenza e classifica male gli eightbyte (libffi#33; union { double d;
-// int64_t i; } finirebbe in un registro SSE invece che INTEGER). Una union è
-// descritta come una sequenza di slot di min(allineamento, 8) byte, ognuno
-// con la classe System V dei membri che lo coprono: INTEGER se almeno uno è un
-// intero o un puntatore, SSE se sono tutti float/double.
-enum class SlotClass : uint8_t { kNone, kSse, kInteger };
-
-void ClassifySlots(const StructInfo& info, size_t base, size_t slot_size, std::span<SlotClass> slots);
-
-void ClassifyLeaf(CType type, size_t offset, size_t size, size_t slot_size, std::span<SlotClass> slots) {
-  const SlotClass leaf =
-    type == CType::CTYPES_FLOAT || type == CType::CTYPES_DOUBLE ? SlotClass::kSse : SlotClass::kInteger;
-  for (size_t slot = offset / slot_size; slot < slots.size() && slot * slot_size < offset + size; slot++) {
-    slots[slot] = std::max(slots[slot], leaf);
-  }
-}
-
-void ClassifySlots(const StructInfo& info, size_t base, size_t slot_size, std::span<SlotClass> slots) {
-  for (const auto& field : info.GetFields()) {
-    const size_t offset = base + field.offset;
-    if (field.array_type) {
-      const ArrayInfo& array = *field.array_type;
-      const size_t element_size = array.GetCount() == 0 ? 0 : array.GetSize() / array.GetCount();
-      for (size_t i = 0; i < array.GetCount(); i++) {
-        if (const auto element = array.GetElementStruct()) {
-          ClassifySlots(*element, offset + i * element_size, slot_size, slots);
-        } else {
-          ClassifyLeaf(array.GetElementType(), offset + i * element_size, element_size, slot_size, slots);
-        }
-      }
-    } else if (field.struct_type) {
-      ClassifySlots(*field.struct_type, offset, slot_size, slots);
-    } else {
-      ClassifyLeaf(field.type, offset, field.size, slot_size, slots);
-    }
-  }
-}
-
-ffi_type* SlotType(SlotClass slot, size_t slot_size) {
-  if (slot == SlotClass::kSse && slot_size == 8) {
-    return &ffi_type_double;
-  }
-  if (slot == SlotClass::kSse && slot_size == 4) {
-    return &ffi_type_float;
-  }
-  switch (slot_size) {
-    case 8:
-      return &ffi_type_uint64;
-    case 4:
-      return &ffi_type_uint32;
-    case 2:
-      return &ffi_type_uint16;
-    default:
-      return &ffi_type_uint8;
-  }
-}
-
-}  // namespace
-#endif
-
-ffi_type* StructInfo::GetFFIType() {
-  Finalize();
-  if (ffi_type_) {
-    return ffi_type_.get();
-  }
-
-  ffi_field_types_.clear();
-#if defined(__x86_64__) && !defined(_WIN32)
-  if (memory_class_) {
-    ffi_field_types_ = {&kMemoryClassMarker, nullptr};
-    ffi_type_ = std::make_unique<ffi_type>();
-    ffi_type_->size = size_;
-    ffi_type_->alignment = static_cast<unsigned short>(alignment_);
-    ffi_type_->type = FFI_TYPE_STRUCT;
-    ffi_type_->elements = ffi_field_types_.data();
-    return ffi_type_.get();
-  }
-  if (is_union_ && size_ > 0) {
-    const size_t slot_size = std::min<size_t>(alignment_, 8);
-    std::vector<SlotClass> slots(size_ / slot_size, SlotClass::kNone);
-    ClassifySlots(*this, 0, slot_size, slots);
-    for (const SlotClass slot : slots) {
-      ffi_field_types_.push_back(SlotType(slot, slot_size));
-    }
-    ffi_field_types_.push_back(nullptr);
-    ffi_type_ = std::make_unique<ffi_type>();
-    ffi_type_->size = size_;
-    ffi_type_->alignment = static_cast<unsigned short>(alignment_);
-    ffi_type_->type = FFI_TYPE_STRUCT;
-    ffi_type_->elements = ffi_field_types_.data();
-    return ffi_type_.get();
-  }
-#endif
-  for (const auto& field : fields_) {
-    if (field.array_type) {
-      ffi_field_types_.push_back(field.array_type->GetFFIType());
-    } else if (field.struct_type) {
-      ffi_field_types_.push_back(field.struct_type->GetFFIType());
-    } else {
-      ffi_field_types_.push_back(CTypeToFFI(field.type));
-    }
-  }
-
-  ffi_field_types_.push_back(nullptr);  // Terminatore
-
-  ffi_type_ = std::make_unique<ffi_type>();
-  ffi_type_->size = size_;
-  ffi_type_->alignment = static_cast<unsigned short>(alignment_);
-  ffi_type_->type = FFI_TYPE_STRUCT;
-  ffi_type_->elements = ffi_field_types_.data();
-
-  return ffi_type_.get();
 }
 
 bool StructInfo::JSToStruct(Napi::Env env,
@@ -392,43 +237,7 @@ ArrayInfo::ArrayInfo(CType element_type, size_t count, std::shared_ptr<StructInf
   } else {
     element_size_ = CTypeSize(element_type);
 
-    // Alignment dell'elemento
-    switch (element_type) {
-      case CType::CTYPES_INT8:
-      case CType::CTYPES_UINT8:
-      case CType::CTYPES_CHAR:
-      case CType::CTYPES_BOOL:
-        alignment_ = 1;
-        break;
-      case CType::CTYPES_INT16:
-      case CType::CTYPES_UINT16:
-        alignment_ = 2;
-        break;
-      case CType::CTYPES_WCHAR:
-        alignment_ = alignof(wchar_t);  // 2 su Windows, 4 su Unix
-        break;
-      case CType::CTYPES_INT32:
-      case CType::CTYPES_UINT32:
-      case CType::CTYPES_FLOAT:
-        alignment_ = 4;
-        break;
-      case CType::CTYPES_LONG:
-      case CType::CTYPES_ULONG:
-        alignment_ = sizeof(long);  // 4 su Windows (LLP64), 8 su Unix 64-bit (LP64)
-        break;
-      case CType::CTYPES_INT64:
-      case CType::CTYPES_UINT64:
-      case CType::CTYPES_DOUBLE:
-      case CType::CTYPES_POINTER:
-      case CType::CTYPES_STRING:
-      case CType::CTYPES_WSTRING:
-      case CType::CTYPES_SIZE_T:
-      case CType::CTYPES_SSIZE_T:
-        alignment_ = sizeof(void*);
-        break;
-      default:
-        alignment_ = 1;
-    }
+    alignment_ = CTypeAlignment(element_type);
   }
 
   size_ = element_size_ * count_;
@@ -440,40 +249,6 @@ void ArrayInfo::Finalize() {
   if (element_struct_) {
     element_struct_->Finalize();
   }
-}
-
-ffi_type* ArrayInfo::GetFFIType() {
-  Finalize();
-  if (ffi_type_) {
-    return ffi_type_.get();
-  }
-
-  // Array è rappresentato in libffi come struct con elementi ripetuti
-  ffi_element_types_.clear();
-  ffi_element_types_.reserve(count_ + 1);
-
-  ffi_type* element_ffi;
-  if (element_struct_) {
-    element_ffi = element_struct_->GetFFIType();
-  } else {
-    element_ffi = CTypeToFFI(element_type_);
-  }
-
-  // Ripeti element_ffi count_ volte
-  for (size_t i = 0; i < count_; i++) {
-    ffi_element_types_.push_back(element_ffi);
-  }
-  // Terminator NULL
-  ffi_element_types_.push_back(nullptr);
-
-  // Crea ffi_type
-  ffi_type_ = std::make_unique<ffi_type>();
-  ffi_type_->size = size_;
-  ffi_type_->alignment = static_cast<unsigned short>(alignment_);
-  ffi_type_->type = FFI_TYPE_STRUCT;  // Array come struct
-  ffi_type_->elements = ffi_element_types_.data();
-
-  return ffi_type_.get();
 }
 
 bool ArrayInfo::JSToArray(Napi::Env env,

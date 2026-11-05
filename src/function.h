@@ -1,8 +1,9 @@
 #pragma once
 
 #include "addon.h"
-#include "direct_call.h"
+#include "call_abi.h"
 #include "layout.h"
+#include "libffi_call.h"
 #include "library.h"
 #include "napi_fast.h"
 #include "shared.h"
@@ -10,52 +11,29 @@
 
 namespace ctypes {
 
-// Calling conventions supportate
-enum class CallConv { CTYPES_DEFAULT, CTYPES_CDECL, CTYPES_STDCALL, CTYPES_FASTCALL, CTYPES_THISCALL };
-
-[[nodiscard]] CallConv StringToCallConv(std::string_view name);
-[[nodiscard]] ffi_abi CallConvToFFI(CallConv conv);
-
 // Costanti per ottimizzazione
 static constexpr size_t MAX_INLINE_ARGS = 16;
 static constexpr size_t ARG_SLOT_SIZE = 16;  // Abbastanza per qualsiasi tipo base
 static constexpr size_t RETURN_BUFFER_SIZE = 64;
-static constexpr size_t MAX_VARIADIC_EXTRA_ARGS = 8;    // Per stack allocation
-static constexpr size_t MAX_CACHED_VARIADIC_CIFS = 16;  // Cache per pattern comuni
-static constexpr size_t SMALL_STRING_BUFFER = 1024;     // Stack buffer per stringhe piccole
+static constexpr size_t MAX_VARIADIC_EXTRA_ARGS = MAX_INLINE_ARGS;  // Per stack allocation
+static constexpr size_t MAX_CACHED_EXTRA_CALLS = 16;                // Cache per pattern comuni
+static constexpr size_t SMALL_STRING_BUFFER = 1024;                 // Stack buffer per stringhe piccole
 
-// Valore restituito da libffi o dal direct invoker: byte grezzi, letti con
+// Valore restituito da libffi o da un fixed invoker: byte grezzi, letti con
 // LoadAs<T> (leggere un membro non attivo di una union è indefinito in C++).
-// libffi scrive almeno un ffi_arg, con i tipi più stretti estesi.
+// Ogni invoker usa lo slot AbiWord, con i tipi interi piu' stretti estesi.
 struct ReturnValue {
   alignas(8) std::array<std::byte, 8> bytes{};
 };
 
-// Cache entry per CIF variadici (es. sprintf con 1-2 argomenti extra)
-struct VariadicCifCache {
-  size_t total_args = 0;  // Numero totale argomenti (fissi + variadici)
-  ffi_cif cif;
-  std::vector<ffi_type*> ffi_types;
+// Firme concrete dedotte o variadiche, con CIF/plan libffi lazy.
+struct ExtraCallCache : LibffiExtraCallState {
+  size_t total_args = 0;           // Numero totale argomenti (fissi + variadici)
   std::vector<CType> extra_types;  // Tipi degli argomenti extra
   bool valid = false;
-  // Chiamate in corso che usano questo CIF: una chiamata rientrante (da un
+  // Chiamate in corso che usano la firma: una chiamata rientrante (da un
   // callback) non può ricostruire lo slot mentre la chiamata esterna lo usa.
   uint32_t in_use = 0;
-  // Reusable call plan per questo CIF variadico (libffi 3.7+). Ricostruito
-  // insieme al cif quando lo slot viene riutilizzato.
-  ffi_call_plan* plan = nullptr;
-
-  VariadicCifCache() = default;
-  VariadicCifCache(const VariadicCifCache&) = delete;
-  VariadicCifCache& operator=(const VariadicCifCache&) = delete;
-  ~VariadicCifCache() { ResetPlan(); }
-
-  void ResetPlan() noexcept {
-    if (plan) {
-      ffi_call_plan_free(plan);
-      plan = nullptr;
-    }
-  }
 };
 
 // Buffer heap di una chiamata sincrona. L'istanza ne riusa uno (capacità
@@ -131,7 +109,7 @@ concept ArgumentList =
 #endif
 
 // Wrapper per una funzione C chiamabile da JavaScript
-class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
+class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallState {
  public:
   static Napi::Function GetClass(Napi::Env env);
 
@@ -151,19 +129,19 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
   //   2. SelectReturnPtr       — gestisce il return buffer per struct/array grandi
   //   3. CaptureErrorState     — snapshot di errno/GetLastError post-ffi_call
   //   4. FinalizeCall          — convert return + errcheck
-  // The variadic setup block (CIF cache lookup + prep_cif_var) resta inline
-  // in Call() perché usa SBO stack arrays che sarebbero persi con
-  // l'estrazione.
+  // La selezione della firma extra resta nel frame della chiamata per
+  // mantenere vivi gli array SBO dei tipi e dei valori dedotti.
   // ==========================================================================
   struct CallContext {
     Napi::Env env;
     const FunctionArguments& info;
     size_t argc = 0;
     size_t expected_argc = 0;
-    ffi_cif* active_cif = nullptr;
-    ffi_call_plan* active_plan = nullptr;
-    VariadicCifCache* cache_entry = nullptr;
+    LibffiCallContext libffi{};
+    ExtraCallCache* cache_entry = nullptr;
     size_t num_extra = 0;
+    // Prefisso numerico extra gia' copiato negli slot inline durante l'inferenza.
+    size_t num_marshaled_extra = 0;
     // Puntatore al primo elemento dell'array di tipi extra (che risiede
     // su stack o heap nel frame di Call()). Valido solo se need_reprep.
     const CType* extra_types_ptr = nullptr;
@@ -221,7 +199,12 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
                                             std::vector<Napi::ObjectReference>* owners = nullptr);
 
  private:
+  using FixedInvoker = void (*)(void* fn, void** args, void* ret);
+
+  bool PrepareCall(Napi::Env env);
+  void PrepareFFITypes();
   bool PrepareFFI(Napi::Env env);
+  bool PrepareAsyncFFI(Napi::Env env, size_t argc, std::span<const CType> extra_types, LibffiAsyncCallState& state);
 
   // Entry point of the per-instance `call` function: the FFIFunction* is the
   // function's N-API data, so the hot path skips the napi_unwrap of InstanceMethod.
@@ -229,10 +212,10 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
   Napi::Value CallFromInfo(const Napi::CallbackInfo& info);
   static Napi::Value FastCheckedCall(const Napi::CallbackInfo& info);
   void InstallFastCall(Napi::Env env);
-  void SetupDirectCall();
+  void SetupFixedCall();
 
-  // Firma semplice (vedi SimpleCall): argomenti fissi primitivi, puntatori o
-  // stringhe e ritorno che non è una struct/array. Calcolato in PrepareFFI.
+  // Firma semplice (vedi SimpleCall): scalari, puntatori, stringhe e piccoli
+  // aggregati negli slot inline. Calcolato in PrepareCall.
   static constexpr size_t kMaxSimpleArgs = 8;
   static constexpr size_t kMaxSimpleStructReturn = 64;
   bool simple_call_ = false;
@@ -268,23 +251,20 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
                                             size_t& out_argc,
                                             bool& out_is_variadic) const;
 
-  // CIF per una call variadica: uno slot della cache con gli stessi tipi, uno
-  // slot libero da ricostruire o, se sono tutti in uso, `fallback`. nullptr se
-  // ffi_prep_cif fallisce (eccezione JS già lanciata).
-  [[nodiscard]] VariadicCifCache* AcquireVariadicCif(Napi::Env env,
-                                                     size_t argc,
-                                                     const CType* extra_types,
-                                                     size_t num_extra,
-                                                     std::optional<VariadicCifCache>& fallback);
+  // Uno slot con la stessa firma, uno libero o, se sono tutti in uso, `fallback`.
+  [[nodiscard]] ExtraCallCache* AcquireExtraCall(size_t argc,
+                                                 std::span<const CType> extra_types,
+                                                 std::optional<ExtraCallCache>& fallback);
+  [[nodiscard]] bool PrepareExtraFFI(Napi::Env env, ExtraCallCache& entry);
 
   // ============================================================
   // Nested async worker for CallAsync (no separate files)
   // ============================================================
-  class CallWorker : public Napi::AsyncWorker {
+  class CallWorker : public Napi::AsyncWorker, private LibffiAsyncCallState {
    public:
     CallWorker(Napi::Env env,
                FFIFunction* ffi_function,
-               ffi_cif* cif,
+               FixedInvoker invoker,
                void* fn_ptr,
                CType return_type,
                std::shared_ptr<StructInfo> return_struct_info,
@@ -295,8 +275,7 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
                std::vector<std::pair<size_t, size_t>>&& string_fixups,
                std::vector<std::pair<size_t, size_t>>&& wstring_fixups,
                std::vector<Napi::ObjectReference>&& buffer_refs,
-               std::unique_ptr<ffi_cif>&& owned_cif,
-               std::vector<ffi_type*>&& owned_ffi_types,
+               LibffiAsyncCallState&& libffi,
                std::vector<std::vector<uint8_t>>&& large_arg_buffers,
                std::vector<size_t>&& large_arg_indices,
                const Napi::Function* errcheck,
@@ -313,7 +292,7 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
     void FixupPointers();
 
     FFIFunction* ffi_function_;
-    ffi_cif* active_cif_;
+    FixedInvoker invoker_;
     void* fn_ptr_;
     CType return_type_;
     std::shared_ptr<StructInfo> return_struct_info_;
@@ -325,8 +304,6 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
     std::vector<std::pair<size_t, size_t>> string_fixups_;
     std::vector<std::pair<size_t, size_t>> wstring_fixups_;
     std::vector<Napi::ObjectReference> buffer_refs_;
-    std::unique_ptr<ffi_cif> owned_cif_;
-    std::vector<ffi_type*> owned_ffi_types_;
     std::vector<std::vector<uint8_t>> large_arg_buffers_;  // overflow for struct/array > ARG_SLOT_SIZE
     std::vector<size_t> large_arg_indices_;                // which arg slots use large_arg_buffers_ (in order)
     std::vector<uint8_t> return_buffer_;                   // for struct/array returns > sizeof(ReturnValue)
@@ -335,7 +312,7 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
     Napi::FunctionReference errcheck_ref_;
     bool result_handler_;
     Napi::ObjectReference args_ref_;  // JS arguments, for errcheck(result, func, args)
-    // use_last_error / use_errno: snapshot on the worker thread, right after ffi_call
+    // use_last_error / use_errno: snapshot sul worker subito dopo la chiamata nativa.
     bool capture_last_error_;
     bool capture_errno_;
     bool struct_as_buffer_;
@@ -350,20 +327,8 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
   void* fn_ptr_;
   std::string name_;
 
-  // FFI stuff
-  ffi_cif cif_;
-  bool cif_prepared_;
-  ffi_abi abi_;
-
-  // Reusable call plan per la signature fissa (libffi 3.7+). Costruito una volta
-  // in PrepareFFI e riusato ad ogni chiamata: cattura il posizionamento degli
-  // argomenti così ffi_call_plan_invoke evita di riclassificarli. Su x86-64 usa
-  // il fast path di libffi; altrove ffi_call_plan_invoke ricade su ffi_call.
-  ffi_call_plan* call_plan_ = nullptr;
-
-  // Direct-call fast path (see direct_call.h); nullptr when the signature is
-  // not eligible and the call goes through libffi.
-  direct::Invoker direct_invoker_ = nullptr;
+  // Direct per la firma fissa; nullptr seleziona libffi.
+  FixedInvoker fixed_invoker_ = nullptr;
 
   // Tipi
   CType return_type_;
@@ -374,10 +339,6 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
   std::shared_ptr<ArrayInfo> return_array_info_;
   std::vector<std::shared_ptr<StructInfo>> arg_struct_infos_;
   std::vector<std::shared_ptr<ArrayInfo>> arg_array_infos_;
-
-  // Cache dei tipi FFI
-  ffi_type* ffi_return_type_;
-  std::vector<ffi_type*> ffi_arg_types_;
 
   // ============================================================
   // Stato delle chiamate sincrone. Slot inline, return value e stringhe corte
@@ -399,9 +360,9 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction> {
   Napi::ObjectReference library_ref_;
 
   // ============================================================
-  // Cache per CIF variadici (ottimizzazione chiamate ripetute)
+  // Cache delle firme concrete con argomenti oltre gli argtypes
   // ============================================================
-  std::array<VariadicCifCache, MAX_CACHED_VARIADIC_CIFS> variadic_cache_;
+  std::array<ExtraCallCache, MAX_CACHED_EXTRA_CALLS> extra_call_cache_;
   size_t next_cache_slot_;  // Round-robin replacement
 
   // ============================================================

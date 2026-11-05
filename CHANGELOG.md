@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-11-05
+
+### Added
+
+- **Backend-independent ABI regressions**: compiled C callers verify scalar
+  aliases, narrow GP/FP stack arguments, small/large aggregates and homogeneous
+  float/double aggregates for sync/async calls and ordinary/thread-safe callbacks.
+  Include Darwin stack-slot coverage and a safe indirect-pointer alignment TODO.
+- **Koffi C-loop callback comparison**: check 64 consecutive i32 callbacks per
+  native call with the same C fixture, reporting batch latency separately from
+  the single-callback workload and normalizing both int64 results to Number.
+- **node:ffi benchmark coverage**: expand to 25 workloads with narrow scalars,
+  GP/FP stack arguments, C-loop/host-thread-safe callbacks and inferred calls.
+  Document numeric bool normalization and explicitly typed inference counterparts;
+  unsupported aggregate, variadic and async APIs remain not compared.
+
+### Changed
+
+- **Native backend source boundaries**: keep `src` flat and isolate
+  `libffi_types`, `libffi_call` and `libffi_callback`, with concrete RAII-managed
+  state and lazy descriptor caches. Common wrappers retain Node-API marshalling,
+  selection and sync/async/TSFN ownership. Scalar/direct headers no longer depend
+  on libffi; return-word compatibility is checked at compile time. CMake discovers
+  native sources with `GLOB_RECURSE` and `CONFIGURE_DEPENDS`.
+- **libffi upstream alignment**: temporarily pin the unmodified submodule to
+  `d02afc25e8ea3aac9e78e227748e1fd7c9f14c82` for the Darwin small-composite
+  stack-slot fixes and regenerate integration headers, pending an official tag.
+  The indirect-pointer alignment defect remains tracked in
+  [libffi/libffi#1057](https://github.com/libffi/libffi/issues/1057), without a local vendor patch.
+- **Fixed sync/async preparation**: select direct invokers from finalized native
+  metadata before preparing libffi types, CIFs or call plans; fixed workers reuse
+  that selection and pin the parent function and library. Unsupported signatures
+  retain eager libffi setup. Extra calls use cached sync or worker-owned async
+  CIFs, prepared on the JavaScript thread without changing the fixed invoker.
+
+### Performance
+
+- **Inferred and variadic arguments**: bypass object conversion for primitive
+  JavaScript extras and keep type/value metadata for up to 16 extras on the stack.
+  Generic sync calls fuse inference/storage for leading numeric extras within
+  16 total arguments. Preserve the eight-argument simple path, conversion order,
+  scalar snapshots and ownership, with boundary, promotion, wide/non-finite
+  number and reentrant-cache regressions.
+- **Owned callback snapshots**: reuse the existing aligned JavaScript buffer
+  pool for eligible high-level arguments, with independent, never-recycled
+  slices; raw native and over-aligned arguments retain Node-API copies.
+  Cache standard handlers and readers, not individual views, while respecting
+  custom definition getters and mirrored synchronization.
+
 ## [2.8.0] - 2026-11-04
 
 ### Fixed
@@ -1071,7 +1120,8 @@ It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-
 
 Initial releases.
 
-[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.8.0...HEAD
+[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.9.0...HEAD
+[2.9.0]: https://github.com/dmazzella/node-ctypes/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/dmazzella/node-ctypes/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/dmazzella/node-ctypes/compare/v2.6.0...v2.7.0
 [2.6.0]: https://github.com/dmazzella/node-ctypes/compare/v2.5.0...v2.6.0

@@ -1,6 +1,7 @@
 #include "callback.h"
 
-#include "function.h"  // For StringToCallConv, CallConvToFFI
+#include "addon.h"
+#include "call_abi.h"
 #include "types.h"
 
 namespace ctypes {
@@ -29,7 +30,7 @@ bool StoreJSCallbackResult(const Napi::Value& result, CType type, void* destinat
   if (ReturnStorageSize(type) == size) {
     return JSToC(result, type, std::span(static_cast<uint8_t*>(destination), size)) > 0;
   }
-  std::array<uint8_t, sizeof(ffi_arg)> bytes{};
+  std::array<uint8_t, sizeof(AbiWord)> bytes{};
   if (JSToC(result, type, std::span(bytes).first(size)) <= 0) {
     return false;
   }
@@ -106,16 +107,38 @@ void ParseCallbackTypes(const Napi::CallbackInfo& info, CType& return_type, std:
   }
 }
 
-[[nodiscard]] ffi_type* CallbackArgFFIType(const TypeSpec& type) {
-  return type.struct_info ? type.struct_info->GetFFIType() : CTypeToFFI(type.type);
+Napi::FunctionReference CallbackBufferAllocator(const Napi::CallbackInfo& info) {
+  if (info.Length() <= 6 || info[6].IsUndefined()) {
+    return {};
+  }
+  if (!info[6].IsFunction()) {
+    throw Napi::TypeError::New(info.Env(), "Callback buffer allocator must be a function");
+  }
+  return Napi::Persistent(info[6].As<Napi::Function>());
 }
 
 // Argomento di un callback: i primitivi con CToJS, le struct per valore come
-// copia in un Buffer (la memoria di libffi vale solo durante la chiamata), che
+// copia in un Buffer (la memoria ABI vale solo durante la chiamata), che
 // il layer JS avvolge in un'istanza della classe.
-[[nodiscard]] Napi::Value CallbackArgToJS(Napi::Env env, void* arg, const TypeSpec& type) {
+[[nodiscard]] Napi::Value CallbackArgToJS(Napi::Env env,
+                                          void* arg,
+                                          const TypeSpec& type,
+                                          const Napi::FunctionReference& allocator) {
   if (type.struct_info || type.scalar_buffer) {
     const size_t size = type.struct_info ? type.struct_info->GetSize() : CTypeSize(type.type);
+    // Il pool JS allinea a 8 byte; i layout sovra-allineati mantengono l'allocatore nativo.
+    if (!allocator.IsEmpty() && (!type.struct_info || type.struct_info->GetAlignment() <= 8)) {
+      const Napi::Value value = allocator.Call({Napi::Number::New(env, size)});
+      if (!value.IsBuffer()) {
+        throw Napi::TypeError::New(env, "Callback buffer allocator must return a Buffer");
+      }
+      const auto buffer = value.As<Napi::Buffer<uint8_t>>();
+      if (buffer.Length() != size) {
+        throw Napi::RangeError::New(env, "Callback buffer allocator returned a buffer of the wrong size");
+      }
+      std::memcpy(buffer.Data(), arg, size);
+      return buffer;
+    }
     return Napi::Buffer<uint8_t>::Copy(env, static_cast<const uint8_t*>(arg), size);
   }
   return CToJS(env, arg, type.type);
@@ -143,12 +166,7 @@ void EmitCallbackWarning(Napi::Env env, const std::string& message, const char* 
 // Callback - Solo main thread, semplice e veloce
 // ========================================================================
 
-namespace {
-
-// Handler per Callback (main thread only)
-void CallbackHandler(ffi_cif* cif, void* ret, void** args, void* user_data) {
-  CallbackData* data = static_cast<CallbackData*>(user_data);
-
+void DispatchCallback(CallbackData* data, void* ret, void** args) {
   if (data->released.load(std::memory_order_acquire)) {
     // Callback rilasciato, ritorna zero
     ZeroReturnValue(data->return_type, ret);
@@ -170,26 +188,38 @@ void CallbackHandler(ffi_cif* cif, void* ret, void** args, void* user_data) {
   // Converti argomenti C -> JS
   Napi::Env env = data->js_function_ref.Env();
   Napi::HandleScope scope(env);
+  const size_t nargs = data->arg_types.size();
 
   // SBO: usa stack buffer per callback comuni, heap solo se necessario
   napi_value inline_args[kMaxInlineCallbackArgs];
   std::vector<napi_value> heap_args;
   napi_value* js_args;
 
-  if (cif->nargs <= kMaxInlineCallbackArgs) {
+  if (nargs <= kMaxInlineCallbackArgs) {
     js_args = inline_args;
   } else {
-    heap_args.resize(cif->nargs);
+    heap_args.resize(nargs);
     js_args = heap_args.data();
   }
 
-  for (unsigned int i = 0; i < cif->nargs; i++) {
-    js_args[i] = CallbackArgToJS(env, args[i], data->arg_types[i]);
+  try {
+    for (size_t i = 0; i < nargs; i++) {
+      js_args[i] = CallbackArgToJS(env, args[i], data->arg_types[i], data->buffer_allocator_ref);
+    }
+  } catch (const Napi::Error& error) {
+    const auto& message = error.Message();
+    {
+      std::lock_guard lock(data->error_mutex);
+      data->last_error = message;
+    }
+    EmitCallbackWarning(env, message, "CallbackError");
+    ZeroReturnValue(data->return_type, ret);
+    return;
   }
 
   Napi::Value result;
   std::string error_msg;
-  if (!CallJSCallback(env, data->js_function_ref.Value(), cif->nargs, js_args, result, error_msg)) {
+  if (!CallJSCallback(env, data->js_function_ref.Value(), nargs, js_args, result, error_msg)) {
     if (error_msg.empty()) {
       error_msg = "Unknown error in callback";
     }
@@ -219,7 +249,7 @@ void CallbackHandler(ffi_cif* cif, void* ret, void** args, void* user_data) {
 
   // Converti risultato JS -> C direttamente nel buffer di ret, senza
   // heap-allocare un vettore temporaneo e memcpy in ogni invocazione.
-  // `ret` è fornito da libffi ed è abbastanza grande per il tipo dichiarato.
+  // Libffi fornisce uno slot abbastanza grande per il tipo dichiarato.
   if (data->return_type != CType::CTYPES_VOID) {
     try {
       if (!StoreJSCallbackResult(result, data->return_type, ret)) {
@@ -237,8 +267,6 @@ void CallbackHandler(ffi_cif* cif, void* ret, void** args, void* user_data) {
     }
   }
 }
-
-}  // namespace
 
 Napi::Function Callback::GetClass(Napi::Env env) {
   return DefineClass(env, "Callback",
@@ -268,41 +296,29 @@ Callback::Callback(const Napi::CallbackInfo& info) : Napi::ObjectWrap<Callback>(
   data_->js_function_ref = Napi::Persistent(info[0].As<Napi::Function>());
 
   ParseCallbackTypes(info, data_->return_type, data_->arg_types);
+  data_->buffer_allocator_ref = CallbackBufferAllocator(info);
 
   // Legge il quarto argomento opzionale: la stringa della convenzione di chiamata.
-  ffi_abi abi = FFI_DEFAULT_ABI;
+  CallConv conv = CallConv::CTYPES_DEFAULT;
   if (info.Length() > 3 && info[3].IsString()) {
-    abi = CallConvToFFI(StringToCallConv(info[3].As<Napi::String>().Utf8Value()));
+    conv = StringToCallConv(info[3].As<Napi::String>().Utf8Value());
   }
-
-  // Prepara FFI types
-  data_->ffi_return_type = CTypeToFFI(data_->return_type);
   for (const auto& type : data_->arg_types) {
-    data_->ffi_arg_types.push_back(CallbackArgFFIType(type));
+    if (type.struct_info) {
+      type.struct_info->Finalize();
+    }
   }
 
-  // Prepara CIF
-  ffi_status status =
-    ffi_prep_cif(&data_->cif, abi, static_cast<unsigned int>(data_->ffi_arg_types.size()), data_->ffi_return_type,
-                 data_->ffi_arg_types.empty() ? nullptr : data_->ffi_arg_types.data());
-
-  if (status != FFI_OK) {
-    Napi::Error::New(env, "Failed to prepare callback CIF").ThrowAsJavaScriptException();
+  if (!data_->PrepareCIF(env, data_->return_type, data_->arg_types, conv)) {
     return;
   }
-
-  // Alloca closure
-  data_->closure.reset(static_cast<ffi_closure*>(ffi_closure_alloc(sizeof(ffi_closure), &data_->code_ptr)));
-
-  if (!data_->closure) {
+  if (!data_->AllocateClosure(data_->code_ptr)) {
     Napi::Error::New(env, "Failed to allocate FFI closure").ThrowAsJavaScriptException();
     return;
   }
 
   // Prepara closure
-  status = ffi_prep_closure_loc(data_->closure.get(), &data_->cif, CallbackHandler, data_.get(), data_->code_ptr);
-
-  if (status != FFI_OK) {
+  if (!data_->PrepareClosure(LibffiCallbackHandler, data_.get(), data_->code_ptr)) {
     data_->closure.reset();
     Napi::Error::New(env, "Failed to prepare FFI closure").ThrowAsJavaScriptException();
     return;
@@ -317,14 +333,19 @@ Callback::Callback(const Napi::CallbackInfo& info) : Napi::ObjectWrap<Callback>(
 }
 
 Callback::~Callback() {
-  // Cleanup - il flag atomico previene double-free
+  ReleaseResources();
+}
+
+void Callback::ReleaseResources() {
   if (data_ && !data_->released.exchange(true)) {
     data_->closure.reset();
-    // Reset() è sicuro qui perché N-API lo gestisce internamente
-    // Se chiamato dal GC, N-API lo fa in modo thread-safe
     if (!data_->js_function_ref.IsEmpty()) {
       data_->js_function_ref.Reset();
     }
+    if (!data_->error_handler_ref.IsEmpty()) {
+      data_->error_handler_ref.Reset();
+    }
+    data_->buffer_allocator_ref.Reset();
   }
 }
 
@@ -340,13 +361,7 @@ Napi::Value Callback::GetPointer(const Napi::CallbackInfo& info) {
 }
 
 Napi::Value Callback::Release(const Napi::CallbackInfo& info) {
-  if (data_ && !data_->released.exchange(true)) {
-    data_->closure.reset();
-    data_->js_function_ref.Reset();
-    if (!data_->error_handler_ref.IsEmpty()) {
-      data_->error_handler_ref.Reset();
-    }
-  }
+  ReleaseResources();
   return info.Env().Undefined();
 }
 
@@ -425,7 +440,7 @@ void InvokeThreadSafeCallback(Napi::Env env,
 
   try {
     for (size_t i = 0; i < nargs; i++) {
-      js_args[i] = CallbackArgToJS(env, args[i], data->arg_types[i]);
+      js_args[i] = CallbackArgToJS(env, args[i], data->arg_types[i], data->buffer_allocator_ref);
     }
 
     Napi::Value result;
@@ -516,9 +531,11 @@ namespace {
 
 class NativeCallbackScope final {
  public:
-  NativeCallbackScope(ThreadSafeCallbackData& data, PendingCallbackCall& call, bool foreign)
-    : data_(data), call_(call) {
-    data_.active_calls.fetch_add(1, std::memory_order_acq_rel);
+  NativeCallbackScope(ThreadSafeCallbackData& data, PendingCallbackCall& call, bool foreign, bool counted)
+    : data_(data), call_(call), counted_(counted) {
+    if (counted_) {
+      data_.active_calls.fetch_add(1, std::memory_order_acq_rel);
+    }
     if (foreign && data_.native_context) {
       suspended_state_.emplace(data_.native_context->suspend());
     }
@@ -532,7 +549,9 @@ class NativeCallbackScope final {
     if (call_.native_error != nullptr) {
       data_.native_context->on_error(call_.native_error);
     }
-    data_.active_calls.fetch_sub(1, std::memory_order_release);
+    if (counted_) {
+      data_.active_calls.fetch_sub(1, std::memory_order_release);
+    }
   }
 
   NativeCallbackScope(const NativeCallbackScope&) = delete;
@@ -544,14 +563,15 @@ class NativeCallbackScope final {
   ThreadSafeCallbackData& data_;
   PendingCallbackCall& call_;
   std::optional<NativeCallbackContext::State> suspended_state_;
+  bool counted_;
 };
 
 static_assert(!std::copyable<NativeCallbackScope> && !std::movable<NativeCallbackScope>);
 
-// Handler per ThreadSafeCallback
-void ThreadSafeCallbackHandler(ffi_cif* /*cif*/, void* ret, void** args, void* user_data) {
-  auto* data = static_cast<ThreadSafeCallbackState*>(user_data);
+}  // namespace
 
+// Handler per ThreadSafeCallback
+void DispatchThreadSafeNative(ThreadSafeCallbackState* data, void* ret, void** args) {
   if (data->released.load(std::memory_order_acquire)) {
     ZeroResult(data->return_type, ret);
     return;
@@ -568,7 +588,8 @@ void ThreadSafeCallbackHandler(ffi_cif* /*cif*/, void* ret, void** args, void* u
   // Thread esterno: ogni invocazione ha il proprio stato, quindi chiamate
   // concorrenti dello stesso callback ricevono ciascuna il proprio risultato.
   auto call = std::make_shared<PendingCallbackCall>(args, ret);
-  NativeCallbackScope context(*data, *call, !host_thread);
+  const bool counted = true;
+  NativeCallbackScope context(*data, *call, !host_thread, counted);
 
   if (host_thread) {
     InvokeThreadSafeCallback(data->js_function_ref.Env(), data->js_function_ref.Value(), data, args, ret,
@@ -594,8 +615,6 @@ void ThreadSafeCallbackHandler(ffi_cif* /*cif*/, void* ret, void** args, void* u
   std::unique_lock<std::mutex> lock(call->mutex);
   call->cv.wait(lock, [&call] { return call->done; });
 }
-
-}  // namespace
 
 Napi::Function ThreadSafeCallback::GetClass(Napi::Env env) {
   return DefineClass(env, "ThreadSafeCallback",
@@ -632,6 +651,7 @@ ThreadSafeCallback::ThreadSafeCallback(const Napi::CallbackInfo& info) : Napi::O
   data_->js_function_ref = Napi::Persistent(js_func);
 
   ParseCallbackTypes(info, data_->return_type, data_->arg_types);
+  data_->buffer_allocator_ref = CallbackBufferAllocator(info);
 
   if (info.Length() > 5 && !info[5].IsUndefined()) {
     if (!info[5].IsObject() || info[5].IsNull()) {
@@ -652,24 +672,17 @@ ThreadSafeCallback::ThreadSafeCallback(const Napi::CallbackInfo& info) : Napi::O
   }
 
   // Legge il quarto argomento opzionale: la stringa della convenzione di chiamata.
-  ffi_abi abi = FFI_DEFAULT_ABI;
+  CallConv conv = CallConv::CTYPES_DEFAULT;
   if (info.Length() > 3 && info[3].IsString()) {
-    abi = CallConvToFFI(StringToCallConv(info[3].As<Napi::String>().Utf8Value()));
+    conv = StringToCallConv(info[3].As<Napi::String>().Utf8Value());
   }
-
-  // Prepara FFI types
-  data_->ffi_return_type = CTypeToFFI(data_->return_type);
   for (const auto& type : data_->arg_types) {
-    data_->ffi_arg_types.push_back(CallbackArgFFIType(type));
+    if (type.struct_info) {
+      type.struct_info->Finalize();
+    }
   }
 
-  // Prepara CIF
-  ffi_status status =
-    ffi_prep_cif(&data_->cif, abi, static_cast<unsigned int>(data_->ffi_arg_types.size()), data_->ffi_return_type,
-                 data_->ffi_arg_types.empty() ? nullptr : data_->ffi_arg_types.data());
-
-  if (status != FFI_OK) {
-    Napi::Error::New(env, "Failed to prepare callback CIF").ThrowAsJavaScriptException();
+  if (!data_->PrepareCIF(env, data_->return_type, data_->arg_types, conv)) {
     return;
   }
 
@@ -691,20 +704,14 @@ ThreadSafeCallback::ThreadSafeCallback(const Napi::CallbackInfo& info) : Napi::O
   owner.release();
   data_->tsfn_finalized = false;
 
-  // Alloca closure
-  data_->closure.reset(static_cast<ffi_closure*>(ffi_closure_alloc(sizeof(ffi_closure), &data_->code_ptr)));
-
-  if (!data_->closure) {
+  if (!data_->AllocateClosure(data_->code_ptr)) {
     ReleaseResources();
     Napi::Error::New(env, "Failed to allocate FFI closure").ThrowAsJavaScriptException();
     return;
   }
 
   // Prepara closure
-  status =
-    ffi_prep_closure_loc(data_->closure.get(), &data_->cif, ThreadSafeCallbackHandler, data_.get(), data_->code_ptr);
-
-  if (status != FFI_OK) {
+  if (!data_->PrepareClosure(LibffiThreadSafeCallbackHandler, data_.get(), data_->code_ptr)) {
     ReleaseResources();
     Napi::Error::New(env, "Failed to prepare FFI closure").ThrowAsJavaScriptException();
     return;
@@ -728,6 +735,7 @@ void ThreadSafeCallback::ReleaseResources() {
   }
   data_->closure.reset();
   data_->js_function_ref.Reset();
+  data_->buffer_allocator_ref.Reset();
   if (!data_->error_handler_ref.IsEmpty()) {
     data_->error_handler_ref.Reset();
   }

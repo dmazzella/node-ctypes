@@ -1,5 +1,6 @@
 #pragma once
 
+#include "call_abi.h"
 #include "shared.h"
 
 namespace ctypes {
@@ -50,58 +51,6 @@ enum class CType : int32_t {
 // CType da un valore JS: un numero dell'enum CType, altrimenti TypeError.
 [[nodiscard]] CType CTypeFromJS(const Napi::Value& value);
 
-// Mappa CType -> ffi_type*
-[[nodiscard]] inline ffi_type* CTypeToFFI(CType type) {
-  switch (type) {
-    case CType::CTYPES_VOID:
-      return &ffi_type_void;
-    case CType::CTYPES_INT8:
-      return &ffi_type_sint8;
-    case CType::CTYPES_UINT8:
-      return &ffi_type_uint8;
-    case CType::CTYPES_INT16:
-      return &ffi_type_sint16;
-    case CType::CTYPES_UINT16:
-      return &ffi_type_uint16;
-    case CType::CTYPES_INT32:
-      return &ffi_type_sint32;
-    case CType::CTYPES_UINT32:
-      return &ffi_type_uint32;
-    case CType::CTYPES_INT64:
-      return &ffi_type_sint64;
-    case CType::CTYPES_UINT64:
-      return &ffi_type_uint64;
-    case CType::CTYPES_FLOAT:
-      return &ffi_type_float;
-    case CType::CTYPES_DOUBLE:
-      return &ffi_type_double;
-    case CType::CTYPES_POINTER:
-    case CType::CTYPES_STRING:
-    case CType::CTYPES_WSTRING:
-      return &ffi_type_pointer;
-    case CType::CTYPES_CHAR:
-      return std::is_signed_v<char> ? &ffi_type_sint8 : &ffi_type_uint8;
-    case CType::CTYPES_WCHAR:
-      if constexpr (sizeof(wchar_t) == 2) {
-        return std::is_signed_v<wchar_t> ? &ffi_type_sint16 : &ffi_type_uint16;
-      } else {
-        return std::is_signed_v<wchar_t> ? &ffi_type_sint32 : &ffi_type_uint32;
-      }
-    case CType::CTYPES_BOOL:
-      return &ffi_type_uint8;
-    case CType::CTYPES_SIZE_T:
-      return sizeof(size_t) == 8 ? &ffi_type_uint64 : &ffi_type_uint32;
-    case CType::CTYPES_SSIZE_T:
-      return sizeof(ssize_t) == 8 ? &ffi_type_sint64 : &ffi_type_sint32;
-    case CType::CTYPES_LONG:
-      return sizeof(long) == 8 ? &ffi_type_sint64 : &ffi_type_sint32;
-    case CType::CTYPES_ULONG:
-      return sizeof(unsigned long) == 8 ? &ffi_type_uint64 : &ffi_type_uint32;
-    default:
-      return &ffi_type_void;
-  }
-}
-
 // Dimensione di un tipo primitivo (0 per void e per struct/union/array, la cui
 // dimensione è quella di StructInfo / ArrayInfo).
 [[nodiscard]] constexpr size_t CTypeSize(CType type) noexcept {
@@ -143,13 +92,46 @@ enum class CType : int32_t {
   }
 }
 
-// I ritorni interi stretti di libffi occupano uno slot ffi_arg completo.
+[[nodiscard]] constexpr size_t CTypeAlignment(CType type) noexcept {
+  switch (type) {
+    case CType::CTYPES_INT8:
+    case CType::CTYPES_UINT8:
+    case CType::CTYPES_CHAR:
+    case CType::CTYPES_BOOL:
+      return 1;
+    case CType::CTYPES_INT16:
+    case CType::CTYPES_UINT16:
+      return 2;
+    case CType::CTYPES_WCHAR:
+      return alignof(wchar_t);
+    case CType::CTYPES_INT32:
+    case CType::CTYPES_UINT32:
+    case CType::CTYPES_FLOAT:
+      return 4;
+    case CType::CTYPES_LONG:
+    case CType::CTYPES_ULONG:
+      return sizeof(long);
+    case CType::CTYPES_INT64:
+    case CType::CTYPES_UINT64:
+    case CType::CTYPES_DOUBLE:
+    case CType::CTYPES_POINTER:
+    case CType::CTYPES_STRING:
+    case CType::CTYPES_WSTRING:
+    case CType::CTYPES_SIZE_T:
+    case CType::CTYPES_SSIZE_T:
+      return sizeof(void*);
+    default:
+      return 1;
+  }
+}
+
+// Tutti gli invoker estendono i ritorni interi stretti a uno slot ABI completo.
 template <typename T>
   requires std::is_trivially_copyable_v<T>
 inline void StoreReturnValue(void* destination, T value) noexcept {
-  if constexpr (std::is_integral_v<T> && sizeof(T) < sizeof(ffi_arg)) {
-    const ffi_arg widened =
-      std::is_signed_v<T> ? static_cast<ffi_arg>(static_cast<ffi_sarg>(value)) : static_cast<ffi_arg>(value);
+  if constexpr (std::is_integral_v<T> && sizeof(T) < sizeof(AbiWord)) {
+    const AbiWord widened =
+      std::is_signed_v<T> ? static_cast<AbiWord>(static_cast<SignedAbiWord>(value)) : static_cast<AbiWord>(value);
     std::memcpy(destination, &widened, sizeof(widened));
   } else {
     std::memcpy(destination, &value, sizeof(value));
@@ -181,7 +163,7 @@ inline void StoreReturnValue(void* destination, T value) noexcept {
 
 [[nodiscard]] constexpr size_t ReturnStorageSize(CType type) noexcept {
   const size_t size = CTypeSize(type);
-  return IsIntegralReturn(type) ? std::max(size, sizeof(ffi_arg)) : size;
+  return IsIntegralReturn(type) ? std::max(size, sizeof(AbiWord)) : size;
 }
 
 inline void ZeroReturnValue(CType type, void* destination) noexcept {
@@ -191,7 +173,7 @@ inline void ZeroReturnValue(CType type, void* destination) noexcept {
 }
 
 inline void StoreCallbackValue(CType type, const void* source, void* destination) noexcept {
-  if (CTypeSize(type) >= sizeof(ffi_arg) || !IsIntegralReturn(type)) {
+  if (CTypeSize(type) >= sizeof(AbiWord) || !IsIntegralReturn(type)) {
     std::memcpy(destination, source, CTypeSize(type));
     return;
   }

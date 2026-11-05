@@ -1,36 +1,31 @@
 #pragma once
 
 #include "array.h"
+#include "libffi_callback.h"
 #include "shared.h"
 #include "types.h"
 
 namespace ctypes {
 
-struct ClosureDeleter {
-  void operator()(ffi_closure* closure) const noexcept { ffi_closure_free(closure); }
-};
-using ClosureHandle = std::unique_ptr<ffi_closure, ClosureDeleter>;
-
 // ========================================================================
 // Callback - Solo main thread, veloce, zero overhead
 // ========================================================================
 
-struct CallbackData {
+struct CallbackData : LibffiCallbackState {
   Napi::FunctionReference js_function_ref;
+  Napi::FunctionReference buffer_allocator_ref;
   Napi::FunctionReference error_handler_ref;  // Error handler opzionale
-  ClosureHandle closure;
   void* code_ptr = nullptr;
-  ffi_cif cif;
   CType return_type;
   std::vector<TypeSpec> arg_types;  // primitivi o struct per valore
-  std::vector<ffi_type*> ffi_arg_types;
-  ffi_type* ffi_return_type = nullptr;
   std::atomic<bool> released{false};
   std::string last_error;  // Ultimo errore catturato
   std::mutex error_mutex;  // Protezione per last_error
   // Thread che ha creato il callback, l'unico su cui può eseguire JS.
   std::thread::id thread_id;
 };
+
+void DispatchCallback(CallbackData* data, void* ret, void** args);
 
 class Callback : public Napi::ObjectWrap<Callback> {
  public:
@@ -45,6 +40,7 @@ class Callback : public Napi::ObjectWrap<Callback> {
   Napi::Value GetLastError(const Napi::CallbackInfo& info);
 
  private:
+  void ReleaseResources();
   std::unique_ptr<CallbackData> data_;
 };
 
@@ -83,17 +79,14 @@ struct NativeCallbackContext {
   Notify notify = nullptr;
 };
 
-struct ThreadSafeCallbackData {
+struct ThreadSafeCallbackData : LibffiCallbackState {
   Napi::FunctionReference js_function_ref;
+  Napi::FunctionReference buffer_allocator_ref;
   Napi::FunctionReference error_handler_ref;  // Error handler opzionale
   std::thread::id main_thread_id;
-  ClosureHandle closure;
   void* code_ptr = nullptr;
-  ffi_cif cif;
   CType return_type;
   std::vector<TypeSpec> arg_types;  // primitivi o struct per valore
-  std::vector<ffi_type*> ffi_arg_types;
-  ffi_type* ffi_return_type = nullptr;
   std::atomic<bool> released{false};
   std::string last_error;  // Ultimo errore catturato
   std::mutex error_mutex;  // Protezione per last_error
@@ -119,6 +112,8 @@ struct ThreadSafeCallbackState : ThreadSafeCallbackData {
   // TSFN assente o finalizzata: non va rilasciata.
   bool tsfn_finalized = true;
 };
+
+void DispatchThreadSafeNative(ThreadSafeCallbackState* data, void* ret, void** args);
 
 class ThreadSafeCallback : public Napi::ObjectWrap<ThreadSafeCallback> {
  public:

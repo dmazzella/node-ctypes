@@ -36,7 +36,9 @@ import { CDLL, Structure, c_int32, c_size_t, c_char_p } from "node-ctypes";
 const libc = new CDLL(process.platform === "win32" ? "msvcrt" : null);
 
 // 2. Declare a function signature
-const strlen = libc.func("strlen", c_size_t, [c_char_p]);
+const strlen = libc.strlen;
+strlen.argtypes = [c_char_p];
+strlen.restype = c_size_t;
 console.log(strlen("hello")); // 5n
 
 // 3. Declare a struct
@@ -88,10 +90,16 @@ auto-`HRESULT`-checking use `OleDLL`.
 
 Direct native calls are limited to a bounded set of exact scalar C++
 signatures with up to four arguments, on 64-bit little-endian targets using
-the default ABI. Other signatures use the existing cached libffi plans/CIFs,
+the default ABI. By default, other signatures use the existing cached libffi plans/CIFs,
 including pointers and strings whose pointee types and qualifiers are not
 encoded in the native type metadata. Float/double arguments continue to use
 libffi on x86-64. This changes the optimization route, not the JavaScript API.
+Eligible fixed invokers are selected before constructing libffi types, CIFs or
+call plans. Fixed async workers reuse the same selected invoker, with their own
+argument/result storage. Other signatures retain eager fallback setup;
+additional arguments bypass fixed invokers and prepare their libffi metadata
+on the JavaScript thread. Inferred calls use the ordinary ABI; true variadic
+calls preserve the declared named-prefix boundary.
 
 ### Structs, unions, bit fields, arrays
 
@@ -269,7 +277,7 @@ qsort(arr, 5, 4, cmp);
 // CFUNCTYPE types also work as struct fields (read back as a callable).
 
 // IMPORTANT: release the trampoline when done. Unlike Python, we cannot
-// rely on GC — the callback holds a libffi closure that native code may
+// rely on GC — the callback holds a native trampoline that C code may
 // still reference.
 cmp.release();
 cmp2.release();
@@ -993,11 +1001,22 @@ Reports record library/runtime versions, CPU, OS/kernel, buffer mode, start/
 finish timestamps and Git revision/working-tree status. Missing CPU or Git
 metadata produces an explicit warning rather than invented values.
 
-The comparisons cover scalars, mixed arguments, short/long strings, buffer
-arguments, field reads and callbacks. Koffi also covers structures by value,
+Both comparisons cover narrow scalars, mixed GP/FP stack arguments, short/long
+strings, buffer arguments, field reads, scalar callbacks and 64-callback C loops.
+The node:ffi comparison includes 25 workloads. Koffi also covers structures by value,
 variadic calls and async calls with 1/8 calls in flight. Cases without an
 equivalent documented node:ffi API are listed as **not compared**, not
 emulated with a different native signature.
+
+Inferred rows omit node-ctypes `argtypes`, while both competitors use explicit
+fixed signatures for the same C functions: these rows include node-ctypes
+inference overhead, not equivalent automatic-inference APIs.
+The node:ffi bool row passes numeric `1` and compares normalized Number results:
+node:ffi represents bool arguments/results as uint8 values, whereas node-ctypes
+returns a JavaScript Boolean. Koffi's bool row uses Boolean input/output.
+The thread-safe scalar callback rows measure node-ctypes dispatch on its host
+thread against a competitor callback on the same thread, not cross-thread handoff.
+The C-loop times are per batch of 64 completed callbacks, not per callback.
 
 The `CFUNCTYPE` rows measure calls through an already-bound node-ctypes
 prototype, against an independently bound competitor function with the same
@@ -1009,8 +1028,9 @@ Both sides call the same C fixture and verify results before/after timing.
 String contents are encoded on every call; node-ctypes reuses scratch storage,
 not previously encoded strings. Measurements describe warmed repeated calls,
 not cold-start allocation costs.
-String lengths are compared as Numbers, including conversion where the API
-returns BigInt; wide integers are BigInt in both APIs. Structures are plain
+String lengths, narrow/inferred-stack i64 results and C-loop sums are compared
+as Numbers, including conversion where the API returns BigInt; wide integers
+are BigInt in both APIs. Structures are plain
 objects. Async times include scheduling and are reported per completed call,
 with the concurrency shown in the case name.
 
@@ -1032,9 +1052,66 @@ instead of the default HTML report. Parent directories are created automatically
 HTML generation runs only after all measurements finish.
 `benchmark_koffi.js` and `benchmark_node_ffi.js` define the actual side-by-side
 comparisons; `runner.js` shares timing, table output and HTML generation without
-extra dependencies or a separate renderer script. There is no separate
-self-benchmark command, and benchmarks are not run by the functional/parity
-test suite.
+extra dependencies or a separate renderer script. Benchmarks are not run by the
+functional/parity test suite.
+
+### Native backends and upstream libffi
+
+The maintained outgoing paths are the bounded C++ direct invokers and libffi.
+Callbacks use libffi closures and the shared Node-API bridge. The source tree
+stays flat, with backend-specific files prefixed where needed:
+
+| Files                                                                                        | Responsibility                                                                              |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| [call_abi.h](./src/call_abi.h), [types.h](./src/types.h)                                     | Shared calling conventions, ABI return words and scalar conversions, without libffi headers |
+| [direct_call.h](./src/direct_call.h)                                                         | Exact fixed-signature C++ invokers                                                          |
+| [libffi_types.cc](./src/libffi_types.cc), [libffi_types.h](./src/libffi_types.h)             | Primitive mapping and aggregate descriptor factories                                        |
+| [libffi_type_cache.h](./src/libffi_type_cache.h)                                             | Concrete owned aggregate cache used by layout metadata                                      |
+| [libffi_call.cc](./src/libffi_call.cc), [libffi_call.h](./src/libffi_call.h)                 | Calling conventions, CIFs, reusable plans and worker-owned extra-call interfaces            |
+| [libffi_callback.cc](./src/libffi_callback.cc), [libffi_callback.h](./src/libffi_callback.h) | Closure preparation, allocation and release                                                 |
+| [function.cc](./src/function.cc), [function.h](./src/function.h)                             | Node-API call orchestration, marshalling, hooks and sync/async ownership                    |
+| [callback.cc](./src/callback.cc), [callback.h](./src/callback.h)                             | Shared callback conversions, TSFN delivery, native-context hooks and lifetime               |
+
+CMake discovers native files with `file(GLOB_RECURSE ... CONFIGURE_DEPENDS ...)`.
+The public layouts retain their physical size/alignment; the libffi descriptor
+cache in `layout.h` is intentionally concrete rather than ABI-agnostic.
+High-level callback snapshot pooling and cached struct/array readers remain:
+slices are never recycled, retained views have independent bytes and identity,
+and custom getters, mirrored synchronization and Node-API ownership are preserved.
+
+**Temporary dependency pin.** The unmodified
+[libffi submodule](https://github.com/libffi/libffi/tree/d02afc25e8ea3aac9e78e227748e1fd7c9f14c82) is pinned to upstream commit
+[`d02afc25e8ea3aac9e78e227748e1fd7c9f14c82`](https://github.com/libffi/libffi/commit/d02afc25e8ea3aac9e78e227748e1fd7c9f14c82),
+after the v3.8.0 release. Generated version fields still report 3.8.0; the
+gitlink, not that version string, identifies the exact dependency source.
+This includes the Darwin GP-composite stack-slot
+[fix](https://github.com/libffi/libffi/commit/2472245a3430b9d24f085b7654e896e074bceb82)
+and its [compiler/ABI guard adjustment](https://github.com/libffi/libffi/commit/3365ad8b968a9b742922b6f1188462fe6ce142ec):
+small GP composites use aligned, whole-word stack slots in outgoing calls and
+closures, without widening ctypes buffers or changing scalar/HFA packing.
+This follows the compiler's C ABI rather than reproducing broken padding in
+older libffi builds, including those used by some Python installations.
+
+Return to an official tag containing these fixes when released. After changing
+the submodule revision, run `npm run generate-ffi-headers`, rebuild and repeat
+the ABI/parity tests. Do not patch the vendored libffi internals.
+
+**Remaining upstream limitation.** On Darwin ARM64, when all GP registers are
+occupied, a byte-aligned non-HFA struct larger than 16 bytes after a narrow
+stack scalar can still misalign its indirect pointer and subsequent arguments.
+A callee dereferencing that pointer can crash. The upstream update does not
+resolve this case and this project does not disguise it by altering layouts.
+[test_function_abi.js](./tests/node_specific/test_function_abi.js) reports an
+explicit TODO and executes a safe C stack-tag probe for sync/async calls,
+without dereferencing the misplaced pointer. Other GP/HFA/large-aggregate
+regressions and ordinary/thread-safe callback ABI tests run normally.
+
+`CTYPES_ENABLE_DIRECT_CALLS` remains a build-time control, default ON. Fixed
+direct calls and workers need no CIF; unsupported fixed signatures use libffi,
+and async inferred/variadic calls own CIFs prepared on the JavaScript thread.
+Workers retain the parent function, metadata and library through completion.
+To compare the direct-enabled and libffi-only builds, follow the
+[native validation commands](./tests/README.md#native-backends-and-abi-regressions).
 
 ### Release validation
 

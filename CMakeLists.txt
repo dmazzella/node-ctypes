@@ -10,12 +10,13 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # ============================================================================
-# Release optimization: LTO/IPO (cross-file inlining).
-# Applied only in Release / RelWithDebInfo (default for cmake-js).
+# Release optimization: LTO/IPO (cross-file inlining). Applied only in Release / RelWithDebInfo (default for cmake-js).
 # ============================================================================
 
 if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "" FORCE)
+    set(CMAKE_BUILD_TYPE
+        "Release"
+        CACHE STRING "" FORCE)
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
@@ -68,6 +69,8 @@ message(STATUS "Target architecture: ${FFI_ARCH}")
 message(STATUS "Building libffi from source...")
 add_subdirectory(${CMAKE_SOURCE_DIR}/third-party/libffi_cmake)
 
+option(CTYPES_ENABLE_DIRECT_CALLS "Enable the fixed-signature C++ direct invokers" ON)
+
 # ============================================================================
 # node-ctypes module
 # ============================================================================
@@ -77,19 +80,18 @@ execute_process(
     COMMAND node -p "require('node-addon-api').include"
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     OUTPUT_VARIABLE NODE_ADDON_API_DIR
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
-)
-file(GLOB_RECURSE SOURCE_FILES "src/*.cc" "src/*.h")
-
+    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+file(GLOB_RECURSE SOURCE_FILES CONFIGURE_DEPENDS "src/*.cc" "src/*.h")
 add_library(${PROJECT_NAME} SHARED ${SOURCE_FILES} ${CMAKE_JS_SRC})
 
 set_target_properties(${PROJECT_NAME} PROPERTIES PREFIX "" SUFFIX ".node")
 target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_20)
-# NODE_ADDON_API_CPP_EXCEPTIONS_ALL: anche un'eccezione C++ che non è un
-# Napi::Error (es. std::runtime_error, std::bad_alloc) diventa un errore JS
-# invece di terminare il processo.
+# NODE_ADDON_API_CPP_EXCEPTIONS_ALL: anche un'eccezione C++ che non è un Napi::Error (es. std::runtime_error, std::bad_alloc)
+# diventa un errore JS invece di terminare il processo.
 target_compile_definitions(${PROJECT_NAME} PRIVATE NAPI_VERSION=9 NAPI_CPP_EXCEPTIONS NODE_ADDON_API_CPP_EXCEPTIONS_ALL)
+if(NOT CTYPES_ENABLE_DIRECT_CALLS)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE CTYPES_DISABLE_DIRECT_CALLS)
+endif()
 
 if(MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE /W4 /permissive- /Zc:__cplusplus)
@@ -126,28 +128,28 @@ if(MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE /utf-8)
     target_compile_options(${PROJECT_NAME} PRIVATE /bigobj)
     if(CMAKE_JS_NODELIB_DEF AND CMAKE_JS_NODELIB_TARGET)
-        execute_process(COMMAND ${CMAKE_AR} /def:${CMAKE_JS_NODELIB_DEF} /out:${CMAKE_JS_NODELIB_TARGET} ${CMAKE_STATIC_LINKER_FLAGS})
+        execute_process(COMMAND ${CMAKE_AR} /def:${CMAKE_JS_NODELIB_DEF} /out:${CMAKE_JS_NODELIB_TARGET}
+                                ${CMAKE_STATIC_LINKER_FLAGS})
     endif()
 endif()
 
 # ============================================================================
-# Test fixture (tests/fixtures): libreria C per i test, fuori dalla build
-# normale (EXCLUDE_FROM_ALL). `npm run build:test-fixture` la compila in
-# build/fixture/ctypes_test_fixture.{dll,dylib,so}.
+# Test fixture (tests/fixtures): libreria C per i test, fuori dalla build normale (EXCLUDE_FROM_ALL). `npm run build:test-fixture`
+# la compila in build/fixture/ctypes_test_fixture.{dll,dylib,so}.
 # ============================================================================
 
 add_library(ctypes_test_fixture SHARED EXCLUDE_FROM_ALL ${CMAKE_SOURCE_DIR}/tests/fixtures/ctypes_test_fixture.c)
-set_target_properties(ctypes_test_fixture PROPERTIES
-    PREFIX ""
-    C_STANDARD 11
-    C_STANDARD_REQUIRED ON
-    C_VISIBILITY_PRESET hidden
-    # $<1:...>: nessuna sottocartella per configurazione (generatori multi-config)
-    LIBRARY_OUTPUT_DIRECTORY "$<1:${CMAKE_BINARY_DIR}/fixture>"
-    RUNTIME_OUTPUT_DIRECTORY "$<1:${CMAKE_BINARY_DIR}/fixture>")
+set_target_properties(
+    ctypes_test_fixture
+    PROPERTIES PREFIX ""
+               C_STANDARD 11
+               C_STANDARD_REQUIRED ON
+               C_VISIBILITY_PRESET hidden
+               # $<1:...>: nessuna sottocartella per configurazione (generatori multi-config)
+               LIBRARY_OUTPUT_DIRECTORY "$<1:${CMAKE_BINARY_DIR}/fixture>"
+               RUNTIME_OUTPUT_DIRECTORY "$<1:${CMAKE_BINARY_DIR}/fixture>")
 if(MSVC)
-    # cmake-js passa /DELAYLOAD:NODE.EXE a tutte le librerie condivise: la
-    # fixture non importa nulla da node.exe (LNK4199).
+    # cmake-js passa /DELAYLOAD:NODE.EXE a tutte le librerie condivise: la fixture non importa nulla da node.exe (LNK4199).
     target_link_options(ctypes_test_fixture PRIVATE /IGNORE:4199)
 endif()
 
