@@ -11,7 +11,7 @@
   "bugs": {
     "url": "https://github.com/dmazzella/node-ctypes/issues"
   },
-  "homepage": "https://github.com/dmazzella/node-ctypes#readme",
+  "homepage": "https://dmazzella.github.io/node-ctypes/",
   "keywords": [
     "ffi",
     "ctypes",
