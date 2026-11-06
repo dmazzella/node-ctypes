@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-11-06
+
+### Fixed
+
+- **Callback exception boundary**: a C++ exception other than a Node-API error
+  (for example `std::bad_alloc` while copying an aggregate) raised while
+  converting arguments or results, calling the JavaScript function, its error
+  handler or the warning fallback is recorded and yields a zero result instead
+  of crossing the native callback frame.
+- **Callback snapshot pool isolation**: snapshots of callback arguments no
+  longer share their pool with native-call temporaries. Since 2.9.0, detaching
+  a snapshot's `ArrayBuffer` broke every later by-value structure argument and
+  structure callback, and could let JavaScript read, alter or release memory
+  still used by an in-flight native call. A detached pool is now replaced.
+- **Detached buffer arguments**: a Buffer, typed array, DataView or ArrayBuffer
+  argument detached while native code could still use it (by a callback during
+  a synchronous call, or before a `callAsync()` completes) now makes the call
+  throw or reject instead of returning silently. Node-API cannot prevent the
+  detach; synchronous calls check only when a JavaScript callback ran.
+
+### Documentation
+
+- **Callback snapshot pool**: document the dedicated snapshot pool, how
+  retention affects memory and why the underlying `ArrayBuffer` should not be
+  exposed without copying.
+
 ## [2.9.0] - 2026-11-05
 
 ### Added
@@ -1130,7 +1156,8 @@ It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-
 
 Initial releases.
 
-[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.9.0...HEAD
+[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.10.0...HEAD
+[2.10.0]: https://github.com/dmazzella/node-ctypes/compare/v2.9.0...v2.10.0
 [2.9.0]: https://github.com/dmazzella/node-ctypes/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/dmazzella/node-ctypes/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/dmazzella/node-ctypes/compare/v2.6.0...v2.7.0

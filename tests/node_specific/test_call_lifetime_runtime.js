@@ -773,3 +773,64 @@ describe("owners of pointer views", function () {
     assert.strictEqual(weak.deref(), undefined);
   });
 });
+
+describe("Buffer arguments detached during a native call", function () {
+  const N = 256;
+  const reversedInts = () => {
+    const buf = Buffer.from(new ArrayBuffer(N * 4));
+    for (let i = 0; i < N; i++) buf.writeInt32LE(N - i, i * 4);
+    return buf;
+  };
+
+  it("a synchronous call reports a buffer detached by a callback", function () {
+    using libc = new CDLL(LIBC);
+    const qsort = libc.func("qsort", ctypes.c_void, [c_void_p, c_size_t, c_size_t, c_void_p]);
+    for (const create of [callback, threadSafeCallback]) {
+      const buf = reversedInts();
+      let calls = 0;
+      let moved;
+      const compare = create(
+        (a, b) => {
+          if (++calls === 5) moved = buf.buffer.transfer();
+          return readValue(a, c_int32) - readValue(b, c_int32);
+        },
+        c_int32,
+        [c_void_p, c_void_p],
+      );
+      try {
+        assert.throws(() => qsort(buf, N, 4, compare), { message: /^argument 1: memory was detached/ });
+        assert.ok(moved.byteLength === N * 4);
+      } finally {
+        compare.release();
+      }
+    }
+  });
+
+  it("a synchronous call with callbacks that keep their buffers still returns", function () {
+    using libc = new CDLL(LIBC);
+    const qsort = libc.func("qsort", ctypes.c_void, [c_void_p, c_size_t, c_size_t, c_void_p]);
+    const buf = reversedInts();
+    const compare = callback((a, b) => readValue(a, c_int32) - readValue(b, c_int32), c_int32, [c_void_p, c_void_p]);
+    try {
+      qsort(buf, N, 4, compare);
+      assert.strictEqual(buf.readInt32LE(0), 1);
+    } finally {
+      compare.release();
+    }
+  });
+
+  it("an async call rejects when a buffer argument is detached before it completes", { skip: !existsSync(FIXTURE) && "native fixture not built" }, async function () {
+    using fixture = new CDLL(FIXTURE);
+    const address = fixture.func("fixture_address", c_size_t, [c_void_p]);
+    const views = [(backing) => Buffer.from(backing), (backing) => new Uint32Array(backing), (backing) => new DataView(backing), (backing) => backing];
+    for (const view of views) {
+      const backing = new ArrayBuffer(16);
+      // Il risultato arriva dopo il codice sincrono: il distacco è sempre durante la chiamata.
+      const pending = address.callAsync(view(backing));
+      backing.transfer();
+      await assert.rejects(pending, { message: /^buffer argument: memory was detached/ });
+    }
+    const kept = new ArrayBuffer(16);
+    assert.ok((await address.callAsync(kept)) > 0n);
+  });
+});

@@ -50,9 +50,10 @@ bool CallJSCallback(Napi::Env env,
   try {
     result = fn.Call(env.Undefined(), nargs, args);
     return true;
-  } catch (const Napi::Error& e) {
-    if (!e.Message().empty()) {
-      error_msg = e.Message();
+  } catch (const std::exception& e) {
+    // Anche un'eccezione C++ non Napi: non deve attraversare il frame C del callback.
+    if (const std::string_view message = e.what(); !message.empty()) {
+      error_msg = message;
     }
     return false;
   }
@@ -155,7 +156,7 @@ void EmitCallbackWarning(Napi::Env env, const std::string& message, const char* 
     if (emit_warning.IsFunction()) {
       emit_warning.As<Napi::Function>().Call(process, {Napi::String::New(env, message), Napi::String::New(env, type)});
     }
-  } catch (const Napi::Error&) {
+  } catch (const std::exception&) {
     // Il warning è best-effort: non deve propagare dentro il frame C del callback.
   }
 }
@@ -185,6 +186,10 @@ void DispatchCallback(CallbackData* data, void* ret, void** args) {
     return;
   }
 
+  if (data->addon != nullptr) {
+    data->addon->callback_epoch++;
+  }
+
   // Converti argomenti C -> JS
   Napi::Env env = data->js_function_ref.Env();
   Napi::HandleScope scope(env);
@@ -206,8 +211,9 @@ void DispatchCallback(CallbackData* data, void* ret, void** args) {
     for (size_t i = 0; i < nargs; i++) {
       js_args[i] = CallbackArgToJS(env, args[i], data->arg_types[i], data->buffer_allocator_ref);
     }
-  } catch (const Napi::Error& error) {
-    const auto& message = error.Message();
+  } catch (const std::exception& error) {
+    // Anche std::bad_alloc dalla copia: nessuna eccezione attraversa il frame C.
+    const std::string message = error.what();
     {
       std::lock_guard lock(data->error_mutex);
       data->last_error = message;
@@ -255,14 +261,15 @@ void DispatchCallback(CallbackData* data, void* ret, void** args) {
       if (!StoreJSCallbackResult(result, data->return_type, ret)) {
         ZeroReturnValue(data->return_type, ret);
       }
-    } catch (const Napi::Error& e) {
+    } catch (const std::exception& e) {
       // Python: "Exception ignored on converting result of ctypes callback
       // function" e risultato zero; nessuna eccezione attraversa il frame C.
+      const std::string message = e.what();
       {
         std::lock_guard<std::mutex> lock(data->error_mutex);
-        data->last_error = e.Message();
+        data->last_error = message;
       }
-      EmitCallbackWarning(env, e.Message(), "CallbackError");
+      EmitCallbackWarning(env, message, "CallbackError");
       ZeroReturnValue(data->return_type, ret);
     }
   }
@@ -293,6 +300,7 @@ Callback::Callback(const Napi::CallbackInfo& info) : Napi::ObjectWrap<Callback>(
 
   data_ = std::make_unique<CallbackData>();
   data_->thread_id = std::this_thread::get_id();
+  data_->addon = env.GetInstanceData<CTypesAddon>();
   data_->js_function_ref = Napi::Persistent(info[0].As<Napi::Function>());
 
   ParseCallbackTypes(info, data_->return_type, data_->arg_types);
@@ -422,6 +430,9 @@ void InvokeThreadSafeCallback(Napi::Env env,
                               const char* default_error,
                               PendingCallbackCall* call = nullptr) {
   Napi::HandleScope scope(env);
+  if (data->addon != nullptr) {
+    data->addon->callback_epoch++;
+  }
   struct ActiveCall {
     ThreadSafeCallbackData* data;
     PendingCallbackCall* previous;
@@ -453,7 +464,7 @@ void InvokeThreadSafeCallback(Napi::Env env,
       if (!data->error_handler_ref.IsEmpty()) {
         try {
           data->error_handler_ref.Value().Call({Napi::String::New(env, error_msg)});
-        } catch (const Napi::Error&) {
+        } catch (const std::exception&) {
           // Un errore dell'error handler non deve propagare nel frame C.
         }
       } else {
@@ -468,9 +479,9 @@ void InvokeThreadSafeCallback(Napi::Env env,
         ZeroResult(data->return_type, ret);
       }
     }
-  } catch (const Napi::Error& e) {
-    // Conversione di argomenti o risultato fallita.
-    RecordThreadSafeError(data, e.Message());
+  } catch (const std::exception& e) {
+    // Conversione di argomenti o risultato fallita (anche std::bad_alloc).
+    RecordThreadSafeError(data, e.what());
     ZeroResult(data->return_type, ret);
   }
 }
@@ -531,11 +542,9 @@ namespace {
 
 class NativeCallbackScope final {
  public:
-  NativeCallbackScope(ThreadSafeCallbackData& data, PendingCallbackCall& call, bool foreign, bool counted)
-    : data_(data), call_(call), counted_(counted) {
-    if (counted_) {
-      data_.active_calls.fetch_add(1, std::memory_order_acq_rel);
-    }
+  NativeCallbackScope(ThreadSafeCallbackData& data, PendingCallbackCall& call, bool foreign)
+    : data_(data), call_(call) {
+    data_.active_calls.fetch_add(1, std::memory_order_acq_rel);
     if (foreign && data_.native_context) {
       suspended_state_.emplace(data_.native_context->suspend());
     }
@@ -549,9 +558,7 @@ class NativeCallbackScope final {
     if (call_.native_error != nullptr) {
       data_.native_context->on_error(call_.native_error);
     }
-    if (counted_) {
-      data_.active_calls.fetch_sub(1, std::memory_order_release);
-    }
+    data_.active_calls.fetch_sub(1, std::memory_order_release);
   }
 
   NativeCallbackScope(const NativeCallbackScope&) = delete;
@@ -563,7 +570,6 @@ class NativeCallbackScope final {
   ThreadSafeCallbackData& data_;
   PendingCallbackCall& call_;
   std::optional<NativeCallbackContext::State> suspended_state_;
-  bool counted_;
 };
 
 static_assert(!std::copyable<NativeCallbackScope> && !std::movable<NativeCallbackScope>);
@@ -588,8 +594,7 @@ void DispatchThreadSafeNative(ThreadSafeCallbackState* data, void* ret, void** a
   // Thread esterno: ogni invocazione ha il proprio stato, quindi chiamate
   // concorrenti dello stesso callback ricevono ciascuna il proprio risultato.
   auto call = std::make_shared<PendingCallbackCall>(args, ret);
-  const bool counted = true;
-  NativeCallbackScope context(*data, *call, !host_thread, counted);
+  NativeCallbackScope context(*data, *call, !host_thread);
 
   if (host_thread) {
     InvokeThreadSafeCallback(data->js_function_ref.Env(), data->js_function_ref.Value(), data, args, ret,
@@ -648,6 +653,7 @@ ThreadSafeCallback::ThreadSafeCallback(const Napi::CallbackInfo& info) : Napi::O
 
   data_ = std::make_shared<ThreadSafeCallbackState>();
   data_->main_thread_id = std::this_thread::get_id();
+  data_->addon = env.GetInstanceData<CTypesAddon>();
   data_->js_function_ref = Napi::Persistent(js_func);
 
   ParseCallbackTypes(info, data_->return_type, data_->arg_types);

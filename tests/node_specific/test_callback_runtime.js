@@ -365,6 +365,41 @@ describe("Callbacks", function () {
       }
     });
 
+    it("isolates snapshots from call temporaries and survives a detached pool", function () {
+      using fixture = new ctypes.CDLL(FIXTURE);
+      const Point = ctypes.struct({ x: ctypes.c_int32, y: ctypes.c_int32 });
+      const sum = fixture.func("fixture_point_sum", ctypes.c_int32, [Point]);
+      const invoke = fixture.func("fixture_point_callback", ctypes.c_int32, [ctypes.c_void_p, ctypes.c_int32, ctypes.c_int32]);
+      for (const create of [ctypes.callback, ctypes.threadSafeCallback]) {
+        let saved;
+        const callback = create(
+          (value) => {
+            saved = value;
+            return value.x + value.y;
+          },
+          ctypes.c_int32,
+          [Point],
+        );
+        try {
+          // Un temporaneo di chiamata (struct da oggetto) non finisce nel pool degli snapshot.
+          strictEqual(sum({ x: 0x5a5a5a5a, y: 1 }), 0x5a5a5a5b);
+          strictEqual(invoke(callback.pointer, 2, 3), 5);
+          const pool = new Int32Array(saved._buffer.buffer);
+          assert.ok(!pool.includes(0x5a5a5a5a));
+
+          // Il codice utente può staccare il pool di uno snapshot già ricevuto.
+          saved._buffer.buffer.transfer();
+          for (let i = 0; i < 3; i++) {
+            strictEqual(invoke(callback.pointer, i, 10), i + 10);
+            strictEqual(saved.x, i);
+            strictEqual(sum({ x: i, y: 20 }), i + 20);
+          }
+        } finally {
+          callback.release();
+        }
+      }
+    });
+
     for (const [name, create] of [
       ["ordinary", ctypes.callback],
       ["thread-safe", ctypes.threadSafeCallback],

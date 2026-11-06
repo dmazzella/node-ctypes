@@ -232,6 +232,12 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
     return errcheck_callback_.IsEmpty() ? Napi::Function() : errcheck_callback_.Value();
   }
 
+  // Un callback JS eseguito durante la chiamata può aver staccato un buffer
+  // argomento: confronta l'epoch prima/dopo e solo allora controlla gli argomenti.
+  [[nodiscard]] uint64_t CallbackEpoch() const noexcept { return addon_ != nullptr ? addon_->callback_epoch : 0; }
+  template <ArgumentList Args>
+  static void ThrowIfArgumentDetached(const Args& info);
+
   // Per-section helpers for Call(). `always_inline` marcato sulla definition
   // (vedi function.cc) — vengono chiamati esattamente una volta dal
   // caller, l'overhead di call erode il hot path FFI.

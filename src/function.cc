@@ -100,6 +100,30 @@ inline void* ObjectData(const Napi::Value& val, CType type) {
   ThrowWrongType(val, type);
 }
 
+// Memoria di un argomento staccata (transfer(), transfer list) mentre il codice
+// nativo poteva usarla: è passata a un altro ArrayBuffer o è stata liberata.
+// Node-API non permette di impedirlo; la chiamata lo segnala come errore.
+[[nodiscard]] bool IsDetachedView(const Napi::Value& value) {
+  if (!value.IsObject()) {
+    return false;
+  }
+  Napi::ArrayBuffer buffer;
+  if (value.IsTypedArray()) {
+    buffer = value.As<Napi::TypedArray>().ArrayBuffer();
+  } else if (value.IsDataView()) {
+    buffer = value.As<Napi::DataView>().ArrayBuffer();
+  } else if (value.IsArrayBuffer()) {
+    buffer = value.As<Napi::ArrayBuffer>();
+  } else {
+    return false;
+  }
+  return buffer.IsDetached();
+}
+
+constexpr const char* kDetachedArgumentMessage =
+  "memory was detached (transfer() or a transfer list) while the native call could use it; native code may have "
+  "accessed memory no longer owned by this buffer";
+
 // Address carried by a BigInt / Number pointer argument.
 inline uintptr_t AddressFromBigInt(const Napi::Value& val) {
   bool lossless;
@@ -1398,6 +1422,15 @@ ExtraCallCache* FFIFunction::AcquireExtraCall(size_t argc,
   return &entry;
 }
 
+template <ArgumentList Args>
+void FFIFunction::ThrowIfArgumentDetached(const Args& info) {
+  for (size_t i = 0; i < info.Length(); i++) {
+    if (IsDetachedView(info[i])) {
+      throw Napi::Error::New(info.Env(), std::format("argument {}: {}", i + 1, kDetachedArgumentMessage));
+    }
+  }
+}
+
 // Firme semplici (simple_call_): slot e risultato sullo stack, senza
 // CallContext o scratch. Le stringhe corte vanno nel buffer
 // inline dell'istanza, come in Call(); una stringa che non ci sta e le chiamate
@@ -1517,6 +1550,7 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
   // Valore restituito: primitivo, o i byte di una struct fino a kMaxSimpleStructReturn.
   alignas(16) std::array<std::byte, kMaxSimpleStructReturn> return_storage{};
   void* const return_value = return_storage.data();
+  const uint64_t epoch = CallbackEpoch();
   const SavedErrorState saved_errors = SwapInErrorState();
   if (cache_entry == nullptr && fixed_invoker_) [[likely]] {
     fixed_invoker_(fn_ptr_, values.data(), return_value);
@@ -1526,6 +1560,9 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
     InvokeLibffi(*this, fn_ptr_, return_value, values.data());
   }
   CaptureErrorState(saved_errors);
+  if (CallbackEpoch() != epoch) [[unlikely]] {
+    ThrowIfArgumentDetached(info);
+  }
 
   if (scalar_as_buffer_) {
     result = ConvertReturn(env, return_value, return_type_, return_struct_info_, return_array_info_, false, true);
@@ -1698,6 +1735,7 @@ Napi::Value FFIFunction::CallArguments(const FunctionArguments& info, const Napi
   // Firme coperte: invoker direct fisso.
   // Altrimenti reusable call plan quando disponibile (fast path su x86-64;
   // fallback sicuro a ffi_call altrove e se l'allocazione del plan è fallita).
+  const uint64_t epoch = CallbackEpoch();
   if (cache_entry == nullptr && fixed_invoker_) [[likely]] {
     const SavedErrorState saved_errors = SwapInErrorState();
     fixed_invoker_(fn_ptr_, ctx.arg_values, ctx.return_ptr);
@@ -1706,6 +1744,9 @@ Napi::Value FFIFunction::CallArguments(const FunctionArguments& info, const Napi
     const SavedErrorState saved_errors = SwapInErrorState();
     InvokeLibffi(ctx.libffi, fn_ptr_, ctx.return_ptr, ctx.arg_values);
     CaptureErrorState(saved_errors);
+  }
+  if (CallbackEpoch() != epoch) [[unlikely]] {
+    ThrowIfArgumentDetached(info);
   }
 
   // ---- Convert return + apply errcheck -----------------------------
@@ -1810,7 +1851,7 @@ Napi::Value FFIFunction::CallAsyncArguments(const FunctionArguments& info, const
     if (!PrepareAsyncFFI(env, argc, extra_types, libffi)) {
       return env.Undefined();
     }
-  } else if (!is_variadic && !fixed_invoker_ && !PrepareFFI(env)) {
+  } else if (!fixed_invoker_ && !PrepareFFI(env)) {
     return env.Undefined();
   }
 
@@ -2177,6 +2218,15 @@ void FFIFunction::CallWorker::OnOK() {
   // get_last_error() / get_errno() see this call, also inside errcheck.
   if (capture_last_error_ || capture_errno_) {
     ffi_function_->PublishErrorState(last_error_, last_errno_);
+  }
+
+  // Il worker ha usato la memoria dei buffer per tutta la chiamata: se uno è
+  // stato staccato nel frattempo il risultato non è affidabile.
+  for (const Napi::ObjectReference& ref : buffer_refs_) {
+    if (IsDetachedView(ref.Value())) {
+      deferred_.Reject(Napi::Error::New(env, std::format("buffer argument: {}", kDetachedArgumentMessage)).Value());
+      return;
+    }
   }
 
   try {

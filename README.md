@@ -297,6 +297,25 @@ Existing callers retain their result-check snapshot and their own `errcheck`.
 An installed `from_param` converter still resolves the method at call time,
 as before.
 
+Structure, union and scalar-instance arguments received by `callback()`,
+`CFUNCTYPE` and `threadSafeCallback()` are owned snapshots: each one is a
+distinct slice of an 8 KB off-heap pool reserved for callback snapshots.
+Native-call temporaries use a separate pool that is never exposed, so a
+snapshot cannot reveal or alter memory that native code is still using.
+Slices are never reused, so a retained argument keeps its own bytes and
+identity. Detaching a snapshot's `ArrayBuffer` (`transfer()`, a transfer list)
+only affects the snapshots in that pool; later callbacks use a fresh one.
+
+- Retaining any slice keeps its whole 8 KB backing `ArrayBuffer` alive. When
+  storing many small arguments for a long time, copy them, for example
+  `Buffer.from(value._buffer)` or a new instance built from its fields.
+- `value._buffer.buffer` is the whole pool and can contain other callback
+  snapshots. Use `_buffer` itself (or `byteOffset` and `length`), and copy
+  before handing the underlying `ArrayBuffer` to untrusted code.
+
+Values larger than 2 KB, layouts aligned to more than 8 bytes and raw native
+callbacks keep a dedicated allocation.
+
 Both callbacks and libraries implement `Symbol.dispose`, so they work
 with the `using` declaration for scope-bound cleanup (also on `throw`):
 
@@ -592,6 +611,17 @@ Counts must be non-negative safe integers. Copies/fills involving JS memory
 still stop at its end; raw native addresses remain the caller's responsibility.
 Scalar `from_buffer()` / `from_buffer_copy()` validate byte size and offset
 before producing an instance and accept Buffer, typed views and ctypes memory.
+
+Do not detach (`ArrayBuffer.prototype.transfer()`, a `postMessage` /
+`structuredClone` transfer list) memory passed to a call that is still running:
+a pending `callAsync()`, or the outer call while a callback runs. Native code
+keeps its address and may access memory that now belongs to another
+`ArrayBuffer` or has been released. Node-API cannot prevent the detach, so
+node-ctypes reports it instead. A synchronous call during which a JavaScript
+callback ran throws `argument N: memory was detached ...` after native code
+returns, and a `callAsync()` whose Buffer, typed array, DataView or ArrayBuffer
+argument was detached rejects. The check covers those arguments as passed,
+not addresses stored inside structures or obtained with `addressof()`.
 
 ### Electron
 

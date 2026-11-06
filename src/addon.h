@@ -21,6 +21,10 @@ class CTypesAddon : public Napi::Addon<CTypesAddon> {
   uint32_t captured_last_error = 0;  // DWORD-like (unsigned) per parity Win32
   int captured_errno = 0;            // errno è int in POSIX
 
+  // Callback JS eseguiti su questo environment: una chiamata sincrona che lo vede
+  // cambiare controlla che nessun buffer argomento sia stato staccato nel frattempo.
+  uint64_t callback_epoch = 0;
+
   // Classe JS ArgumentError (Python ctypes.ArgumentError), registrata da lib/index.js.
   Napi::FunctionReference argument_error_ctor;
   // JS ephemerons let a hook reference its own handle without rooting a cycle.

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "addon.h"
 #include "array.h"
 #include "libffi_callback.h"
 #include "shared.h"
@@ -23,6 +24,8 @@ struct CallbackData : LibffiCallbackState {
   std::mutex error_mutex;  // Protezione per last_error
   // Thread che ha creato il callback, l'unico su cui può eseguire JS.
   std::thread::id thread_id;
+  // Environment del callback: conta le esecuzioni JS (CTypesAddon::callback_epoch).
+  CTypesAddon* addon = nullptr;
 };
 
 void DispatchCallback(CallbackData* data, void* ret, void** args);
@@ -84,6 +87,8 @@ struct ThreadSafeCallbackData : LibffiCallbackState {
   Napi::FunctionReference buffer_allocator_ref;
   Napi::FunctionReference error_handler_ref;  // Error handler opzionale
   std::thread::id main_thread_id;
+  // Environment del callback: conta le esecuzioni JS (CTypesAddon::callback_epoch).
+  CTypesAddon* addon = nullptr;
   void* code_ptr = nullptr;
   CType return_type;
   std::vector<TypeSpec> arg_types;  // primitivi o struct per valore
