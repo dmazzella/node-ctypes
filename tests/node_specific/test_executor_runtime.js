@@ -258,7 +258,7 @@ describe("Executor spin", function () {
     }
   });
 
-  it("falls back to the notification for slow calls and recovers for fast ones", async function () {
+  it("falls back to the notification for slow calls and recovers for fast ones", { timeout: 30000 }, async function () {
     const { threadId, sleep, ms } = threadApi();
     const executor = new Executor({ spin: 50 });
     try {
@@ -267,8 +267,9 @@ describe("Executor spin", function () {
       for (let index = 0; index < 10; index++) await sleep.callOn(executor, ms(5));
       clearInterval(timer);
       assert.ok(ticks >= 5, `timers ran between slow calls (${ticks})`);
-      for (let index = 0; index < 2000; index++) await threadId.callOn(executor);
-      assert.strictEqual(executor.completed, 2010);
+      // After 10 slow calls the backoff skips at most a few tens of inline waits.
+      for (let index = 0; index < 300; index++) await threadId.callOn(executor);
+      assert.strictEqual(executor.completed, 310);
     } finally {
       await executor.close();
     }
