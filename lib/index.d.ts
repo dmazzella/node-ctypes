@@ -223,6 +223,9 @@ export interface FFIFunction {
   /** Call the native function asynchronously on a worker thread. */
   callAsync(...args: any[]): Promise<any>;
 
+  /** Like {@link callAsync}, on the thread of an {@link Executor}. */
+  callOn(target: ExecutorTarget, ...args: any[]): Promise<any>;
+
   /** The function name in the native library. */
   readonly funcName: string;
 
@@ -287,6 +290,8 @@ export type NativeErrcheckCallback<TArgs extends readonly FFIType[] = FFIType[],
 export interface TypedFFIFunction<TArgs extends readonly FFIType[], TRet extends FFIType | null> {
   (...args: FFIArgs<TArgs>): FFIReturn<TRet>;
   callAsync(...args: FFIArgs<TArgs>): Promise<FFIReturn<TRet>>;
+  /** Like {@link callAsync}, on the thread of an {@link Executor}. */
+  callOn(target: ExecutorTarget, ...args: FFIArgs<TArgs>): Promise<FFIReturn<TRet>>;
   readonly funcName: string;
   readonly address: bigint;
   readonly _as_parameter_: bigint;
@@ -470,6 +475,9 @@ export interface FunctionWrapper {
 
   /** Call the function asynchronously on a worker thread. */
   callAsync(...args: any[]): Promise<any>;
+
+  /** Like {@link callAsync}, on the thread of an {@link Executor}. */
+  callOn(target: ExecutorTarget, ...args: any[]): Promise<any>;
 
   /** Argument types. Set before calling. */
   argtypes: FFIType[];
@@ -728,6 +736,73 @@ export class ThreadSafeCallback extends Callback {
   setNativeError(error: bigint): void;
   /** See {@link ThreadSafeCallbackWrapper.drain}. */
   drain(): number;
+}
+
+// =============================================================================
+// Executor
+// =============================================================================
+
+/**
+ * Options of {@link Executor}.
+ * @category Async Calls
+ */
+export interface ExecutorOptions {
+  /** Thread name shown by debuggers and profilers (default `"node-ctypes"`). */
+  name?: string;
+}
+
+/**
+ * Where {@link FFIFunction.callOn} runs a call: an {@link Executor}, or an
+ * executor with an `AbortSignal` that cancels the call while it is queued
+ * (the promise rejects with `signal.reason`; a started call completes).
+ * @category Async Calls
+ */
+export type ExecutorTarget = Executor | { readonly executor: Executor; readonly signal?: AbortSignal };
+
+/**
+ * A native thread owned by node-ctypes, with a FIFO queue of calls.
+ *
+ * `fn.callOn(executor, ...args)` is `fn.callAsync(...args)` (same conversions,
+ * out parameters, errcheck and argument lifetime) run on this thread instead
+ * of a libuv worker: calls run one at a time, in arrival order, so a slow call
+ * never occupies the libuv pool (fs, dns, crypto) and calls that must share a
+ * thread (thread-local state, thread-affine handles) can.
+ *
+ * The thread starts with the first call. While calls are pending the process
+ * stays alive; an idle executor does not keep it alive and is collected with
+ * its thread when unreferenced. When the process exits (or a worker thread
+ * terminates) queued calls are discarded and a running call is left to finish
+ * on its own.
+ *
+ * No Python equivalent.
+ *
+ * @example
+ * ```javascript
+ * const executor = new Executor({ name: "device" });
+ * const result = await lib.slow_read.callOn(executor, handle, buffer, size);
+ * const controller = new AbortController();
+ * const next = lib.slow_read.callOn({ executor, signal: controller.signal }, handle, buffer, size);
+ * controller.abort(); // rejects `next` if it has not started
+ * await executor.close();
+ * ```
+ *
+ * @category Async Calls
+ */
+export class Executor {
+  constructor(options?: ExecutorOptions);
+  /**
+   * Reject new calls, wait for the accepted ones, then stop the thread.
+   * Always returns the same promise; a closed executor cannot be reopened.
+   */
+  close(): Promise<void>;
+  /** Calls queued or running. */
+  readonly pending: number;
+  /** Calls settled since the executor was created. */
+  readonly completed: number;
+  /** Whether the thread is running (started by the first call, stopped by `close()`). */
+  readonly running: boolean;
+  /** Whether `close()` has been called. */
+  readonly closed: boolean;
 }
 
 // =============================================================================

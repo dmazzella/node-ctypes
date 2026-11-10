@@ -3,6 +3,7 @@
 
 import {
   CDLL,
+  Executor,
   Library,
   Structure,
   Union,
@@ -428,6 +429,19 @@ void new Derived(1, 2).x;
 const strlenProto = CFUNCTYPE(c_int64, c_char_p)(["strlen", libc]);
 strlenProto("x");
 check(expectType<Promise<bigint>>()(strlenProto.callAsync("x")));
+
+// Executor / callOn: same result type as callAsync.
+const executor = new Executor({ name: "types" });
+check(expectType<Promise<bigint>>()(strlenProto.callOn(executor, "x")));
+check(expectType<Promise<bigint>>()(strlenProto.callOn({ executor, signal: AbortSignal.timeout(10) }, "x")));
+check(expectType<Promise<number>>()(castNative.callOn(executor, -7)));
+check(expectType<number>()(executor.pending));
+check(expectType<boolean>()(executor.running));
+check(expectType<Promise<void>>()(executor.close()));
+// @ts-expect-error callOn takes the declared argument types
+strlenProto.callOn(executor, 1);
+// @ts-expect-error the target is an Executor
+strlenProto.callOn({}, "x");
 check(expectType<ErrcheckCallback | null>()(strlenProto.errcheck));
 check(expectType<bigint>()(strlenProto.address));
 // @ts-expect-error errcheck must be callable or null

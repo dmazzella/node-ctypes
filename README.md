@@ -101,6 +101,47 @@ additional arguments bypass fixed invokers and prepare their libffi metadata
 on the JavaScript thread. Inferred calls use the ordinary ABI; true variadic
 calls preserve the declared named-prefix boundary.
 
+### Asynchronous calls: `callAsync` and `Executor`
+
+`fn.callAsync(...args)` runs the call on a libuv worker and returns a promise;
+the event loop stays free meanwhile. Arguments are converted on the
+JavaScript thread before the call, results (and `errcheck`) after it, and the
+memory passed by address stays referenced until the promise settles.
+
+libuv workers are shared with `fs`, `dns` and `crypto` (4 by default), and
+concurrent calls run in parallel in any order. For long or blocking calls, or
+calls that must run in sequence on one thread (thread-local state,
+thread-affine handles, libraries that are not thread-safe), use an
+`Executor`: a native thread owned by node-ctypes with a FIFO queue.
+`fn.callOn(executor, ...args)` is the same call as `callAsync`, run there:
+
+```javascript
+import { Executor } from "node-ctypes";
+
+const executor = new Executor({ name: "device" }); // thread name for debuggers
+const read = await lib.device_read.callOn(executor, handle, buffer, buffer.length);
+
+// Cancel a call that has not started yet: the promise rejects with signal.reason.
+const controller = new AbortController();
+const next = lib.device_read.callOn({ executor, signal: controller.signal }, handle, buffer, buffer.length);
+controller.abort();
+
+await executor.close(); // waits for the accepted calls, then stops the thread
+```
+
+- Calls run one at a time, in arrival order; each promise settles once.
+- The thread starts with the first call. Pending calls keep the process
+  alive; an idle executor does not, and is collected with its thread when no
+  longer referenced. `close()` rejects new calls, waits for the accepted ones
+  and stops the thread (an executor cannot be reopened).
+- `executor.pending`, `completed`, `running` and `closed` report its state.
+- A call that has started cannot be interrupted: the signal only removes
+  queued calls.
+- On process exit (or worker termination) queued calls are discarded and a
+  running call is left to finish on its own.
+- Callbacks invoked during the call run on the executor thread: use
+  `threadSafeCallback`, as with `callAsync`.
+
 ### Structs, unions, bit fields, arrays
 
 ```javascript

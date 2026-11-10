@@ -263,34 +263,46 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
                                                  std::optional<ExtraCallCache>& fallback);
   [[nodiscard]] bool PrepareExtraFFI(Napi::Env env, ExtraCallCache& entry);
 
+ public:
   // ============================================================
-  // Nested async worker for CallAsync (no separate files)
+  // Chiamata asincrona preparata sul thread JS (callAsync, callOn):
+  // argomenti convertiti, memoria trattenuta, Promise. Run() esegue la
+  // chiamata nativa su un altro thread (pool libuv o Executor) senza V8;
+  // Complete() converte il risultato, applica errcheck e risolve la Promise
+  // sul thread JS. Creata e distrutta sul thread JS.
   // ============================================================
-  class CallWorker : public Napi::AsyncWorker, private LibffiAsyncCallState {
+  class PreparedCall : private LibffiAsyncCallState {
    public:
-    CallWorker(Napi::Env env,
-               FFIFunction* ffi_function,
-               FixedInvoker invoker,
-               void* fn_ptr,
-               CType return_type,
-               std::shared_ptr<StructInfo> return_struct_info,
-               std::shared_ptr<ArrayInfo> return_array_info,
-               std::vector<uint8_t>&& arg_storage,
-               std::vector<void*>&& arg_values,
-               std::vector<char>&& string_buffer,
-               std::vector<std::pair<size_t, size_t>>&& string_fixups,
-               std::vector<std::pair<size_t, size_t>>&& wstring_fixups,
-               std::vector<Napi::ObjectReference>&& buffer_refs,
-               LibffiAsyncCallState&& libffi,
-               std::vector<std::vector<uint8_t>>&& large_arg_buffers,
-               std::vector<size_t>&& large_arg_indices,
-               const Napi::Function* errcheck,
-               bool result_handler);
-    ~CallWorker();
+    PreparedCall(Napi::Env env,
+                 FFIFunction* ffi_function,
+                 FixedInvoker invoker,
+                 void* fn_ptr,
+                 CType return_type,
+                 std::shared_ptr<StructInfo> return_struct_info,
+                 std::shared_ptr<ArrayInfo> return_array_info,
+                 std::vector<uint8_t>&& arg_storage,
+                 std::vector<void*>&& arg_values,
+                 std::vector<char>&& string_buffer,
+                 std::vector<std::pair<size_t, size_t>>&& string_fixups,
+                 std::vector<std::pair<size_t, size_t>>&& wstring_fixups,
+                 std::vector<Napi::ObjectReference>&& buffer_refs,
+                 LibffiAsyncCallState&& libffi,
+                 std::vector<std::vector<uint8_t>>&& large_arg_buffers,
+                 std::vector<size_t>&& large_arg_indices,
+                 const Napi::Function* errcheck,
+                 bool result_handler);
+    ~PreparedCall();
+    PreparedCall(const PreparedCall&) = delete;
+    PreparedCall& operator=(const PreparedCall&) = delete;
 
-    void Execute() override;
-    void OnOK() override;
-    void OnError(const Napi::Error& error) override;
+    // Thread nativo: nessun accesso a V8.
+    void Run() noexcept;
+    [[nodiscard]] bool Failed() const noexcept { return failed_; }
+    [[nodiscard]] const std::string& FailureMessage() const noexcept { return failure_; }
+
+    // Thread JS.
+    void Complete(Napi::Env env);
+    void Reject(Napi::Value reason);
     Napi::Promise GetPromise() { return deferred_.Promise(); }
     void KeepArguments(const FunctionArguments& info);
 
@@ -318,7 +330,7 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
     Napi::FunctionReference errcheck_ref_;
     bool result_handler_;
     Napi::ObjectReference args_ref_;  // JS arguments, for errcheck(result, func, args)
-    // use_last_error / use_errno: snapshot sul worker subito dopo la chiamata nativa.
+    // use_last_error / use_errno: snapshot sul thread nativo subito dopo la chiamata.
     bool capture_last_error_;
     bool capture_errno_;
     bool struct_as_buffer_;
@@ -328,6 +340,28 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
     // Valori privati (get_last_error() / get_errno()) al momento della chiamata.
     uint32_t last_error_in_ = 0;
     int errno_in_ = 0;
+    // Eccezione nativa durante Run(): la Promise viene rifiutata.
+    bool failed_ = false;
+    std::string failure_;
+  };
+
+  // Converte gli argomenti di callAsync / callOn in una PreparedCall; nullptr
+  // dopo un'eccezione JS (il chiamante restituisce undefined).
+  [[nodiscard]] std::unique_ptr<PreparedCall> PrepareAsyncCall(const FunctionArguments& info,
+                                                               const Napi::Function* errcheck);
+
+ private:
+  // Esegue una PreparedCall su un worker del pool libuv (callAsync).
+  class CallWorker : public Napi::AsyncWorker {
+   public:
+    CallWorker(Napi::Env env, std::unique_ptr<PreparedCall> call);
+
+    void Execute() override;
+    void OnOK() override;
+    void OnError(const Napi::Error& error) override;
+
+   private:
+    std::unique_ptr<PreparedCall> call_;
   };
 
   void* fn_ptr_;

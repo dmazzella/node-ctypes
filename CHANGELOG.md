@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-11-10
+
+### Added
+
+- **`Executor` and `fn.callOn(executor, ...args)`**: a native thread owned by
+  node-ctypes with a FIFO queue. `callOn` is the same call as `callAsync`
+  (conversions, out parameters, structures, variadic arguments, `errcheck`,
+  argument lifetime), run on that thread instead of a libuv worker: calls run
+  one at a time in arrival order and never occupy the libuv pool. Queued calls
+  can be cancelled with an `AbortSignal` (`callOn({ executor, signal }, ...)`);
+  `close()` waits for the accepted calls and stops the thread. Pending calls
+  keep the process alive, an idle executor does not; on process exit or worker
+  termination queued calls are discarded and a running call is detached.
+
+### Changed
+
+- **Asynchronous call internals**: the converted arguments of `callAsync` are
+  held by a call object shared with `callOn`; the libuv worker only runs it.
+  Behavior is unchanged.
+
+### Documentation
+
+- **Asynchronous calls**: document `callAsync` on the libuv pool, when to use
+  an `Executor`, cancellation, `close()` and the process lifetime.
+
 ## [2.10.0] - 2026-11-06
 
 ### Fixed
@@ -1156,7 +1181,8 @@ It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-
 
 Initial releases.
 
-[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.10.0...HEAD
+[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.11.0...HEAD
+[2.11.0]: https://github.com/dmazzella/node-ctypes/compare/v2.10.0...v2.11.0
 [2.10.0]: https://github.com/dmazzella/node-ctypes/compare/v2.9.0...v2.10.0
 [2.9.0]: https://github.com/dmazzella/node-ctypes/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/dmazzella/node-ctypes/compare/v2.7.0...v2.8.0

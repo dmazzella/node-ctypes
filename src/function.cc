@@ -1,7 +1,8 @@
 #include "function.h"
 
-#include "addon.h"  // CTypesAddon per gli slot captured_last_error / captured_errno
-#include "array.h"  // TypeSpecFromJS
+#include "addon.h"     // CTypesAddon per gli slot captured_last_error / captured_errno
+#include "array.h"     // TypeSpecFromJS
+#include "executor.h"  // Executor (callOn)
 
 #ifndef CTYPES_DISABLE_DIRECT_CALLS
 #include "direct_call.h"
@@ -1814,13 +1815,14 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
   return CallAsyncArguments(FunctionArguments{info}, errcheck.IsEmpty() ? nullptr : &errcheck);
 }
 
-Napi::Value FFIFunction::CallAsyncArguments(const FunctionArguments& info, const Napi::Function* errcheck) {
+std::unique_ptr<FFIFunction::PreparedCall> FFIFunction::PrepareAsyncCall(const FunctionArguments& info,
+                                                                         const Napi::Function* errcheck) {
   Napi::Env env = info.Env();
 
   size_t argc;
   bool is_variadic = false;
   if (!ValidateAndResolveArgc(env, info, argc, is_variadic)) {
-    return env.Undefined();
+    return nullptr;
   }
   const LibraryCallScope library_scope(library_, env);
   const size_t expected_argc = arg_types_.size();
@@ -1849,10 +1851,10 @@ Napi::Value FFIFunction::CallAsyncArguments(const FunctionArguments& info, const
 
   if (is_variadic) {
     if (!PrepareAsyncFFI(env, argc, extra_types, libffi)) {
-      return env.Undefined();
+      return nullptr;
     }
   } else if (!fixed_invoker_ && !PrepareFFI(env)) {
-    return env.Undefined();
+    return nullptr;
   }
 
   // =====================================================================
@@ -2017,7 +2019,7 @@ Napi::Value FFIFunction::CallAsyncArguments(const FunctionArguments& info, const
           if (i < expected_argc && arg_struct_infos_[i]) {
             if (!MarshalStructArg(env, val, i, arg_struct_infos_[i], slot, &async_arg_values[i], large_arg_buffers,
                                   &large_arg_indices, &buffer_refs)) {
-              return env.Undefined();
+              return nullptr;
             }
           } else {
             MarshalOther(val, type, slot);
@@ -2029,7 +2031,7 @@ Napi::Value FFIFunction::CallAsyncArguments(const FunctionArguments& info, const
           if (i < expected_argc && arg_array_infos_[i]) {
             if (!MarshalArrayArg(env, val, i, arg_array_infos_[i], slot, &async_arg_values[i], large_arg_buffers,
                                  &large_arg_indices, &buffer_refs)) {
-              return env.Undefined();
+              return nullptr;
             }
           } else {
             MarshalOther(val, type, slot);
@@ -2047,50 +2049,71 @@ Napi::Value FFIFunction::CallAsyncArguments(const FunctionArguments& info, const
   }
 
   // =====================================================================
-  // ---- Create worker, move buffers, return Promise ----------------
+  // ---- PreparedCall: owns the converted arguments until completion ----
   // =====================================================================
 
-  auto worker = std::make_unique<CallWorker>(
+  auto call = std::make_unique<PreparedCall>(
     env, this, is_variadic ? nullptr : fixed_invoker_, fn_ptr_, return_type_, return_struct_info_, return_array_info_,
     std::move(async_arg_storage), std::move(async_arg_values), std::move(async_string_buffer), std::move(string_fixups),
     std::move(wstring_fixups), std::move(buffer_refs), std::move(libffi), std::move(large_arg_buffers),
     std::move(large_arg_indices), errcheck, info.HasResultHandler());
 
   if (errcheck != nullptr && !info.HasResultHandler()) {
-    worker->KeepArguments(info);
+    call->KeepArguments(info);
+  }
+  return call;
+}
+
+// callAsync(): un worker del pool libuv. callOn(): il wrapper JS imposta
+// l'Executor per questa sola chiamata (setCallTarget) e la chiamata va nella
+// sua coda. Conversioni, errcheck e risultato sono gli stessi.
+Napi::Value FFIFunction::CallAsyncArguments(const FunctionArguments& info, const Napi::Function* errcheck) {
+  Napi::Env env = info.Env();
+  Executor* executor = nullptr;
+  if (addon_ != nullptr && !addon_->call_target.IsEmpty() && addon_->call_target_function.Value() == Value()) {
+    executor = UnwrapTagged<Executor>(addon_->call_target.Value());
+    addon_->call_target.Reset();
+    addon_->call_target_function.Reset();
   }
 
-  Napi::Promise promise = worker->GetPromise();
-  worker->Queue();
-  worker.release();
-
+  std::unique_ptr<PreparedCall> call = PrepareAsyncCall(info, errcheck);
+  if (!call) {
+    return env.Undefined();
+  }
+  Napi::Promise promise = call->GetPromise();
+  if (executor != nullptr) {
+    executor->Submit(env, std::move(call));
+  } else {
+    auto worker = std::make_unique<CallWorker>(env, std::move(call));
+    worker->Queue();
+    worker.release();
+  }
   return promise;
 }
 
 // ============================================================================
-// CallWorker implementations (nested class)
+// PreparedCall / CallWorker implementations (nested classes)
 // ============================================================================
 
-FFIFunction::CallWorker::CallWorker(Napi::Env env,
-                                    FFIFunction* parent,
-                                    FixedInvoker invoker,
-                                    void* fn_ptr,
-                                    CType return_type,
-                                    std::shared_ptr<StructInfo> return_struct_info,
-                                    std::shared_ptr<ArrayInfo> return_array_info,
-                                    std::vector<uint8_t>&& arg_storage,
-                                    std::vector<void*>&& arg_values,
-                                    std::vector<char>&& string_buffer,
-                                    std::vector<std::pair<size_t, size_t>>&& string_fixups,
-                                    std::vector<std::pair<size_t, size_t>>&& wstring_fixups,
-                                    std::vector<Napi::ObjectReference>&& buffer_refs,
-                                    LibffiAsyncCallState&& libffi,
-                                    std::vector<std::vector<uint8_t>>&& large_arg_buffers,
-                                    std::vector<size_t>&& large_arg_indices,
-                                    const Napi::Function* errcheck,
-                                    bool result_handler)
-  : Napi::AsyncWorker(env),
-    LibffiAsyncCallState(std::move(libffi)),
+FFIFunction::PreparedCall::PreparedCall(Napi::Env env,
+                                        FFIFunction* parent,
+                                        FixedInvoker invoker,
+                                        void* fn_ptr,
+                                        CType return_type,
+                                        std::shared_ptr<StructInfo> return_struct_info,
+                                        std::shared_ptr<ArrayInfo> return_array_info,
+                                        std::vector<uint8_t>&& arg_storage,
+                                        std::vector<void*>&& arg_values,
+                                        std::vector<char>&& string_buffer,
+                                        std::vector<std::pair<size_t, size_t>>&& string_fixups,
+                                        std::vector<std::pair<size_t, size_t>>&& wstring_fixups,
+                                        std::vector<Napi::ObjectReference>&& buffer_refs,
+                                        LibffiAsyncCallState&& libffi,
+                                        std::vector<std::vector<uint8_t>>&& large_arg_buffers,
+                                        std::vector<size_t>&& large_arg_indices,
+                                        const Napi::Function* errcheck,
+                                        bool result_handler)
+  : LibffiAsyncCallState(std::move(libffi)),
     ffi_function_(parent),
     invoker_(invoker),
     fn_ptr_(fn_ptr),
@@ -2147,7 +2170,7 @@ FFIFunction::CallWorker::CallWorker(Napi::Env env,
   }
 }
 
-void FFIFunction::CallWorker::FixupPointers() {
+void FFIFunction::PreparedCall::FixupPointers() {
   uint8_t* base = arg_storage_.data();
   const size_t argc = arg_values_.size();
 
@@ -2178,7 +2201,7 @@ void FFIFunction::CallWorker::FixupPointers() {
   }
 }
 
-void FFIFunction::CallWorker::KeepArguments(const FunctionArguments& info) {
+void FFIFunction::PreparedCall::KeepArguments(const FunctionArguments& info) {
   Napi::Array args = Napi::Array::New(info.Env(), info.Length());
   for (size_t i = 0; i < info.Length(); i++) {
     args.Set(static_cast<uint32_t>(i), info[i]);
@@ -2186,15 +2209,15 @@ void FFIFunction::CallWorker::KeepArguments(const FunctionArguments& info) {
   args_ref_ = Napi::Persistent(args.As<Napi::Object>());
 }
 
-FFIFunction::CallWorker::~CallWorker() {
+FFIFunction::PreparedCall::~PreparedCall() {
   if (ffi_function_->library_ != nullptr) {
     ffi_function_->library_->EndCall();
   }
   ffi_function_->Unref();  // Unpin the FFIFunction instance
 }
 
-void FFIFunction::CallWorker::Execute() {
-  // *** WORKER THREAD - Nessun accesso a V8! ***
+void FFIFunction::PreparedCall::Run() noexcept {
+  // *** THREAD NATIVO - Nessun accesso a V8! ***
   try {
     const SavedErrorState saved = SwapErrorStateIn(capture_last_error_, capture_errno_, last_error_in_, errno_in_);
     void** args = arg_values_.empty() ? nullptr : arg_values_.data();
@@ -2206,22 +2229,31 @@ void FFIFunction::CallWorker::Execute() {
     // Snapshot su questo thread, subito dopo la chiamata (come CaptureErrorState).
     SwapErrorStateOut(capture_last_error_, capture_errno_, saved, last_error_, last_errno_);
   } catch (...) {
-    SetError("Native function threw an exception");
+    failed_ = true;
+    failure_ = "Native function threw an exception";
   }
 }
 
-void FFIFunction::CallWorker::OnOK() {
+void FFIFunction::PreparedCall::Reject(Napi::Value reason) {
+  deferred_.Reject(reason);
+}
+
+void FFIFunction::PreparedCall::Complete(Napi::Env env) {
   // *** MAIN THREAD ***
-  Napi::Env env = Env();
   Napi::HandleScope scope(env);
+
+  if (failed_) {
+    deferred_.Reject(Napi::Error::New(env, failure_).Value());
+    return;
+  }
 
   // get_last_error() / get_errno() see this call, also inside errcheck.
   if (capture_last_error_ || capture_errno_) {
     ffi_function_->PublishErrorState(last_error_, last_errno_);
   }
 
-  // Il worker ha usato la memoria dei buffer per tutta la chiamata: se uno è
-  // stato staccato nel frattempo il risultato non è affidabile.
+  // Il thread nativo ha usato la memoria dei buffer per tutta la chiamata: se
+  // uno è stato staccato nel frattempo il risultato non è affidabile.
   for (const Napi::ObjectReference& ref : buffer_refs_) {
     if (IsDetachedView(ref.Value())) {
       deferred_.Reject(Napi::Error::New(env, std::format("buffer argument: {}", kDetachedArgumentMessage)).Value());
@@ -2255,8 +2287,23 @@ void FFIFunction::CallWorker::OnOK() {
   }
 }
 
+FFIFunction::CallWorker::CallWorker(Napi::Env env, std::unique_ptr<PreparedCall> call)
+  : Napi::AsyncWorker(env), call_(std::move(call)) {}
+
+void FFIFunction::CallWorker::Execute() {
+  // *** WORKER THREAD - Nessun accesso a V8! ***
+  call_->Run();
+  if (call_->Failed()) {
+    SetError(call_->FailureMessage());
+  }
+}
+
+void FFIFunction::CallWorker::OnOK() {
+  call_->Complete(Env());
+}
+
 void FFIFunction::CallWorker::OnError(const Napi::Error& error) {
-  deferred_.Reject(error.Value());
+  call_->Reject(error.Value());
 }
 
 }  // namespace ctypes

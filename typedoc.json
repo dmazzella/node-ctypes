@@ -6,7 +6,7 @@
   "readme": "README.md",
   "includeVersion": true,
   "categorizeByGroup": true,
-  "categoryOrder": ["Library Loading", "Structures", "Callbacks", "Pointers", "Memory", "Types", "Error Handling", "Constants", "*"],
+  "categoryOrder": ["Library Loading", "Structures", "Callbacks", "Async Calls", "Pointers", "Memory", "Types", "Error Handling", "Constants", "*"],
   "sort": ["source-order"],
   "projectDocuments": ["examples/README.md"],
   "navigationLinks": {

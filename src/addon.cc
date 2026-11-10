@@ -2,6 +2,7 @@
 
 #include "array.h"
 #include "callback.h"
+#include "executor.h"
 #include "function.h"
 #include "library.h"
 #include "struct.h"
@@ -66,6 +67,7 @@ CTypesAddon::CTypesAddon(Napi::Env env, Napi::Object exports) {
   ThreadSafeCallbackConstructor = PersistentClass<ThreadSafeCallback>(env);
   StructTypeConstructor = PersistentClass<StructType>(env);
   ArrayTypeConstructor = PersistentClass<ArrayType>(env);
+  ExecutorConstructor = PersistentClass<Executor>(env);
 
   // Definisci l'addon con tutte le esportazioni
   DefineAddon(exports, {
@@ -79,6 +81,7 @@ CTypesAddon::CTypesAddon(Napi::Env env, Napi::Object exports) {
                          InstanceValue("ThreadSafeCallback", ThreadSafeCallbackConstructor->Value(), napi_enumerable),
                          InstanceValue("StructType", StructTypeConstructor->Value(), napi_enumerable),
                          InstanceValue("ArrayType", ArrayTypeConstructor->Value(), napi_enumerable),
+                         InstanceValue("Executor", ExecutorConstructor->Value(), napi_enumerable),
 
                          // Funzioni helper
                          InstanceMethod("load", &CTypesAddon::LoadLibrary),
@@ -101,6 +104,7 @@ CTypesAddon::CTypesAddon(Napi::Env env, Napi::Object exports) {
                          InstanceMethod("getCapturedErrno", &CTypesAddon::GetCapturedErrno),
                          InstanceMethod("setCapturedErrno", &CTypesAddon::SetCapturedErrno),
                          InstanceMethod("setArgumentError", &CTypesAddon::SetArgumentError),
+                         InstanceMethod("setCallTarget", &CTypesAddon::SetCallTarget),
 
                          // CType enum - single source of truth per i tipi
                          InstanceValue("CType", CreateCType(env), napi_enumerable),
@@ -685,6 +689,27 @@ Napi::Value CTypesAddon::SetArgumentError(const Napi::CallbackInfo& info) {
     argument_error_ctor = Napi::Persistent(info[0].As<Napi::Function>());
   }
   return info.Env().Undefined();
+}
+
+// setCallTarget(executor, ffiFunction): l'Executor della prossima chiamata
+// asincrona di ffiFunction (callOn). setCallTarget(null) lo azzera.
+Napi::Value CTypesAddon::SetCallTarget(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  call_target.Reset();
+  call_target_function.Reset();
+  if (info.Length() < 1 || info[0].IsNull() || info[0].IsUndefined()) {
+    return env.Undefined();
+  }
+  if (UnwrapTagged<Executor>(info[0]) == nullptr) {
+    throw Napi::TypeError::New(env, "callOn requires an Executor");
+  }
+  if (info.Length() < 2 || !info[1].IsObject() ||
+      !info[1].As<Napi::Object>().InstanceOf(FFIFunctionConstructor->Value())) {
+    throw Napi::TypeError::New(env, "callOn requires a native function");
+  }
+  call_target = Napi::Persistent(info[0].As<Napi::Object>());
+  call_target_function = Napi::Persistent(info[1].As<Napi::Object>());
+  return env.Undefined();
 }
 
 Napi::Value CTypesAddon::SetCapturedErrno(const Napi::CallbackInfo& info) {
