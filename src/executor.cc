@@ -75,13 +75,17 @@ void DeliverExecutorCompletions(Napi::Env env, Napi::Function, ExecutorQueue* qu
   if (jobs.empty()) {
     return;
   }
-  if (!deliver) {
-    for (const ExecutorJob& job : jobs) {
-      delete job.call;
+  // Callback C della TSFN: nessuna eccezione C++ deve uscirne.
+  try {
+    if (!deliver) {
+      for (const ExecutorJob& job : jobs) {
+        delete job.call;
+      }
+      return;
     }
-    return;
+    deliver(env, std::move(jobs));
+  } catch (...) {
   }
-  deliver(env, std::move(jobs));
 }
 
 Napi::Function Executor::GetClass(Napi::Env env) {
@@ -120,7 +124,10 @@ Executor::~Executor() {
   // Raccolto dal GC: nessuna chiamata in sospeso (l'oggetto è referenziato
   // finché ce ne sono), il thread è inattivo.
   if (started_ && !abandoned_) {
-    Stop(Napi::Env(env_));
+    try {
+      Stop(Napi::Env(env_));
+    } catch (...) {
+    }
   }
 }
 
@@ -243,20 +250,31 @@ void Executor::Deliver(Napi::Env env, std::vector<ExecutorJob>&& jobs) {
       if (!first_error) {
         first_error = e;
       }
+    } catch (...) {
+      // Complete non solleva altro; un errore nativo inatteso non deve
+      // impedire di completare le altre chiamate.
     }
   }
   Settled(env);
   if (first_error) {
-    // Callback della TSFN: l'errore diventa un'eccezione JS non gestita.
-    first_error->ThrowAsJavaScriptException();
+    // L'errore diventa un'eccezione JS non gestita; napi_throw non solleva
+    // eccezioni C++ (questa funzione gira nel callback C della TSFN).
+    napi_value value = nullptr;
+    try {
+      value = first_error->Value();
+    } catch (const Napi::Error&) {
+    }
+    if (value != nullptr) {
+      napi_throw(env, value);
+    }
   }
 }
 
 void Executor::Hold(Napi::Env env) {
   if (!held_) {
+    held_ = true;
     channel_.Ref(env);
     Ref();
-    held_ = true;
   }
 }
 
@@ -265,9 +283,14 @@ void Executor::Settled(Napi::Env env) {
     return;
   }
   if (held_) {
-    channel_.Unref(env);
-    Unref();
     held_ = false;
+    // Durante la chiusura dell'environment Node-API può rifiutare l'unref:
+    // non deve interrompere la consegna delle altre chiamate né la chiusura.
+    try {
+      channel_.Unref(env);
+      Unref();
+    } catch (const Napi::Error&) {
+    }
   }
   if (closing_) {
     FinishClose(env);

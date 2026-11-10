@@ -2213,7 +2213,12 @@ FFIFunction::PreparedCall::~PreparedCall() {
   if (ffi_function_->library_ != nullptr) {
     ffi_function_->library_->EndCall();
   }
-  ffi_function_->Unref();  // Unpin the FFIFunction instance
+  // Unpin the FFIFunction instance. A destructor must not throw: while the
+  // environment is shutting down Node-API can refuse the call.
+  try {
+    ffi_function_->Unref();
+  } catch (...) {
+  }
 }
 
 void FFIFunction::PreparedCall::Run() noexcept {

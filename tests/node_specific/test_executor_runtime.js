@@ -338,4 +338,34 @@ describe("Executor and the process lifetime", function () {
     await worker.terminate();
     assert.ok(performance.now() - started < 4000, "terminate() did not wait for the running call");
   });
+
+  // Worker startup dominates: the suite-wide --test-timeout is too short under load.
+  it("a worker can terminate at any point of its calls, with calls queued", { timeout: 60000 }, async function () {
+    // Termination can land while a call (sync, callAsync or callOn) is being
+    // prepared, queued, running or completing: none of these may crash the
+    // process, also when Node-API can no longer throw a JavaScript exception.
+    const source = `
+      import { parentPort } from "node:worker_threads";
+      import * as ctypes from "${import.meta.resolve("node-ctypes")}";
+      ${SLEEP_SOURCE}
+      const executor = new ctypes.Executor();
+      parentPort.postMessage("ready");
+      for (;;) {
+        sleep(0);
+        sleep.callAsync(ms(1));
+        sleep.callOn(executor, ms(1));
+        sleep.callOn(executor, ms(2));
+        await sleep.callOn(executor, ms(1));
+      }
+    `;
+    for (let round = 0; round < 16; round++) {
+      const worker = new Worker(new URL(`data:text/javascript,${encodeURIComponent(source)}`), { execArgv: [] });
+      await new Promise((resolve, reject) => {
+        worker.once("message", resolve);
+        worker.once("error", reject);
+      });
+      await new Promise((resolve) => setTimeout(resolve, round % 8));
+      await worker.terminate();
+    }
+  });
 });

@@ -88,7 +88,11 @@ set_target_properties(${PROJECT_NAME} PROPERTIES PREFIX "" SUFFIX ".node")
 target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_20)
 # NODE_ADDON_API_CPP_EXCEPTIONS_ALL: anche un'eccezione C++ che non è un Napi::Error (es. std::runtime_error, std::bad_alloc)
 # diventa un errore JS invece di terminare il processo.
-target_compile_definitions(${PROJECT_NAME} PRIVATE NAPI_VERSION=9 NAPI_CPP_EXCEPTIONS NODE_ADDON_API_CPP_EXCEPTIONS_ALL)
+# NODE_API_SWALLOW_UNTHROWABLE_EXCEPTIONS: durante la chiusura dell'environment
+# (es. worker.terminate()) napi_throw fallisce; senza, node-addon-api solleva un
+# Napi::Error vuoto fuori dal callback e il processo termina (std::terminate).
+target_compile_definitions(${PROJECT_NAME} PRIVATE NAPI_VERSION=9 NAPI_CPP_EXCEPTIONS NODE_ADDON_API_CPP_EXCEPTIONS_ALL
+                                                   NODE_API_SWALLOW_UNTHROWABLE_EXCEPTIONS)
 if(NOT CTYPES_ENABLE_DIRECT_CALLS)
     target_compile_definitions(${PROJECT_NAME} PRIVATE CTYPES_DISABLE_DIRECT_CALLS)
 endif()

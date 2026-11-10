@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.11.1] - 2026-11-10
+
+### Fixed
+
+- **Worker termination during a call**: terminating a worker thread (or any
+  environment shutdown) while a node-ctypes call was being prepared or
+  completed could abort the process with `std::terminate` (an empty
+  `Napi::Error`): Node-API can no longer throw a JavaScript exception there,
+  and the C++ exception escaped the native callback.
+  Such exceptions are now discarded during shutdown
+  (`NODE_API_SWALLOW_UNTHROWABLE_EXCEPTIONS`), and the executor and async call
+  teardown paths no longer let C++ exceptions escape destructors or the
+  completion callback.
+
+### Added
+
+- **Regression test**: workers terminated at random points while they make
+  sync, `callAsync` and `callOn` calls.
+
 ## [2.11.0] - 2026-11-10
 
 ### Added
@@ -1181,7 +1200,8 @@ It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-
 
 Initial releases.
 
-[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.11.0...HEAD
+[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.11.1...HEAD
+[2.11.1]: https://github.com/dmazzella/node-ctypes/compare/v2.11.0...v2.11.1
 [2.11.0]: https://github.com/dmazzella/node-ctypes/compare/v2.10.0...v2.11.0
 [2.10.0]: https://github.com/dmazzella/node-ctypes/compare/v2.9.0...v2.10.0
 [2.9.0]: https://github.com/dmazzella/node-ctypes/compare/v2.8.0...v2.9.0
