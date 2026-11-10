@@ -172,6 +172,123 @@ describe("Executor calls", function () {
   });
 });
 
+describe("Executor spin", function () {
+  it("validates the spin option", function () {
+    assert.throws(() => new Executor({ spin: "50" }), TypeError);
+    assert.throws(() => new Executor({ spin: -1 }), RangeError);
+    assert.throws(() => new Executor({ spin: 20000 }), RangeError);
+    assert.throws(() => new Executor({ spin: NaN }), RangeError);
+    for (const spin of [0, 1, 50, 10000]) new Executor({ spin }).close();
+  });
+
+  for (const spin of [0, 50]) {
+    it(`settles awaited calls in order on the executor thread (spin ${spin})`, async function () {
+      const { threadId } = threadApi();
+      const executor = new Executor({ spin });
+      try {
+        const main = threadId();
+        const ids = new Set();
+        for (let index = 0; index < 300; index++) ids.add(await threadId.callOn(executor));
+        // Awaited calls interleaved with a burst.
+        const burst = Array.from({ length: 100 }, () => threadId.callOn(executor));
+        ids.add(await threadId.callOn(executor));
+        for (const id of await Promise.all(burst)) ids.add(id);
+        assert.strictEqual(ids.size, 1);
+        assert.notStrictEqual([...ids][0], main);
+        assert.strictEqual(executor.completed, 401);
+        assert.strictEqual(executor.pending, 0);
+      } finally {
+        await executor.close();
+      }
+    });
+  }
+
+  it("lets errcheck call the same executor while an awaited call completes", async function () {
+    const { threadId } = threadApi();
+    const inner = platform === "win32" ? new WinDLL("kernel32.dll").func("GetCurrentThreadId", c_uint32, []) : new CDLL(LIBC).func("pthread_self", c_void_p, []);
+    const executor = new Executor();
+    try {
+      let order = [];
+      threadId.errcheck = (result) => {
+        order.push("errcheck");
+        return inner.callOn(executor).then((again) => [result, again]);
+      };
+      for (let index = 0; index < 50; index++) {
+        order = [];
+        const pending = threadId.callOn(executor);
+        order.push("returned");
+        const [first, second] = await pending;
+        assert.strictEqual(first, second, "both on the executor thread");
+        assert.strictEqual(order.length, 2);
+      }
+    } finally {
+      threadId.errcheck = null;
+      await executor.close();
+    }
+  });
+
+  it("lets the event loop turn during awaited calls and bursts", async function () {
+    const { threadId } = threadApi();
+    const executor = new Executor();
+    try {
+      // Awaited calls in sequence: immediates and timers still run between them.
+      let immediates = 0;
+      let ticks = 0;
+      const timer = setInterval(() => ticks++, 1);
+      const started = performance.now();
+      let calls = 0;
+      while (performance.now() - started < 200) {
+        setImmediate(() => immediates++);
+        await threadId.callOn(executor);
+        calls++;
+      }
+      clearInterval(timer);
+      assert.ok(immediates > calls / 20, `immediates ran (${immediates} for ${calls} calls)`);
+      assert.ok(ticks >= 10, `timers ran (${ticks})`);
+      // A burst submitted in one go blocks the JavaScript thread for about one slice at most.
+      const before = performance.now();
+      const burst = Array.from({ length: 20000 }, () => threadId.callOn(executor));
+      const submitting = performance.now() - before;
+      assert.ok(executor.pending > 0, "the burst is still queued");
+      await Promise.all(burst);
+      assert.ok(submitting < 1000, `submitted in ${submitting.toFixed(1)} ms`);
+    } finally {
+      await executor.close();
+    }
+  });
+
+  it("falls back to the notification for slow calls and recovers for fast ones", async function () {
+    const { threadId, sleep, ms } = threadApi();
+    const executor = new Executor({ spin: 50 });
+    try {
+      let ticks = 0;
+      const timer = setInterval(() => ticks++, 1);
+      for (let index = 0; index < 10; index++) await sleep.callOn(executor, ms(5));
+      clearInterval(timer);
+      assert.ok(ticks >= 5, `timers ran between slow calls (${ticks})`);
+      for (let index = 0; index < 2000; index++) await threadId.callOn(executor);
+      assert.strictEqual(executor.completed, 2010);
+    } finally {
+      await executor.close();
+    }
+  });
+
+  it("serves thread-safe callbacks from the executor thread while waiting", async function () {
+    const lib = new CDLL(FIXTURE);
+    const executor = new Executor({ spin: 10000 });
+    const Point = ctypes.struct({ x: c_int32, y: c_int32 });
+    const callback = ctypes.threadSafeCallback((point) => point.x + point.y, c_int32, [Point]);
+    try {
+      const invoke = lib.func("fixture_point_callback", c_int32, [c_void_p, c_int32, c_int32]);
+      for (let index = 0; index < 100; index++) assert.strictEqual(await invoke.callOn(executor, callback.pointer, index, 7), index + 7);
+    } finally {
+      callback.release();
+      await executor.close();
+      lib.close();
+    }
+  });
+});
+
 describe("Executor cancellation", function () {
   it("rejects a queued call with the abort reason and runs the others", async function () {
     const { sleep, threadId, ms } = threadApi();

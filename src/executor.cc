@@ -9,6 +9,29 @@ namespace ctypes {
 namespace {
 
 constexpr const char* kDefaultThreadName = "node-ctypes";
+// Attesa attiva predefinita: copre il giro di una chiamata breve (preparazione,
+// esecuzione, completamento) e l'intervallo fra un await e la chiamata successiva.
+constexpr double kDefaultSpinMicros = 50;
+constexpr double kMaxSpinMicros = 10'000;
+// Attese in linea scadute di fila: salta al più 2^10 chiamate prima di riprovare.
+constexpr uint32_t kMaxSkipShift = 10;
+// Tempo massimo di completamenti in linea per giro dell'event loop.
+constexpr std::chrono::microseconds kInlineSlice{1000};
+// Dato del segnaposto inviato alla TSFN per contare i giri dell'event loop.
+char turn_marker;
+
+// Attende attivamente, per al più `spin`, che `counter` cambi da `seen`; tra
+// un controllo e l'altro cede il processore agli altri thread pronti.
+bool SpinUntilChanged(const std::atomic<uint64_t>& counter, uint64_t seen, std::chrono::microseconds spin) {
+  const auto deadline = std::chrono::steady_clock::now() + spin;
+  while (counter.load(std::memory_order_acquire) == seen) {
+    if (std::chrono::steady_clock::now() >= deadline) {
+      return false;
+    }
+    std::this_thread::yield();
+  }
+  return true;
+}
 
 // Nome del thread nei debugger e nei profiler (best effort).
 void NameCurrentThread(const std::string& name, const std::u16string& wide_name) {
@@ -32,12 +55,23 @@ void NameCurrentThread(const std::string& name, const std::u16string& wide_name)
 }
 
 // Il thread nativo: esegue le chiamate in ordine di arrivo, una alla volta,
-// e notifica il thread JS di ognuna attraverso la TSFN.
+// e notifica il thread JS di ognuna attraverso la TSFN (salvo quella che il
+// thread JS sta aspettando in linea).
 void ExecutorLoop(std::shared_ptr<ExecutorQueue> queue, std::string name, std::u16string wide_name) {
   NameCurrentThread(name, wide_name);
   std::unique_lock lock(queue->mutex);
   while (true) {
+    if (queue->waiting.empty() && !queue->stopping && queue->spin.count() > 0) {
+      // La chiamata successiva arriva spesso subito dopo il completamento (await
+      // in sequenza): attenderla attivamente evita di svegliare il thread.
+      const uint64_t seen = queue->submitted.load(std::memory_order_acquire);
+      lock.unlock();
+      SpinUntilChanged(queue->submitted, seen, queue->spin);
+      lock.lock();
+    }
+    queue->parked = true;
     queue->wake.wait(lock, [&queue] { return queue->stopping || !queue->waiting.empty(); });
+    queue->parked = false;
     if (queue->abandoned || queue->waiting.empty()) {
       return;
     }
@@ -54,16 +88,28 @@ void ExecutorLoop(std::shared_ptr<ExecutorQueue> queue, std::string name, std::u
       return;
     }
     queue->done.push_back(job);
+    queue->finished.fetch_add(1, std::memory_order_release);
+    if (queue->awaited == job.id) {
+      // Il thread JS la sta aspettando e la completa lui.
+      queue->awaited = 0;
+      queue->awaited_done = true;
+      continue;
+    }
     // Sotto lock: dopo abandoned la TSFN non viene più usata da questo thread.
-    napi_call_threadsafe_function(queue->channel, nullptr, napi_tsfn_nonblocking);
+    ExecutorChannel(queue->channel).NonBlockingCall();
   }
 }
 
 }  // namespace
 
-void DeliverExecutorCompletions(Napi::Env env, Napi::Function, ExecutorQueue* queue, void*) {
+void DeliverExecutorCompletions(Napi::Env env, Napi::Function, ExecutorQueue* queue, void* data) {
   if (env == nullptr) {
     return;
+  }
+  if (data == &turn_marker) {
+    // Thread JS, a ogni consegna: nessun lock.
+    queue->turns++;
+    queue->turn_posted = false;
   }
   std::vector<ExecutorJob> jobs;
   std::function<void(Napi::Env, std::vector<ExecutorJob>&&)> deliver;
@@ -72,9 +118,7 @@ void DeliverExecutorCompletions(Napi::Env env, Napi::Function, ExecutorQueue* qu
     jobs.swap(queue->done);
     deliver = queue->deliver;
   }
-  if (jobs.empty()) {
-    return;
-  }
+  // Anche senza chiamate: un segnaposto può portare un errore di AwaitInline.
   // Callback C della TSFN: nessuna eccezione C++ deve uscirne.
   try {
     if (!deliver) {
@@ -118,6 +162,21 @@ Executor::Executor(const Napi::CallbackInfo& info) : Napi::ObjectWrap<Executor>(
       name_ = name.As<Napi::String>().Utf8Value();
     }
   }
+  double spin = kDefaultSpinMicros;
+  if (info.Length() > 0 && info[0].IsObject()) {
+    const Napi::Value value = info[0].As<Napi::Object>().Get("spin");
+    if (!value.IsUndefined()) {
+      if (!value.IsNumber()) {
+        throw Napi::TypeError::New(env, "Executor spin must be a number of microseconds");
+      }
+      spin = value.As<Napi::Number>().DoubleValue();
+      if (!(spin >= 0 && spin <= kMaxSpinMicros)) {
+        throw Napi::RangeError::New(env,
+                                    std::format("Executor spin must be between 0 and {} microseconds", kMaxSpinMicros));
+      }
+    }
+  }
+  queue_->spin = std::chrono::microseconds(static_cast<int64_t>(spin));
 }
 
 Executor::~Executor() {
@@ -145,7 +204,16 @@ void Executor::Start(Napi::Env env) {
     queue_->channel = channel_;
     queue_->stopping = false;
     queue_->deliver = [this](Napi::Env deliver_env, std::vector<ExecutorJob>&& jobs) {
-      Deliver(deliver_env, std::move(jobs));
+      std::optional<Napi::Error> error = Deliver(deliver_env, std::move(jobs));
+      if (!error && deferred_error_) {
+        error = std::move(deferred_error_);
+        deferred_error_.reset();
+      }
+      if (error) {
+        // L'errore diventa un'eccezione JS non gestita (il chiamante, nel
+        // callback C della TSFN, intercetta le eccezioni C++).
+        error->ThrowAsJavaScriptException();
+      }
     };
   }
   try {
@@ -161,7 +229,7 @@ void Executor::Start(Napi::Env env) {
   }
   // Registrato dopo la TSFN: i cleanup hook girano in ordine inverso, quindi
   // questo ferma il thread prima che l'environment chiuda la TSFN.
-  napi_add_env_cleanup_hook(env, &Executor::EnvCleanup, this);
+  cleanup_hook_ = env.AddCleanupHook(&Executor::EnvCleanup, this);
   started_ = true;
 }
 
@@ -176,12 +244,14 @@ void Executor::Stop(Napi::Env env) {
     thread_.join();
   }
   channel_.Release();
-  napi_remove_env_cleanup_hook(env, &Executor::EnvCleanup, this);
+  if (!cleanup_hook_.IsEmpty()) {
+    cleanup_hook_.Remove(env);
+  }
   started_ = false;
 }
 
-void Executor::EnvCleanup(void* data) {
-  static_cast<Executor*>(data)->Abandon();
+void Executor::EnvCleanup(Executor* executor) {
+  executor->Abandon();
 }
 
 // Chiusura dell'environment (uscita del processo o terminazione del worker):
@@ -231,15 +301,94 @@ void Executor::Submit(Napi::Env env, std::unique_ptr<FFIFunction::PreparedCall> 
   last_job_ = id;
   pending_++;
   Hold(env);
+  // Attesa in linea fuori da Deliver, se le ultime non sono scadute e il giro
+  // corrente dell'event loop ha ancora tempo; sotto lock, solo se nessuna
+  // chiamata attende davanti a questa.
+  bool await_inline = queue_->spin.count() > 0 && !delivering_ && InlineSliceLeft();
+  if (await_inline && skip_ > 0) {
+    skip_--;
+    await_inline = false;
+  }
+  bool parked = false;
+  uint64_t finished = 0;
   {
     std::lock_guard lock(queue_->mutex);
+    await_inline = await_inline && queue_->waiting.empty();
     queue_->waiting.push_back({id, call.release()});
+    queue_->submitted.fetch_add(1, std::memory_order_release);
+    if (await_inline) {
+      queue_->awaited = id;
+      queue_->awaited_done = false;
+      finished = queue_->finished.load(std::memory_order_relaxed);
+    }
+    parked = queue_->parked;
   }
-  queue_->wake.notify_one();
+  if (parked) {
+    queue_->wake.notify_one();
+  }
+  if (await_inline) {
+    AwaitInline(env, finished);
+  }
 }
 
-void Executor::Deliver(Napi::Env env, std::vector<ExecutorJob>&& jobs) {
+bool Executor::InlineSliceLeft() {
+  const auto now = std::chrono::steady_clock::now();
+  if (queue_->turns != inline_turn_) {
+    inline_turn_ = queue_->turns;
+    inline_since_ = now;
+  }
+  // Consegnato al prossimo giro dell'event loop: lì inizia un nuovo intervallo.
+  if (!PostTurnMarker()) {
+    return false;
+  }
+  return now - inline_since_ < kInlineSlice;
+}
+
+bool Executor::PostTurnMarker() {
+  if (!queue_->turn_posted) {
+    if (channel_.NonBlockingCall(&turn_marker) != napi_ok) {
+      return false;
+    }
+    queue_->turn_posted = true;
+  }
+  return true;
+}
+
+void Executor::AwaitInline(Napi::Env env, uint64_t finished) {
+  SpinUntilChanged(queue_->finished, finished, queue_->spin);
+  std::vector<ExecutorJob> jobs;
+  {
+    std::lock_guard lock(queue_->mutex);
+    if (queue_->awaited_done) {
+      queue_->awaited_done = false;
+      jobs.swap(queue_->done);
+    } else {
+      // Scaduta: il thread nativo la notificherà con la TSFN.
+      queue_->awaited = 0;
+    }
+  }
+  if (jobs.empty()) {
+    misses_ = std::min(misses_ + 1, kMaxSkipShift);
+    skip_ = (1u << misses_) - 1;
+    return;
+  }
+  misses_ = 0;
+  // Siamo dentro fn.callOn(): un errore inatteso di Deliver diventa
+  // un'eccezione non gestita al prossimo giro dell'event loop, non
+  // un'eccezione di callOn.
+  if (std::optional<Napi::Error> error = Deliver(env, std::move(jobs)); error && !deferred_error_) {
+    deferred_error_ = std::move(error);
+    PostTurnMarker();
+  }
+}
+
+std::optional<Napi::Error> Executor::Deliver(Napi::Env env, std::vector<ExecutorJob>&& jobs) {
+  if (jobs.empty()) {
+    return std::nullopt;
+  }
   std::optional<Napi::Error> first_error;
+  const bool delivering = delivering_;
+  delivering_ = true;
   for (const ExecutorJob& job : jobs) {
     const std::unique_ptr<FFIFunction::PreparedCall> call(job.call);
     pending_--;
@@ -255,19 +404,9 @@ void Executor::Deliver(Napi::Env env, std::vector<ExecutorJob>&& jobs) {
       // impedire di completare le altre chiamate.
     }
   }
+  delivering_ = delivering;
   Settled(env);
-  if (first_error) {
-    // L'errore diventa un'eccezione JS non gestita; napi_throw non solleva
-    // eccezioni C++ (questa funzione gira nel callback C della TSFN).
-    napi_value value = nullptr;
-    try {
-      value = first_error->Value();
-    } catch (const Napi::Error&) {
-    }
-    if (value != nullptr) {
-      napi_throw(env, value);
-    }
-  }
+  return first_error;
 }
 
 void Executor::Hold(Napi::Env env) {

@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-11-10
+
+### Added
+
+- **`Executor` `spin` option** (microseconds, default 50, `0` disables, at
+  most 10000): after a call the executor thread polls for the next one this
+  long before sleeping, and the JavaScript thread waits this long for a call
+  submitted to an executor with nothing queued, completing it without a round
+  trip through the event loop. Awaited calls in sequence go from about 37 µs to
+  about 4 µs each on Windows x64 (the same as a burst).
+- **Tests**: spin option validation, awaited calls with and without spin,
+  errcheck calling the same executor during an inline completion, slow calls
+  falling back to the notification, thread-safe callbacks from the executor
+  thread while the JavaScript thread waits, and immediates/timers running
+  during awaited calls and bursts.
+
+### Changed
+
+- **Executor completions**: a call that completes within the `spin` budget is
+  completed before `callOn` returns: its errcheck runs then and the promise is
+  already settled (`await` still resumes asynchronously).
+- **Event loop fairness**: inline completions are limited to 1 ms per turn of
+  the event loop (a turn is detected by delivering a marker through the
+  executor's thread-safe function); after that, calls are completed through
+  the thread-safe function so that timers, I/O and UI events run, and a burst
+  submitted in one go is queued instead of blocking the JavaScript thread.
+  Waits that time out (slow calls) are skipped for the following calls, with
+  exponential backoff up to 1024 calls, until one completes in time again.
+- **Executor internals**: Node-API calls go through node-addon-api
+  (`TypedThreadSafeFunction::NonBlockingCall`,
+  `Error::ThrowAsJavaScriptException`, `Env::AddCleanupHook`); the executor
+  thread signals its condition variable only when the thread is asleep.
+
 ## [2.11.1] - 2026-11-10
 
 ### Fixed
@@ -1200,7 +1233,8 @@ It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-
 
 Initial releases.
 
-[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.11.1...HEAD
+[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.12.0...HEAD
+[2.12.0]: https://github.com/dmazzella/node-ctypes/compare/v2.11.1...v2.12.0
 [2.11.1]: https://github.com/dmazzella/node-ctypes/compare/v2.11.0...v2.11.1
 [2.11.0]: https://github.com/dmazzella/node-ctypes/compare/v2.10.0...v2.11.0
 [2.10.0]: https://github.com/dmazzella/node-ctypes/compare/v2.9.0...v2.10.0

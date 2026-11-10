@@ -21,6 +21,20 @@ struct ExecutorJob {
 struct ExecutorQueue {
   std::mutex mutex;
   std::condition_variable wake;
+  // Attesa attiva (µs) del thread nativo dopo una chiamata, prima di dormire,
+  // e del thread JS per una chiamata inviata a un Executor inattivo; 0 la disattiva.
+  std::chrono::microseconds spin{0};
+  // Chiamate accodate (incrementato a ogni push): il thread nativo lo osserva durante l'attesa attiva.
+  std::atomic<uint64_t> submitted{0};
+  // Chiamate eseguite: il thread JS lo osserva mentre attende una chiamata.
+  std::atomic<uint64_t> finished{0};
+  bool parked = false;        // il thread nativo dorme sulla condition variable
+  uint64_t awaited = 0;       // id della chiamata attesa dal thread JS (niente notifica TSFN)
+  bool awaited_done = false;  // la chiamata attesa è conclusa ed è in done
+  // Thread JS: giri dell'event loop osservati, contati alla consegna di un
+  // segnaposto inviato alla TSFN dal thread JS stesso (in attesa: turn_posted).
+  uint64_t turns = 0;
+  bool turn_posted = false;
   std::deque<ExecutorJob> waiting;  // accodate, non ancora iniziate
   std::vector<ExecutorJob> done;    // eseguite, da completare sul thread JS
   bool busy = false;                // una chiamata in esecuzione
@@ -66,13 +80,22 @@ class Executor : public Napi::ObjectWrap<Executor> {
   void Start(Napi::Env env);
   // Thread inattivo: lo ferma, attende che esca e rilascia la TSFN.
   void Stop(Napi::Env env);
-  void Deliver(Napi::Env env, std::vector<ExecutorJob>&& jobs);
+  // Completa le chiamate eseguite; restituisce il primo errore inatteso.
+  std::optional<Napi::Error> Deliver(Napi::Env env, std::vector<ExecutorJob>&& jobs);
+  // Thread JS: attende per al più queue_->spin la chiamata appena inviata a un
+  // Executor inattivo (`finished`: il contatore prima dell'invio) e, se
+  // conclusa, la completa subito, senza il giro della TSFN.
+  void AwaitInline(Napi::Env env, uint64_t finished);
+  // Se il giro corrente dell'event loop può ancora completare chiamate in linea.
+  bool InlineSliceLeft();
+  // Invia il segnaposto del giro dell'event loop, se non è già in attesa.
+  bool PostTurnMarker();
   // Dopo ogni chiamata conclusa: unref quando non ne restano, chiusura se richiesta.
   void Settled(Napi::Env env);
   // Con chiamate in sospeso: processo vivo (TSFN ref) e oggetto JS non raccolto.
   void Hold(Napi::Env env);
   void FinishClose(Napi::Env env);
-  static void EnvCleanup(void* data);
+  static void EnvCleanup(Executor* executor);
   void Abandon();
 
   std::shared_ptr<ExecutorQueue> queue_ = std::make_shared<ExecutorQueue>();
@@ -84,6 +107,21 @@ class Executor : public Napi::ObjectWrap<Executor> {
   bool closed_ = false;
   bool abandoned_ = false;
   bool held_ = false;
+  // Durante Deliver: niente attese in linea per le chiamate inviate dagli errcheck.
+  bool delivering_ = false;
+  // Attese in linea scadute di fila: le successive `skip_` chiamate non attendono.
+  uint32_t misses_ = 0;
+  uint32_t skip_ = 0;
+  // Completamenti in linea per giro dell'event loop: dal primo, al più
+  // kInlineSlice; poi le chiamate passano dalla TSFN e il loop gira (timer, I/O,
+  // UI). Un giro nuovo si riconosce dalla consegna del segnaposto della TSFN,
+  // che avviene solo quando il loop torna a elaborarla.
+  uint64_t inline_turn_ = UINT64_MAX;
+  std::chrono::steady_clock::time_point inline_since_;
+  // Errore inatteso di un completamento in linea, sollevato alla consegna del segnaposto.
+  std::optional<Napi::Error> deferred_error_;
+  // Ferma il thread alla chiusura dell'environment (vuoto se il thread non è avviato).
+  Napi::Env::CleanupHook<void (*)(Executor*), Executor> cleanup_hook_;
   // Chiamate accodate o in esecuzione (contate sul thread JS).
   size_t pending_ = 0;
   uint64_t completed_ = 0;

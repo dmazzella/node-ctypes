@@ -135,6 +135,14 @@ await executor.close(); // waits for the accepted calls, then stops the thread
   longer referenced. `close()` rejects new calls, waits for the accepted ones
   and stops the thread (an executor cannot be reopened).
 - `executor.pending`, `completed`, `running` and `closed` report its state.
+- `spin` (microseconds, default 50, `0` to disable): after a call the thread
+  polls for the next one this long before sleeping, and the JavaScript thread
+  waits this long for a call submitted to an idle executor, completing it
+  without a round trip through the event loop. Awaited calls in sequence then
+  cost a few microseconds instead of tens; its errcheck may run before
+  `callOn` returns. Inline completions are limited to 1 ms per turn of the
+  event loop, so timers, I/O and UI events keep running; slow calls fall back
+  to the normal notification.
 - A call that has started cannot be interrupted: the signal only removes
   queued calls.
 - On process exit (or worker termination) queued calls are discarded and a

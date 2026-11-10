@@ -749,6 +749,16 @@ export class ThreadSafeCallback extends Callback {
 export interface ExecutorOptions {
   /** Thread name shown by debuggers and profilers (default `"node-ctypes"`). */
   name?: string;
+  /**
+   * Busy-wait budget in microseconds (default 50, 0 to disable, at most
+   * 10000). After a call the executor thread polls for the next one this long
+   * before sleeping, and the JavaScript thread waits this long for a call
+   * submitted to an idle executor, completing it without a round trip through
+   * the event loop: awaited calls in sequence cost a few microseconds instead
+   * of tens. When the wait times out (slow calls) the following calls skip it,
+   * with exponential backoff, until one completes in time again.
+   */
+  spin?: number;
 }
 
 /**
@@ -773,6 +783,10 @@ export type ExecutorTarget = Executor | { readonly executor: Executor; readonly 
  * its thread when unreferenced. When the process exits (or a worker thread
  * terminates) queued calls are discarded and a running call is left to finish
  * on its own.
+ *
+ * A call that completes within the {@link ExecutorOptions.spin} budget is
+ * completed before `callOn` returns: its errcheck runs then, and the promise
+ * is already settled (`await` still resumes asynchronously).
  *
  * No Python equivalent.
  *

@@ -432,6 +432,9 @@ check(expectType<Promise<bigint>>()(strlenProto.callAsync("x")));
 
 // Executor / callOn: same result type as callAsync.
 const executor = new Executor({ name: "types" });
+new Executor({ name: "types", spin: 0 });
+// @ts-expect-error spin is a number of microseconds
+new Executor({ spin: "50" });
 check(expectType<Promise<bigint>>()(strlenProto.callOn(executor, "x")));
 check(expectType<Promise<bigint>>()(strlenProto.callOn({ executor, signal: AbortSignal.timeout(10) }, "x")));
 check(expectType<Promise<number>>()(castNative.callOn(executor, -7)));
