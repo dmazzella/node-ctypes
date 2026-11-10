@@ -58,7 +58,8 @@ describe("Executor calls", function () {
       const main = threadId();
       const settled = [];
       const calls = Array.from({ length: 500 }, (_, index) => threadId.callOn(executor).then((id) => (settled.push(index), id)));
-      assert.strictEqual(executor.pending, 500);
+      // Calls completed inline (spin) are already counted as completed.
+      assert.strictEqual(executor.pending + executor.completed, 500);
       const ids = new Set(await Promise.all(calls));
       assert.strictEqual(ids.size, 1, "a single executor thread");
       assert.notStrictEqual([...ids][0], main, "not the JavaScript thread");
