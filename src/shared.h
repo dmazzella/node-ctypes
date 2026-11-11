@@ -106,4 +106,19 @@ template <TypeTaggedWrap T>
   return object.CheckTypeTag(&T::kTypeTag) ? Napi::ObjectWrap<T>::Unwrap(object) : nullptr;
 }
 
+// Thread nativi in attesa del thread JavaScript (callback thread-safe invocati
+// da un altro thread, es. durante una chiamata su un Executor): un'attesa in
+// linea del thread JavaScript si interrompe, perché quel thread deve tornare
+// all'event loop per servirli.
+inline std::atomic<uint32_t> native_threads_awaiting_js{0};
+
+// Per la durata di un'attesa del thread JavaScript da parte di un thread nativo.
+class AwaitingJsThread {
+ public:
+  AwaitingJsThread() noexcept { native_threads_awaiting_js.fetch_add(1, std::memory_order_release); }
+  ~AwaitingJsThread() { native_threads_awaiting_js.fetch_sub(1, std::memory_order_release); }
+  AwaitingJsThread(const AwaitingJsThread&) = delete;
+  AwaitingJsThread& operator=(const AwaitingJsThread&) = delete;
+};
+
 }  // namespace ctypes

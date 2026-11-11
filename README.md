@@ -136,7 +136,7 @@ await executor.close(); // waits for the accepted calls, then stops the thread
   and stops the thread (an executor cannot be reopened).
 - `executor.pending`, `completed`, `running` and `closed` report its state.
 - `spin` (microseconds, default 50, `0` to disable): after a call the thread
-  polls for the next one this long before sleeping, and the JavaScript thread
+  polls for the next one this long (at most 50 µs) before sleeping, and the JavaScript thread
   waits this long for a call submitted to an idle executor, completing it
   without a round trip through the event loop. Awaited calls in sequence then
   cost a few microseconds instead of tens; its errcheck may run before

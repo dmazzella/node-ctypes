@@ -313,7 +313,8 @@ describe("Executor spin", function () {
       }
       clearInterval(timer);
       assert.ok(immediates > calls / 20, `immediates ran (${immediates} for ${calls} calls)`);
-      assert.ok(ticks >= 10, `timers ran (${ticks})`);
+      // Windows timers fire about every 15.6 ms, and less often on a loaded machine.
+      assert.ok(ticks >= 3, `timers ran (${ticks})`);
       // A burst submitted in one go blocks the JavaScript thread for about one slice at most.
       const before = performance.now();
       const burst = Array.from({ length: 20000 }, () => threadId.callOn(executor));
@@ -385,8 +386,9 @@ describe("Executor cancellation", function () {
     const executor = new Executor();
     try {
       const controller = new AbortController();
-      const running = sleep.callOn({ executor, signal: controller.signal }, ms(100));
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      const running = sleep.callOn({ executor, signal: controller.signal }, ms(300));
+      // Long enough for the executor thread to start the call, also on a loaded machine.
+      await new Promise((resolve) => setTimeout(resolve, 100));
       controller.abort();
       await running;
     } finally {

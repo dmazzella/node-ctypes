@@ -605,6 +605,8 @@ void DispatchThreadSafeNative(ThreadSafeCallbackState* data, void* ret, void** a
     std::lock_guard<std::mutex> lock(data->pending_mutex);
     data->pending.push_back(call);
   }
+  // Fino alla risposta: un'attesa in linea del thread JS si interrompe.
+  const AwaitingJsThread awaiting;
   auto payload = std::make_unique<PendingCallback>(call);
   const napi_status status = data->tsfn.BlockingCall(payload.get());
   if (status != napi_ok) {

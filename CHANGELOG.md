@@ -25,6 +25,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   waits time out (e.g. where the executor thread wakes up slowly), a function
   skips the next 1, 3, 7, ... up to 1023 waits, without affecting the others.
 
+### Fixed
+
+- **Executor busy waits on a loaded machine**: the busy waits called
+  `std::this_thread::yield()`, which, with other threads ready on the same
+  core, gives the core away for a whole time slice: on a loaded machine (CI
+  VMs running test files in parallel) each call cost tens of milliseconds, 401
+  awaited calls 13 s instead of 0.13 s. The waits no longer yield, the
+  executor thread polls for the next call for at most 50 µs whatever `spin`
+  is, and the JavaScript thread stops waiting as soon as a native thread waits
+  for it (a thread-safe callback invoked by the awaited call). Under load the
+  fast path is now 3 to 5 times faster than `spin: 0`, as on an idle machine.
+
 ### Added
 
 - **`Executor` `spinLimit` option**, and tests for the per-function wait

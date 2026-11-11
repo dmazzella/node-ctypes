@@ -15,6 +15,11 @@ constexpr double kDefaultSpinMicros = 50;
 constexpr double kMaxSpinMicros = 10'000;
 // Attesa in linea massima per una funzione che ne ha bisogno (più di spin).
 constexpr double kDefaultSpinLimitMicros = 500;
+// Attesa attiva massima del thread nativo, dopo una chiamata, per la chiamata
+// successiva (l'intervallo fra un await e la chiamata seguente è di pochi µs).
+// Oltre dorme sulla condition variable: su una macchina carica un'attesa attiva
+// lunga toglierebbe il core al thread JavaScript che deve inviarla.
+constexpr std::chrono::nanoseconds kMaxIdleSpin = std::chrono::microseconds(50);
 // Margine dell'attesa in linea oltre una volta e mezza la durata tipica.
 constexpr std::chrono::nanoseconds kInlineMargin = std::chrono::microseconds(10);
 // Peso di una nuova durata nella media mobile (1/8) e tetto delle durate
@@ -34,15 +39,29 @@ constexpr std::chrono::microseconds kInlineSlice{1000};
 // Dato del segnaposto inviato alla TSFN per contare i giri dell'event loop.
 char turn_marker;
 
-// Attende attivamente, per al più `spin`, che `counter` cambi da `seen`; tra
-// un controllo e l'altro cede il processore agli altri thread pronti.
+// Attende attivamente, per al più `spin` (pochi microsecondi), che `counter`
+// cambi da `seen`. Non cede il processore: con altri thread pronti sullo
+// stesso core, yield() lo cederebbe per un intero quanto (decine di ms).
 bool SpinUntilChanged(const std::atomic<uint64_t>& counter, uint64_t seen, std::chrono::nanoseconds spin) {
   const auto deadline = std::chrono::steady_clock::now() + spin;
   while (counter.load(std::memory_order_acquire) == seen) {
     if (std::chrono::steady_clock::now() >= deadline) {
       return false;
     }
-    std::this_thread::yield();
+  }
+  return true;
+}
+
+// Come SpinUntilChanged, per il thread JavaScript: si interrompe anche quando un
+// thread nativo aspetta il thread JavaScript (un callback thread-safe invocato
+// dalla chiamata attesa, che altrimenti non potrebbe concludersi).
+bool AwaitUntilChanged(const std::atomic<uint64_t>& counter, uint64_t seen, std::chrono::nanoseconds spin) {
+  const auto deadline = std::chrono::steady_clock::now() + spin;
+  while (counter.load(std::memory_order_acquire) == seen) {
+    if (native_threads_awaiting_js.load(std::memory_order_acquire) != 0 ||
+        std::chrono::steady_clock::now() >= deadline) {
+      return false;
+    }
   }
   return true;
 }
@@ -80,7 +99,7 @@ void ExecutorLoop(std::shared_ptr<ExecutorQueue> queue, std::string name, std::u
       // in sequenza): attenderla attivamente evita di svegliare il thread.
       const uint64_t seen = queue->submitted.load(std::memory_order_acquire);
       lock.unlock();
-      SpinUntilChanged(queue->submitted, seen, queue->spin);
+      SpinUntilChanged(queue->submitted, seen, std::min<std::chrono::nanoseconds>(queue->spin, kMaxIdleSpin));
       lock.lock();
     }
     queue->parked = true;
@@ -437,7 +456,7 @@ bool Executor::PostTurnMarker() {
 }
 
 void Executor::AwaitInline(Napi::Env env, uint64_t finished, std::chrono::nanoseconds budget, const void* function) {
-  SpinUntilChanged(queue_->finished, finished, budget);
+  AwaitUntilChanged(queue_->finished, finished, budget);
   std::vector<ExecutorJob> jobs;
   {
     std::lock_guard lock(queue_->mutex);
