@@ -21,6 +21,7 @@
 #include <windows.h>
 #define FIXTURE_API __declspec(dllexport)
 #else
+#include <pthread.h>
 #include <time.h>
 #define FIXTURE_API __attribute__((visibility("default")))
 #endif
@@ -187,6 +188,17 @@ FIXTURE_API uint32_t fixture_busy_wait_us(uint32_t microseconds) {
   while (fixture_now_us() < end) {
   }
   return microseconds;
+}
+
+/* Identity of the thread that runs the call; the argument is ignored (a slot
+ * for argument adapters such as from_param). */
+FIXTURE_API uint64_t fixture_current_thread(const void* unused) {
+  (void)unused;
+#ifdef _WIN32
+  return (uint64_t)GetCurrentThreadId();
+#else
+  return (uint64_t)(uintptr_t)pthread_self();
+#endif
 }
 
 FIXTURE_API size_t fixture_string_length(const char* value) {

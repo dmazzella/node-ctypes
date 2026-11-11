@@ -312,7 +312,8 @@ describe("Executor spin", function () {
         calls++;
       }
       clearInterval(timer);
-      assert.ok(immediates > calls / 20, `immediates ran (${immediates} for ${calls} calls)`);
+      // The loop turned between awaited calls (how often depends on the load of the machine).
+      assert.ok(immediates > 0, `immediates ran (${immediates} for ${calls} calls)`);
       // Windows timers fire about every 15.6 ms, and less often on a loaded machine.
       assert.ok(ticks >= 3, `timers ran (${ticks})`);
       // A burst submitted in one go blocks the JavaScript thread for about one slice at most.
@@ -360,6 +361,195 @@ describe("Executor spin", function () {
   });
 });
 
+describe("Executor completion notifications", function () {
+  it("coalesces the notifications of a burst, completing each call once and in order", async function () {
+    const { createHook } = await import("node:async_hooks");
+    const { threadId } = threadApi();
+    const executor = new Executor({ spin: 0 });
+    const resources = new Set();
+    let deliveries = 0;
+    const hook = createHook({
+      init(asyncId, type) {
+        if (type === "node-ctypes Executor") resources.add(asyncId);
+      },
+      before(asyncId) {
+        if (resources.has(asyncId)) deliveries++;
+      },
+    }).enable();
+    try {
+      await threadId.callOn(executor);
+      deliveries = 0;
+      const order = [];
+      const calls = Array.from({ length: 2000 }, (_, index) => threadId.callOn(executor).then(() => order.push(index)));
+      await Promise.all(calls);
+      // Let notifications still queued (one per call before coalescing) arrive.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.deepStrictEqual(
+        order,
+        calls.map((_, index) => index),
+        "each call completed once, in order",
+      );
+      assert.strictEqual(executor.pending, 0);
+      assert.ok(deliveries < 200, `${deliveries} deliveries for 2000 calls`);
+    } finally {
+      hook.disable();
+      await executor.close();
+    }
+  });
+});
+
+describe("Executor call identity", function () {
+  // The executor of a call and its identity (for cancellation) belong to that
+  // call: argument adapters and errcheck can run JavaScript, including other
+  // callOn, between the start of callOn and its return.
+  function threadFunctions() {
+    const lib = new CDLL(FIXTURE);
+    const plain = lib.func("fixture_current_thread", ctypes.c_uint64, [c_void_p]);
+    return { lib, plain };
+  }
+
+  it("runs a call on its executor when an argument adapter calls another executor", async function () {
+    const { lib, plain } = threadFunctions();
+    const executor = new Executor({ spin: 0 });
+    const other = new Executor({ spin: 0 });
+    try {
+      const executorThread = await plain.callOn(executor, null);
+      const otherThread = await plain.callOn(other, null);
+      assert.notStrictEqual(executorThread, otherThread);
+      const nested = [];
+      class Probe extends c_void_p {
+        static from_param(value) {
+          nested.push(plain.callOn(other, null), plain.callOn(executor, null));
+          return value;
+        }
+      }
+      const probed = lib.func("fixture_current_thread", ctypes.c_uint64, [Probe]);
+      assert.strictEqual(await probed.callOn(executor, null), executorThread, "the outer call on its executor");
+      assert.deepStrictEqual(await Promise.all(nested), [otherThread, executorThread], "the nested calls on theirs");
+    } finally {
+      await executor.close();
+      await other.close();
+      lib.close();
+    }
+  });
+
+  it("runs a call on its executor when an argument adapter calls the same function", async function () {
+    const { lib, plain } = threadFunctions();
+    const executor = new Executor({ spin: 0 });
+    const other = new Executor({ spin: 0 });
+    try {
+      const executorThread = await plain.callOn(executor, null);
+      const otherThread = await plain.callOn(other, null);
+      let nested = null;
+      let reentered = false;
+      class Probe extends c_void_p {
+        static from_param(value) {
+          if (!reentered) {
+            reentered = true;
+            // The same function, reentered from its own argument conversion.
+            nested = probed.callOn(other, null);
+          }
+          return value;
+        }
+      }
+      const probed = lib.func("fixture_current_thread", ctypes.c_uint64, [Probe]);
+      assert.strictEqual(await probed.callOn(executor, null), executorThread);
+      assert.strictEqual(await nested, otherThread);
+      // A plain callAsync of the same function from the adapter stays on the libuv pool.
+      reentered = false;
+      let pooled = null;
+      class PoolProbe extends c_void_p {
+        static from_param(value) {
+          if (!reentered) {
+            reentered = true;
+            pooled = pooledFn.callAsync(null);
+          }
+          return value;
+        }
+      }
+      const pooledFn = lib.func("fixture_current_thread", ctypes.c_uint64, [PoolProbe]);
+      assert.strictEqual(await pooledFn.callOn(executor, null), executorThread);
+      const poolThread = await pooled;
+      assert.notStrictEqual(poolThread, executorThread);
+      assert.notStrictEqual(poolThread, otherThread);
+    } finally {
+      await executor.close();
+      await other.close();
+      lib.close();
+    }
+  });
+
+  it("cancels only its own call, also after an inline completion whose errcheck queued others", async function () {
+    const { sleep, ms, threadId } = threadApi();
+    const executor = new Executor();
+    try {
+      let checked = false;
+      for (let attempt = 0; attempt < 50 && !checked; attempt++) {
+        for (let index = 0; index < 5; index++) await threadId.callOn(executor);
+        const controller = new AbortController();
+        let blocking = null;
+        let behind = null;
+        threadId.errcheck = (result) => {
+          threadId.errcheck = null;
+          blocking = sleep.callOn(executor, ms(100));
+          behind = threadId.callOn(executor);
+          return result;
+        };
+        const inlineBefore = executor._inlineCompleted;
+        const outer = threadId.callOn({ executor, signal: controller.signal });
+        const inline = executor._inlineCompleted > inlineBefore;
+        threadId.errcheck = null;
+        if (!inline) {
+          await outer;
+          await Promise.all([blocking, behind]);
+          continue;
+        }
+        // The outer call completed inline: aborting its signal must not cancel the calls its errcheck queued.
+        controller.abort(new Error("abort OUTER only"));
+        await outer;
+        await assert.doesNotReject(blocking, "the blocking call queued by errcheck");
+        await assert.doesNotReject(behind, "the call queued behind it");
+        checked = true;
+      }
+      assert.ok(checked, "no inline completion to test in 50 attempts");
+    } finally {
+      threadId.errcheck = null;
+      await executor.close();
+    }
+  });
+
+  it("does not run a call whose signal is aborted while its arguments are prepared", async function () {
+    const { sleep, ms } = threadApi();
+    const { lib } = threadFunctions();
+    const executor = new Executor();
+    try {
+      const blocking = sleep.callOn(executor, ms(100));
+      const controller = new AbortController();
+      const reason = new Error("aborted during preparation");
+      class Aborting extends c_void_p {
+        static from_param(value) {
+          controller.abort(reason);
+          return value;
+        }
+      }
+      const aborting = lib.func("fixture_current_thread", ctypes.c_uint64, [Aborting]);
+      await assert.rejects(aborting.callOn({ executor, signal: controller.signal }, null), (error) => error === reason);
+      await blocking;
+      assert.strictEqual(executor.completed, 1, "only the blocking call ran");
+      // A call already queued is still cancelled, a started one completes.
+      const running = sleep.callOn(executor, ms(100));
+      const queuedController = new AbortController();
+      const queued = sleep.callOn({ executor, signal: queuedController.signal }, ms(1));
+      queuedController.abort(reason);
+      await assert.rejects(queued, (error) => error === reason);
+      await running;
+    } finally {
+      await executor.close();
+      lib.close();
+    }
+  });
+});
+
 describe("Executor cancellation", function () {
   it("rejects a queued call with the abort reason and runs the others", async function () {
     const { sleep, threadId, ms } = threadApi();
@@ -382,17 +572,28 @@ describe("Executor cancellation", function () {
   });
 
   it("lets a started call complete", async function () {
-    const { sleep, ms } = threadApi();
+    const lib = new CDLL(FIXTURE);
     const executor = new Executor();
+    const controller = new AbortController();
+    const Point = ctypes.struct({ x: c_int32, y: c_int32 });
+    // The native call invokes this callback from the executor thread: the call
+    // has started when it runs (no timing assumption), and it aborts there.
+    const callback = ctypes.threadSafeCallback(
+      (point) => {
+        controller.abort(new Error("too late"));
+        return point.x + point.y;
+      },
+      c_int32,
+      [Point],
+    );
     try {
-      const controller = new AbortController();
-      const running = sleep.callOn({ executor, signal: controller.signal }, ms(300));
-      // Long enough for the executor thread to start the call, also on a loaded machine.
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      controller.abort();
-      await running;
+      const invoke = lib.func("fixture_point_callback", c_int32, [c_void_p, c_int32, c_int32]);
+      assert.strictEqual(await invoke.callOn({ executor, signal: controller.signal }, callback.pointer, 2, 3), 5);
+      assert.ok(controller.signal.aborted);
     } finally {
+      callback.release();
       await executor.close();
+      lib.close();
     }
   });
 

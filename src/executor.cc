@@ -129,7 +129,12 @@ void ExecutorLoop(std::shared_ptr<ExecutorQueue> queue, std::string name, std::u
       continue;
     }
     // Sotto lock: dopo abandoned la TSFN non viene più usata da questo thread.
-    ExecutorChannel(queue->channel).NonBlockingCall();
+    // Una sola notifica in sospeso: la consegna preleva tutti i completati, e
+    // azzera notify_pending sotto lo stesso lock (nessun risveglio perso).
+    if (!queue->notify_pending) {
+      queue->notify_pending = true;
+      ExecutorChannel(queue->channel).NonBlockingCall();
+    }
   }
 }
 
@@ -149,6 +154,8 @@ void DeliverExecutorCompletions(Napi::Env env, Napi::Function, ExecutorQueue* qu
   {
     std::lock_guard lock(queue->mutex);
     jobs.swap(queue->done);
+    // Le chiamate concluse da qui in poi inviano una nuova notifica.
+    queue->notify_pending = false;
     deliver = queue->deliver;
   }
   // Anche senza chiamate: un segnaposto può portare un errore di AwaitInline.
@@ -340,10 +347,10 @@ void Executor::Abandon() {
   started_ = false;
 }
 
-void Executor::Submit(Napi::Env env, std::unique_ptr<FFIFunction::PreparedCall> call) {
+uint64_t Executor::Submit(Napi::Env env, std::unique_ptr<FFIFunction::PreparedCall> call) {
   if (closed_ || abandoned_) {
     call->Reject(Napi::Error::New(env, "Executor is closed").Value());
-    return;
+    return 0;
   }
   if (!started_) {
     Start(env);
@@ -382,6 +389,7 @@ void Executor::Submit(Napi::Env env, std::unique_ptr<FFIFunction::PreparedCall> 
   if (await_inline) {
     AwaitInline(env, finished, budget, function);
   }
+  return id;
 }
 
 bool Executor::SkipInline(const void* function) {

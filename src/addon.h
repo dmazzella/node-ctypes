@@ -33,12 +33,6 @@ class CTypesAddon : public Napi::Addon<CTypesAddon> {
   Napi::FunctionReference errcheck_owner_set;
   Napi::FunctionReference errcheck_owner_delete;
 
-  // callOn(): Executor della prossima chiamata asincrona di call_target_function,
-  // impostato dal wrapper JS subito prima di callAsync e consumato da quella
-  // chiamata (un convertitore che chiama un'altra funzione non lo vede).
-  Napi::ObjectReference call_target;
-  Napi::ObjectReference call_target_function;
-
   CTypesAddon(Napi::Env env, Napi::Object exports);
   ~CTypesAddon();
 
@@ -65,7 +59,6 @@ class CTypesAddon : public Napi::Addon<CTypesAddon> {
   Napi::Value GetCapturedErrno(const Napi::CallbackInfo& info);
   Napi::Value SetCapturedErrno(const Napi::CallbackInfo& info);
   Napi::Value SetArgumentError(const Napi::CallbackInfo& info);
-  Napi::Value SetCallTarget(const Napi::CallbackInfo& info);
 };
 
 }  // namespace ctypes

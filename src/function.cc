@@ -307,6 +307,8 @@ Napi::Function FFIFunction::GetClass(Napi::Env env) {
                        InstanceMethod("callAsync", &FFIFunction::CallAsync),
                        InstanceMethod("_callWithErrcheck", &FFIFunction::CallChecked),
                        InstanceMethod("_callAsyncWithErrcheck", &FFIFunction::CallAsyncChecked),
+                       InstanceMethod("callOn", &FFIFunction::CallOn),
+                       InstanceMethod("_callOnWithErrcheck", &FFIFunction::CallOnChecked),
                        InstanceMethod("_makeCheckedCall", &FFIFunction::MakeCheckedCall),
                        InstanceMethod("setErrcheck", &FFIFunction::SetErrcheck),
                        InstanceMethod("getCapturedLastError", &FFIFunction::GetLastErrorCaptured),
@@ -512,6 +514,24 @@ Napi::Value FFIFunction::CallAsyncChecked(const Napi::CallbackInfo& info) {
   }
   const Napi::Function errcheck = info[0].As<Napi::Function>();
   return CallAsyncArguments(FunctionArguments{info, 1}, &errcheck);
+}
+
+Napi::Value FFIFunction::CallOn(const Napi::CallbackInfo& info) {
+  if (info.Length() < 1 || !info[0].IsObject()) {
+    throw Napi::TypeError::New(info.Env(), "callOn requires a call target");
+  }
+  const Napi::Object call = info[0].As<Napi::Object>();
+  const Napi::Function errcheck = SnapshotErrcheck();
+  return CallAsyncArguments(FunctionArguments{info, 1, false}, errcheck.IsEmpty() ? nullptr : &errcheck, &call);
+}
+
+Napi::Value FFIFunction::CallOnChecked(const Napi::CallbackInfo& info) {
+  if (info.Length() < 2 || !info[0].IsObject() || !info[1].IsFunction()) {
+    throw Napi::TypeError::New(info.Env(), "a call target and a result handler function are required");
+  }
+  const Napi::Object call = info[0].As<Napi::Object>();
+  const Napi::Function errcheck = info[1].As<Napi::Function>();
+  return CallAsyncArguments(FunctionArguments{info, 2, true}, &errcheck, &call);
 }
 
 Napi::Value FFIFunction::FastCheckedCall(const Napi::CallbackInfo& info) {
@@ -2064,16 +2084,20 @@ std::unique_ptr<FFIFunction::PreparedCall> FFIFunction::PrepareAsyncCall(const F
   return call;
 }
 
-// callAsync(): un worker del pool libuv. callOn(): il wrapper JS imposta
-// l'Executor per questa sola chiamata (setCallTarget) e la chiamata va nella
-// sua coda. Conversioni, errcheck e risultato sono gli stessi.
-Napi::Value FFIFunction::CallAsyncArguments(const FunctionArguments& info, const Napi::Function* errcheck) {
+// callAsync(): un worker del pool libuv. callOn(): la coda dell'Executor
+// indicato da `target`, l'oggetto di questa sola invocazione: le conversioni
+// degli argomenti (from_param) e gli errcheck possono eseguire altre callOn,
+// che hanno ciascuna il proprio. Conversioni, errcheck e risultato sono gli stessi.
+Napi::Value FFIFunction::CallAsyncArguments(const FunctionArguments& info,
+                                            const Napi::Function* errcheck,
+                                            const Napi::Object* target) {
   Napi::Env env = info.Env();
   Executor* executor = nullptr;
-  if (addon_ != nullptr && !addon_->call_target.IsEmpty() && addon_->call_target_function.Value() == Value()) {
-    executor = UnwrapTagged<Executor>(addon_->call_target.Value());
-    addon_->call_target.Reset();
-    addon_->call_target_function.Reset();
+  if (target != nullptr) {
+    executor = UnwrapTagged<Executor>(target->Get("executor"));
+    if (executor == nullptr) {
+      throw Napi::TypeError::New(env, "callOn requires an Executor");
+    }
   }
 
   std::unique_ptr<PreparedCall> call = PrepareAsyncCall(info, errcheck);
@@ -2082,7 +2106,19 @@ Napi::Value FFIFunction::CallAsyncArguments(const FunctionArguments& info, const
   }
   Napi::Promise promise = call->GetPromise();
   if (executor != nullptr) {
-    executor->Submit(env, std::move(call));
+    // Un segnale annullato durante la preparazione degli argomenti (un
+    // adattatore può farlo): la chiamata non viene accodata.
+    if (const Napi::Value signal = target->Get("signal"); signal.IsObject()) {
+      const Napi::Object abort = signal.As<Napi::Object>();
+      if (abort.Get("aborted").ToBoolean().Value()) {
+        call->Reject(abort.Get("reason"));
+        return promise;
+      }
+    }
+    // L'identità della chiamata, per annullarla finché è in coda: scritta
+    // nell'oggetto dell'invocazione, non ricostruita in seguito.
+    const uint64_t job = executor->Submit(env, std::move(call));
+    target->Set("job", Napi::Number::New(env, static_cast<double>(job)));
   } else {
     auto worker = std::make_unique<CallWorker>(env, std::move(call));
     worker->Queue();

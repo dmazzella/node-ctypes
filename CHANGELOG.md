@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.12.2] - 2026-11-11
+
+### Fixed
+
+- **`callOn` target lost during reentrant conversions**: the executor of a
+  call was passed as ambient state just before `callAsync`; an argument
+  adapter (`from_param`) that made another `callOn` overwrote and cleared it,
+  and the outer call ran on the libuv pool. Each invocation now passes its own
+  call object down to the native call (`FFIFunction.callOn`), also when an
+  adapter calls the same function.
+- **Cancellation of the wrong call**: the id of the call to cancel was read
+  from the executor after the call returned; after an inline completion its
+  errcheck may have queued other calls, and aborting the signal cancelled one
+  of those. The native call now writes the id of its own job into the call
+  object.
+- **Abort during argument preparation ignored**: a signal aborted by an
+  argument adapter was checked before the conversions and listened to only
+  after submission, so the call ran. The native call checks the signal after
+  preparing the arguments and before queuing the call, and rejects with
+  `signal.reason` without running it.
+
+### Changed
+
+- **Coalesced completion notifications**: the executor thread notified the
+  JavaScript thread once per completed call, while each delivery takes all the
+  completed calls: in a burst most deliveries found nothing to do (10,000
+  deliveries for 10,000 calls with `spin: 0`, all the promises settled by the
+  first). It now notifies only when no delivery is pending (1 delivery in the
+  same burst). Short calls cost about 25% less (sequential awaited calls about
+  2.7 µs instead of 3.6 µs, bursts 2.4 µs instead of 3.2 µs, with a signal
+  4.0 µs instead of 4.9 µs, locally on Windows x64).
+
+### Added
+
+- Regression tests for the three defects (thread identity of the call, nested
+  calls on another executor and on the same function, cancellation after an
+  inline completion, abort during preparation) and for the coalesced
+  notifications; test fixture function `fixture_current_thread`.
+
 ## [2.12.1] - 2026-11-11
 
 ### Changed
@@ -1271,7 +1310,8 @@ It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-
 
 Initial releases.
 
-[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.12.1...HEAD
+[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.12.2...HEAD
+[2.12.2]: https://github.com/dmazzella/node-ctypes/compare/v2.12.1...v2.12.2
 [2.12.1]: https://github.com/dmazzella/node-ctypes/compare/v2.12.0...v2.12.1
 [2.12.0]: https://github.com/dmazzella/node-ctypes/compare/v2.11.1...v2.12.0
 [2.11.1]: https://github.com/dmazzella/node-ctypes/compare/v2.11.0...v2.11.1

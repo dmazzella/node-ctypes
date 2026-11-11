@@ -76,14 +76,22 @@ struct FunctionArguments {
   const size_t first;
   const size_t argc;
   const Napi::Env env;
+  // Il primo argomento JS è un result handler (le varianti _...WithErrcheck).
+  const bool result_handler;
 
   explicit FunctionArguments(const Napi::CallbackInfo& info, size_t first_arg = 0)
-    : callback(info), first(first_arg), argc(info.Length() - first_arg), env(info.Env()) {}
+    : FunctionArguments(info, first_arg, first_arg != 0) {}
+  FunctionArguments(const Napi::CallbackInfo& info, size_t first_arg, bool has_result_handler)
+    : callback(info),
+      first(first_arg),
+      argc(info.Length() - first_arg),
+      env(info.Env()),
+      result_handler(has_result_handler) {}
 
   Napi::Env Env() const { return env; }
   size_t Length() const { return argc; }
   Napi::Value operator[](size_t index) const { return callback[index + first]; }
-  bool HasResultHandler() const noexcept { return first != 0; }
+  bool HasResultHandler() const noexcept { return result_handler; }
 };
 
 // Argomenti letti da napi_fast::GetArguments (vedi FFIFunction::FastCall):
@@ -120,6 +128,11 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
   Napi::Value CallAsync(const Napi::CallbackInfo& info);
   Napi::Value CallChecked(const Napi::CallbackInfo& info);
   Napi::Value CallAsyncChecked(const Napi::CallbackInfo& info);
+  // callOn(call, ...args) e _callOnWithErrcheck(call, handler, ...args): la
+  // chiamata va sull'Executor di `call` ({ executor, signal, job }), un oggetto
+  // della singola invocazione che riceve l'id del job.
+  Napi::Value CallOn(const Napi::CallbackInfo& info);
+  Napi::Value CallOnChecked(const Napi::CallbackInfo& info);
   Napi::Value MakeCheckedCall(const Napi::CallbackInfo& info);
 
   // ==========================================================================
@@ -227,7 +240,10 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
     requires(std::same_as<Args, Napi::CallbackInfo> || std::same_as<Args, FunctionArguments>)
   Napi::Value InvokeCall(const Args& info, const Napi::Function* errcheck);
   Napi::Value CallArguments(const FunctionArguments& info, const Napi::Function* errcheck);
-  Napi::Value CallAsyncArguments(const FunctionArguments& info, const Napi::Function* errcheck);
+  // Sul pool libuv, o sull'Executor di `call` (callOn).
+  Napi::Value CallAsyncArguments(const FunctionArguments& info,
+                                 const Napi::Function* errcheck,
+                                 const Napi::Object* call = nullptr);
   [[nodiscard]] Napi::Function SnapshotErrcheck() const {
     return errcheck_callback_.IsEmpty() ? Napi::Function() : errcheck_callback_.Value();
   }

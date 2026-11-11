@@ -31,6 +31,10 @@ struct ExecutorQueue {
   bool parked = false;        // il thread nativo dorme sulla condition variable
   uint64_t awaited = 0;       // id della chiamata attesa dal thread JS (niente notifica TSFN)
   bool awaited_done = false;  // la chiamata attesa è conclusa ed è in done
+  // Una notifica della TSFN è in sospeso: la sua consegna preleverà tutti i
+  // completati, quindi le chiamate concluse nel frattempo non ne inviano altre.
+  // Azzerato dalla consegna, sotto lo stesso lock con cui preleva done.
+  bool notify_pending = false;
   // Thread JS: giri dell'event loop osservati, contati alla consegna di un
   // segnaposto inviato alla TSFN dal thread JS stesso (in attesa: turn_posted).
   uint64_t turns = 0;
@@ -75,9 +79,10 @@ class Executor : public Napi::ObjectWrap<Executor> {
   explicit Executor(const Napi::CallbackInfo& info);
   ~Executor();
 
-  // Thread JS: accoda una chiamata preparata. Su un Executor chiuso la sua
-  // Promise viene rifiutata.
-  void Submit(Napi::Env env, std::unique_ptr<FFIFunction::PreparedCall> call);
+  // Thread JS: accoda una chiamata preparata e restituisce l'id del suo job
+  // (per annullarla finché è in coda). Su un Executor chiuso la sua Promise
+  // viene rifiutata e l'id è 0.
+  uint64_t Submit(Napi::Env env, std::unique_ptr<FFIFunction::PreparedCall> call);
 
  private:
   Napi::Value Close(const Napi::CallbackInfo& info);
