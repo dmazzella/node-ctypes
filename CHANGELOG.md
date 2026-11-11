@@ -20,14 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   call: a slow function alternated with fast ones (e.g. ADSI `GetColumn`
   with `FreeColumn`) sent the fast ones through the event loop too. On that
   pattern (one call of 65 µs and two fast calls) the overhead per round drops
-  from about 47 µs to about 18 µs.
+  from about 47 µs to about 18 µs. The backoff is now per function: when its
+  waits time out (e.g. where the executor thread wakes up slowly), a function
+  skips the next 1, 3, 7, ... up to 1023 waits, without affecting the others.
 
 ### Added
 
 - **`Executor` `spinLimit` option**, and tests for the per-function wait
   (a function beyond `spin` within `spinLimit`, a slow function alternated
-  with a fast one, a function that becomes fast again); test fixture function
-  `fixture_busy_wait_us`.
+  with a fast one, a function that becomes fast again), checking the budget
+  computed per function (independent of the speed of the machine); test fixture
+  function `fixture_busy_wait_us`.
 
 ## [2.12.0] - 2026-11-10
 

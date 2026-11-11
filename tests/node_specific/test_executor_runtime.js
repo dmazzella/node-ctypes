@@ -235,28 +235,25 @@ describe("Executor spin", function () {
     for (const spinLimit of [0, 100, 500, 10000]) new Executor({ spinLimit }).close();
   });
 
-  // Inline completions of `count` awaited calls of `call`, after one call that measures it.
-  async function inlineShare(executor, call, count) {
-    await call();
-    const before = executor._inlineCompleted;
-    for (let index = 0; index < count; index++) await call();
-    return (executor._inlineCompleted - before) / count;
-  }
+  // The inline wait per function (_inlineBudget, in microseconds) follows the
+  // durations measured on the executor thread: these tests do not depend on how
+  // fast the machine is (whether a wait succeeds does).
 
-  it("waits inline for a function slower than spin, up to spinLimit", async function () {
+  it("waits longer than spin for a function that needs it, up to spinLimit", async function () {
     const lib = new CDLL(FIXTURE);
     const busy = lib.func("fixture_busy_wait_us", c_uint32, [c_uint32]);
-    const executor = new Executor();
+    // A wide spinLimit: under load (other tests in parallel) the measured durations grow.
+    const executor = new Executor({ spinLimit: 2000 });
     const limited = new Executor({ spinLimit: 0 });
     try {
-      // 150 us: more than spin (50 us), well within spinLimit (500 us). The share
-      // depends on the load of the machine (and on the 1 ms of inline
-      // completions per event-loop turn); with spinLimit 0 it is exactly zero.
-      const share = await inlineShare(executor, () => busy.callOn(executor, 150), 50);
-      // spinLimit 0: a function known to take longer than spin is never awaited inline.
-      const limitedShare = await inlineShare(limited, () => busy.callOn(limited, 150), 50);
-      assert.equal(limitedShare, 0, `completed inline with spinLimit 0: ${(limitedShare * 100).toFixed(0)}%`);
-      assert.ok(share >= 0.1, `completed inline: ${(share * 100).toFixed(0)}%`);
+      assert.equal(executor._inlineBudget(busy.address), 50, "spin for a function not called yet");
+      // 100 us: more than spin (50 us), within spinLimit.
+      for (let index = 0; index < 10; index++) await busy.callOn(executor, 100);
+      const budget = executor._inlineBudget(busy.address);
+      assert.ok(budget > 50 && budget <= 2000, `budget ${budget.toFixed(0)} us`);
+      // spinLimit 0: never more than spin, so no wait for a function slower than spin.
+      for (let index = 0; index < 10; index++) await busy.callOn(limited, 100);
+      assert.equal(limited._inlineBudget(busy.address), 0);
     } finally {
       await executor.close();
       await limited.close();
@@ -264,41 +261,35 @@ describe("Executor spin", function () {
     }
   });
 
-  it("does not let a slow function keep fast ones from completing inline", async function () {
+  it("does not wait for a slow function, without penalizing the others", async function () {
     const lib = new CDLL(FIXTURE);
     const busy = lib.func("fixture_busy_wait_us", c_uint32, [c_uint32]);
     const fast = lib.func("fixture_benchmark_zero", c_int32, []);
     const executor = new Executor();
     try {
-      await busy.callOn(executor, 2000);
-      await fast.callOn(executor);
-      let fastInline = 0;
-      for (let index = 0; index < 50; index++) {
-        // 2 ms, beyond spinLimit: no inline wait (and no penalty for the next call).
-        await busy.callOn(executor, 2000);
-        const before = executor._inlineCompleted;
+      for (let index = 0; index < 5; index++) {
+        // 3 ms, beyond spinLimit, alternated with a fast function.
+        await busy.callOn(executor, 3000);
         await fast.callOn(executor);
-        fastInline += executor._inlineCompleted - before;
       }
-      // With a single backoff per executor (2.12.0) almost none would: each follows a slow call.
-      // How many do depends on how fast the executor thread wakes up (slower on CI VMs).
-      assert.ok(fastInline >= 10, `fast calls completed inline: ${fastInline}/50`);
+      assert.equal(executor._inlineBudget(busy.address), 0, "no wait for the slow function");
+      assert.ok(executor._inlineBudget(fast.address) >= 50, "the fast one keeps its wait");
     } finally {
       await executor.close();
       lib.close();
     }
   });
 
-  it("returns to the inline wait when a function becomes fast", async function () {
+  it("waits again for a function that becomes fast", async function () {
     const lib = new CDLL(FIXTURE);
     const busy = lib.func("fixture_busy_wait_us", c_uint32, [c_uint32]);
     const executor = new Executor();
     try {
       for (let index = 0; index < 5; index++) await busy.callOn(executor, 3000);
-      // The typical duration decays by 1/8 per call: about 15 calls to come back within spinLimit.
-      for (let index = 0; index < 20; index++) await busy.callOn(executor, 5);
-      const share = await inlineShare(executor, () => busy.callOn(executor, 5), 20);
-      assert.ok(share >= 0.75, `completed inline: ${(share * 100).toFixed(0)}%`);
+      assert.equal(executor._inlineBudget(busy.address), 0);
+      // The typical duration moves by 1/8 per call: about 15 calls to come back within spinLimit.
+      for (let index = 0; index < 30; index++) await busy.callOn(executor, 5);
+      assert.ok(executor._inlineBudget(busy.address) >= 50);
     } finally {
       await executor.close();
       lib.close();

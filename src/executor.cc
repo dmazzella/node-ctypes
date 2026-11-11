@@ -23,6 +23,8 @@ constexpr int64_t kTimingWeight = 8;
 constexpr int64_t kTimingClip = 4;
 // Funzioni ricordate per Executor: oltre, la tabella ricomincia.
 constexpr size_t kMaxTimings = 4096;
+// Attese scadute di fila di una funzione: salta al più 2^10 - 1 attese prima di riprovare.
+constexpr uint32_t kMaxSkipShift = 10;
 // Tempo massimo di completamenti in linea per giro dell'event loop.
 constexpr std::chrono::microseconds kInlineSlice{1000};
 // Dato del segnaposto inviato alla TSFN per contare i giri dell'event loop.
@@ -151,6 +153,7 @@ Napi::Function Executor::GetClass(Napi::Env env) {
                        InstanceAccessor("closed", &Executor::GetClosed, nullptr),
                        InstanceAccessor("_lastJob", &Executor::GetLastJob, nullptr),
                        InstanceAccessor("_inlineCompleted", &Executor::GetInlineCompleted, nullptr),
+                       InstanceMethod("_inlineBudget", &Executor::GetInlineBudget),
                      });
 }
 
@@ -329,8 +332,12 @@ void Executor::Submit(Napi::Env env, std::unique_ptr<FFIFunction::PreparedCall> 
   // Attesa in linea fuori da Deliver, se la funzione di solito termina entro il
   // suo budget e il giro corrente dell'event loop ha ancora tempo; sotto lock,
   // solo se nessuna chiamata attende davanti a questa.
-  const std::chrono::nanoseconds budget =
-    queue_->spin.count() > 0 && !delivering_ ? InlineBudget(call->Function()) : std::chrono::nanoseconds{0};
+  const void* function = call->Function();
+  std::chrono::nanoseconds budget =
+    queue_->spin.count() > 0 && !delivering_ ? InlineBudget(function) : std::chrono::nanoseconds{0};
+  if (budget.count() > 0 && SkipInline(function)) {
+    budget = std::chrono::nanoseconds{0};
+  }
   bool await_inline = budget.count() > 0 && InlineSliceLeft();
   bool parked = false;
   uint64_t finished = 0;
@@ -350,8 +357,31 @@ void Executor::Submit(Napi::Env env, std::unique_ptr<FFIFunction::PreparedCall> 
     queue_->wake.notify_one();
   }
   if (await_inline) {
-    AwaitInline(env, finished, budget);
+    AwaitInline(env, finished, budget, function);
   }
+}
+
+bool Executor::SkipInline(const void* function) {
+  const auto found = timings_.find(function);
+  if (found == timings_.end() || found->second.skip == 0) {
+    return false;
+  }
+  found->second.skip--;
+  return true;
+}
+
+void Executor::InlineOutcome(const void* function, bool completed) {
+  const auto found = timings_.find(function);
+  if (found == timings_.end()) {
+    return;
+  }
+  FunctionTiming& timing = found->second;
+  if (completed) {
+    timing.misses = 0;
+    return;
+  }
+  timing.misses = std::min(timing.misses + 1, kMaxSkipShift);
+  timing.skip = (1u << timing.misses) - 1;
 }
 
 std::chrono::nanoseconds Executor::InlineBudget(const void* function) const {
@@ -401,7 +431,7 @@ bool Executor::PostTurnMarker() {
   return true;
 }
 
-void Executor::AwaitInline(Napi::Env env, uint64_t finished, std::chrono::nanoseconds budget) {
+void Executor::AwaitInline(Napi::Env env, uint64_t finished, std::chrono::nanoseconds budget, const void* function) {
   SpinUntilChanged(queue_->finished, finished, budget);
   std::vector<ExecutorJob> jobs;
   {
@@ -415,9 +445,12 @@ void Executor::AwaitInline(Napi::Env env, uint64_t finished, std::chrono::nanose
     }
   }
   if (jobs.empty()) {
+    InlineOutcome(function, false);
     return;
   }
   inline_completed_++;
+  // Prima di Deliver, che aggiorna la durata tipica (e può svuotare la tabella).
+  InlineOutcome(function, true);
   // Siamo dentro fn.callOn(): un errore inatteso di Deliver diventa
   // un'eccezione non gestita al prossimo giro dell'event loop, non
   // un'eccezione di callOn.
@@ -548,6 +581,17 @@ Napi::Value Executor::GetRunning(const Napi::CallbackInfo& info) {
 
 Napi::Value Executor::GetClosed(const Napi::CallbackInfo& info) {
   return Napi::Boolean::New(info.Env(), closed_);
+}
+
+Napi::Value Executor::GetInlineBudget(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  if (info.Length() < 1 || !info[0].IsBigInt()) {
+    throw Napi::TypeError::New(env, "_inlineBudget requires a function address (BigInt)");
+  }
+  bool lossless = false;
+  const uint64_t address = info[0].As<Napi::BigInt>().Uint64Value(&lossless);
+  const std::chrono::nanoseconds budget = InlineBudget(reinterpret_cast<const void*>(static_cast<uintptr_t>(address)));
+  return Napi::Number::New(env, std::chrono::duration<double, std::micro>(budget).count());
 }
 
 Napi::Value Executor::GetInlineCompleted(const Napi::CallbackInfo& info) {

@@ -55,6 +55,11 @@ using ExecutorChannel = Napi::TypedThreadSafeFunction<ExecutorQueue, void, Deliv
 // durate misurate da PreparedCall::Run), da cui dipende l'attesa in linea.
 struct FunctionTiming {
   std::chrono::nanoseconds expected{0};
+  // Attese in linea scadute di fila e attese da saltare: se la chiamata non si
+  // conclude in tempo (es. il thread nativo si sveglia lentamente) la funzione
+  // smette per un po' di attendere, senza toccare le altre.
+  uint32_t misses = 0;
+  uint32_t skip = 0;
 };
 
 // Un thread nativo posseduto, con una coda FIFO: fn.callOn(executor, ...args)
@@ -83,6 +88,8 @@ class Executor : public Napi::ObjectWrap<Executor> {
   Napi::Value GetClosed(const Napi::CallbackInfo& info);
   Napi::Value GetLastJob(const Napi::CallbackInfo& info);
   Napi::Value GetInlineCompleted(const Napi::CallbackInfo& info);
+  // _inlineBudget(address): attesa in linea (µs) per la funzione a quell'indirizzo (per i test).
+  Napi::Value GetInlineBudget(const Napi::CallbackInfo& info);
 
   void Start(Napi::Env env);
   // Thread inattivo: lo ferma, attende che esca e rilascia la TSFN.
@@ -92,7 +99,11 @@ class Executor : public Napi::ObjectWrap<Executor> {
   // Thread JS: attende per al più `budget` la chiamata appena inviata a un
   // Executor inattivo (`finished`: il contatore prima dell'invio) e, se
   // conclusa, la completa subito, senza il giro della TSFN.
-  void AwaitInline(Napi::Env env, uint64_t finished, std::chrono::nanoseconds budget);
+  void AwaitInline(Napi::Env env, uint64_t finished, std::chrono::nanoseconds budget, const void* function);
+  // Se `function` deve saltare questa attesa (dopo attese scadute); consuma un salto.
+  bool SkipInline(const void* function);
+  // Esito di un'attesa in linea di `function`: azzera o allunga i salti.
+  void InlineOutcome(const void* function, bool completed);
   // Attesa in linea per una chiamata a `function`: `spin` per una funzione mai
   // vista, altrimenti una volta e mezza la sua durata tipica (almeno `spin`);
   // zero se supera spin_limit_ (funzione di solito più lenta: niente attesa).
