@@ -280,7 +280,9 @@ describe("Executor spin", function () {
         await fast.callOn(executor);
         fastInline += executor._inlineCompleted - before;
       }
-      assert.ok(fastInline >= 40, `fast calls completed inline: ${fastInline}/50`);
+      // With a single backoff per executor (2.12.0) almost none would: each follows a slow call.
+      // How many do depends on how fast the executor thread wakes up (slower on CI VMs).
+      assert.ok(fastInline >= 10, `fast calls completed inline: ${fastInline}/50`);
     } finally {
       await executor.close();
       lib.close();
