@@ -51,6 +51,12 @@ void DeliverExecutorCompletions(Napi::Env env, Napi::Function, ExecutorQueue* qu
 
 using ExecutorChannel = Napi::TypedThreadSafeFunction<ExecutorQueue, void, DeliverExecutorCompletions>;
 
+// Durata tipica di una funzione chiamata su un Executor (media mobile delle
+// durate misurate da PreparedCall::Run), da cui dipende l'attesa in linea.
+struct FunctionTiming {
+  std::chrono::nanoseconds expected{0};
+};
+
 // Un thread nativo posseduto, con una coda FIFO: fn.callOn(executor, ...args)
 // esegue la chiamata su questo thread invece che su un worker del pool libuv.
 // Le chiamate vengono eseguite una alla volta, in ordine di arrivo; il thread
@@ -76,16 +82,23 @@ class Executor : public Napi::ObjectWrap<Executor> {
   Napi::Value GetRunning(const Napi::CallbackInfo& info);
   Napi::Value GetClosed(const Napi::CallbackInfo& info);
   Napi::Value GetLastJob(const Napi::CallbackInfo& info);
+  Napi::Value GetInlineCompleted(const Napi::CallbackInfo& info);
 
   void Start(Napi::Env env);
   // Thread inattivo: lo ferma, attende che esca e rilascia la TSFN.
   void Stop(Napi::Env env);
   // Completa le chiamate eseguite; restituisce il primo errore inatteso.
   std::optional<Napi::Error> Deliver(Napi::Env env, std::vector<ExecutorJob>&& jobs);
-  // Thread JS: attende per al più queue_->spin la chiamata appena inviata a un
+  // Thread JS: attende per al più `budget` la chiamata appena inviata a un
   // Executor inattivo (`finished`: il contatore prima dell'invio) e, se
   // conclusa, la completa subito, senza il giro della TSFN.
-  void AwaitInline(Napi::Env env, uint64_t finished);
+  void AwaitInline(Napi::Env env, uint64_t finished, std::chrono::nanoseconds budget);
+  // Attesa in linea per una chiamata a `function`: `spin` per una funzione mai
+  // vista, altrimenti una volta e mezza la sua durata tipica (almeno `spin`);
+  // zero se supera spin_limit_ (funzione di solito più lenta: niente attesa).
+  [[nodiscard]] std::chrono::nanoseconds InlineBudget(const void* function) const;
+  // Aggiorna la durata tipica di `function` con una chiamata conclusa.
+  void Learn(const void* function, std::chrono::nanoseconds duration);
   // Se il giro corrente dell'event loop può ancora completare chiamate in linea.
   bool InlineSliceLeft();
   // Invia il segnaposto del giro dell'event loop, se non è già in attesa.
@@ -109,9 +122,12 @@ class Executor : public Napi::ObjectWrap<Executor> {
   bool held_ = false;
   // Durante Deliver: niente attese in linea per le chiamate inviate dagli errcheck.
   bool delivering_ = false;
-  // Attese in linea scadute di fila: le successive `skip_` chiamate non attendono.
-  uint32_t misses_ = 0;
-  uint32_t skip_ = 0;
+  // Attesa in linea massima per funzione (opzione spinLimit, almeno spin).
+  std::chrono::nanoseconds spin_limit_{0};
+  // Durata tipica per funzione chiamata (thread JS).
+  std::unordered_map<const void*, FunctionTiming> timings_;
+  // Chiamate completate in linea (per i test).
+  uint64_t inline_completed_ = 0;
   // Completamenti in linea per giro dell'event loop: dal primo, al più
   // kInlineSlice; poi le chiamate passano dalla TSFN e il loop gira (timer, I/O,
   // UI). Un giro nuovo si riconosce dalla consegna del segnaposto della TSFN,

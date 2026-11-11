@@ -433,6 +433,9 @@ check(expectType<Promise<bigint>>()(strlenProto.callAsync("x")));
 // Executor / callOn: same result type as callAsync.
 const executor = new Executor({ name: "types" });
 new Executor({ name: "types", spin: 0 });
+new Executor({ spin: 50, spinLimit: 500 });
+// @ts-expect-error spinLimit is a number of microseconds
+new Executor({ spinLimit: "500" });
 // @ts-expect-error spin is a number of microseconds
 new Executor({ spin: "50" });
 check(expectType<Promise<bigint>>()(strlenProto.callOn(executor, "x")));

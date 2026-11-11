@@ -2223,6 +2223,7 @@ FFIFunction::PreparedCall::~PreparedCall() {
 
 void FFIFunction::PreparedCall::Run() noexcept {
   // *** THREAD NATIVO - Nessun accesso a V8! ***
+  const auto started = std::chrono::steady_clock::now();
   try {
     const SavedErrorState saved = SwapErrorStateIn(capture_last_error_, capture_errno_, last_error_in_, errno_in_);
     void** args = arg_values_.empty() ? nullptr : arg_values_.data();
@@ -2237,6 +2238,7 @@ void FFIFunction::PreparedCall::Run() noexcept {
     failed_ = true;
     failure_ = "Native function threw an exception";
   }
+  run_duration_ = std::chrono::steady_clock::now() - started;
 }
 
 void FFIFunction::PreparedCall::Reject(Napi::Value reason) {

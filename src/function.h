@@ -299,6 +299,10 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
     void Run() noexcept;
     [[nodiscard]] bool Failed() const noexcept { return failed_; }
     [[nodiscard]] const std::string& FailureMessage() const noexcept { return failure_; }
+    // Funzione chiamata e durata della chiamata nativa (misurata da Run()):
+    // l'Executor ne ricava quanto attendere in linea le chiamate successive.
+    [[nodiscard]] const void* Function() const noexcept { return fn_ptr_; }
+    [[nodiscard]] std::chrono::nanoseconds RunDuration() const noexcept { return run_duration_; }
 
     // Thread JS.
     void Complete(Napi::Env env);
@@ -340,6 +344,7 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
     // Valori privati (get_last_error() / get_errno()) al momento della chiamata.
     uint32_t last_error_in_ = 0;
     int errno_in_ = 0;
+    std::chrono::nanoseconds run_duration_{0};
     // Eccezione nativa durante Run(): la Promise viene rifiutata.
     bool failed_ = false;
     std::string failure_;

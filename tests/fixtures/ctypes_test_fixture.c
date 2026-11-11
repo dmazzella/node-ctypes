@@ -21,6 +21,7 @@
 #include <windows.h>
 #define FIXTURE_API __declspec(dllexport)
 #else
+#include <time.h>
 #define FIXTURE_API __attribute__((visibility("default")))
 #endif
 
@@ -162,6 +163,30 @@ FIXTURE_API size_t fixture_echo_size_t(size_t value) {
 
 FIXTURE_API int32_t fixture_benchmark_zero(void) {
   return 7;
+}
+
+/* Monotonic time in microseconds. */
+static uint64_t fixture_now_us(void) {
+#ifdef _WIN32
+  LARGE_INTEGER frequency;
+  LARGE_INTEGER counter;
+  QueryPerformanceFrequency(&frequency);
+  QueryPerformanceCounter(&counter);
+  return (uint64_t)(counter.QuadPart / (frequency.QuadPart / 1000000));
+#else
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  return (uint64_t)now.tv_sec * 1000000u + (uint64_t)now.tv_nsec / 1000u;
+#endif
+}
+
+/* Keeps the calling thread busy for `microseconds` (a native call of known
+ * duration, shorter and more precise than a sleep); returns them. */
+FIXTURE_API uint32_t fixture_busy_wait_us(uint32_t microseconds) {
+  const uint64_t end = fixture_now_us() + microseconds;
+  while (fixture_now_us() < end) {
+  }
+  return microseconds;
 }
 
 FIXTURE_API size_t fixture_string_length(const char* value) {

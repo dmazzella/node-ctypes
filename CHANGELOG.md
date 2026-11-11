@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.12.1] - 2026-11-11
+
+### Changed
+
+- **Executor inline wait per function**: the JavaScript thread now waits for
+  a call for about one and a half times the typical duration of its function
+  (measured on every call), at least `spin` and at most the new
+  `spinLimit` option (microseconds, default 500, `0` for never more than
+  `spin`); a function that usually takes longer is not waited for. Before, a
+  single backoff per executor skipped the wait for every function after a slow
+  call: a slow function alternated with fast ones (e.g. ADSI `GetColumn`
+  with `FreeColumn`) sent the fast ones through the event loop too. On that
+  pattern (one call of 65 µs and two fast calls) the overhead per round drops
+  from about 47 µs to about 18 µs.
+
+### Added
+
+- **`Executor` `spinLimit` option**, and tests for the per-function wait
+  (a function beyond `spin` within `spinLimit`, a slow function alternated
+  with a fast one, a function that becomes fast again); test fixture function
+  `fixture_busy_wait_us`.
+
 ## [2.12.0] - 2026-11-10
 
 ### Added
@@ -1233,7 +1255,8 @@ It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-
 
 Initial releases.
 
-[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.12.0...HEAD
+[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.12.1...HEAD
+[2.12.1]: https://github.com/dmazzella/node-ctypes/compare/v2.12.0...v2.12.1
 [2.12.0]: https://github.com/dmazzella/node-ctypes/compare/v2.11.1...v2.12.0
 [2.11.1]: https://github.com/dmazzella/node-ctypes/compare/v2.11.0...v2.11.1
 [2.11.0]: https://github.com/dmazzella/node-ctypes/compare/v2.10.0...v2.11.0

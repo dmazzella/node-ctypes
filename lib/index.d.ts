@@ -752,13 +752,22 @@ export interface ExecutorOptions {
   /**
    * Busy-wait budget in microseconds (default 50, 0 to disable, at most
    * 10000). After a call the executor thread polls for the next one this long
-   * before sleeping, and the JavaScript thread waits this long for a call
-   * submitted to an idle executor, completing it without a round trip through
-   * the event loop: awaited calls in sequence cost a few microseconds instead
-   * of tens. When the wait times out (slow calls) the following calls skip it,
-   * with exponential backoff, until one completes in time again.
+   * before sleeping, and the JavaScript thread waits for a call submitted to
+   * an idle executor, completing it without a round trip through the event
+   * loop: awaited calls in sequence cost a few microseconds instead of tens.
+   * The JavaScript thread waits `spin` for a function not called yet; then,
+   * per function, about one and a half times its typical duration (measured
+   * on every call), at least `spin` and at most {@link spinLimit}. A function
+   * that usually takes longer is not waited for: its calls complete through
+   * the event loop, without delaying the others.
    */
   spin?: number;
+  /**
+   * Longest wait in microseconds for a function that usually takes longer
+   * than {@link spin} (default 500, at most 10000; 0: never more than
+   * `spin`).
+   */
+  spinLimit?: number;
 }
 
 /**

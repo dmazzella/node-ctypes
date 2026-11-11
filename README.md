@@ -140,9 +140,12 @@ await executor.close(); // waits for the accepted calls, then stops the thread
   waits this long for a call submitted to an idle executor, completing it
   without a round trip through the event loop. Awaited calls in sequence then
   cost a few microseconds instead of tens; its errcheck may run before
-  `callOn` returns. Inline completions are limited to 1 ms per turn of the
-  event loop, so timers, I/O and UI events keep running; slow calls fall back
-  to the normal notification.
+  `callOn` returns. The wait is per function: `spin` for a function not
+  called yet, then about one and a half times its measured typical duration,
+  up to `spinLimit` (microseconds, default 500); a function that usually takes
+  longer completes through the event loop without delaying the others. Inline
+  completions are limited to 1 ms per turn of the event loop, so timers, I/O
+  and UI events keep running.
 - A call that has started cannot be interrupted: the signal only removes
   queued calls.
 - On process exit (or worker termination) queued calls are discarded and a

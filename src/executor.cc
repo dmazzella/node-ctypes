@@ -13,8 +13,16 @@ constexpr const char* kDefaultThreadName = "node-ctypes";
 // esecuzione, completamento) e l'intervallo fra un await e la chiamata successiva.
 constexpr double kDefaultSpinMicros = 50;
 constexpr double kMaxSpinMicros = 10'000;
-// Attese in linea scadute di fila: salta al più 2^10 chiamate prima di riprovare.
-constexpr uint32_t kMaxSkipShift = 10;
+// Attesa in linea massima per una funzione che ne ha bisogno (più di spin).
+constexpr double kDefaultSpinLimitMicros = 500;
+// Margine dell'attesa in linea oltre una volta e mezza la durata tipica.
+constexpr std::chrono::nanoseconds kInlineMargin = std::chrono::microseconds(10);
+// Peso di una nuova durata nella media mobile (1/8) e tetto delle durate
+// considerate (multiplo di spinLimit): un'eccezione rara non domina la media.
+constexpr int64_t kTimingWeight = 8;
+constexpr int64_t kTimingClip = 4;
+// Funzioni ricordate per Executor: oltre, la tabella ricomincia.
+constexpr size_t kMaxTimings = 4096;
 // Tempo massimo di completamenti in linea per giro dell'event loop.
 constexpr std::chrono::microseconds kInlineSlice{1000};
 // Dato del segnaposto inviato alla TSFN per contare i giri dell'event loop.
@@ -22,7 +30,7 @@ char turn_marker;
 
 // Attende attivamente, per al più `spin`, che `counter` cambi da `seen`; tra
 // un controllo e l'altro cede il processore agli altri thread pronti.
-bool SpinUntilChanged(const std::atomic<uint64_t>& counter, uint64_t seen, std::chrono::microseconds spin) {
+bool SpinUntilChanged(const std::atomic<uint64_t>& counter, uint64_t seen, std::chrono::nanoseconds spin) {
   const auto deadline = std::chrono::steady_clock::now() + spin;
   while (counter.load(std::memory_order_acquire) == seen) {
     if (std::chrono::steady_clock::now() >= deadline) {
@@ -142,6 +150,7 @@ Napi::Function Executor::GetClass(Napi::Env env) {
                        InstanceAccessor("running", &Executor::GetRunning, nullptr),
                        InstanceAccessor("closed", &Executor::GetClosed, nullptr),
                        InstanceAccessor("_lastJob", &Executor::GetLastJob, nullptr),
+                       InstanceAccessor("_inlineCompleted", &Executor::GetInlineCompleted, nullptr),
                      });
 }
 
@@ -176,7 +185,23 @@ Executor::Executor(const Napi::CallbackInfo& info) : Napi::ObjectWrap<Executor>(
       }
     }
   }
+  double spin_limit = kDefaultSpinLimitMicros;
+  if (info.Length() > 0 && info[0].IsObject()) {
+    const Napi::Value value = info[0].As<Napi::Object>().Get("spinLimit");
+    if (!value.IsUndefined()) {
+      if (!value.IsNumber()) {
+        throw Napi::TypeError::New(env, "Executor spinLimit must be a number of microseconds");
+      }
+      spin_limit = value.As<Napi::Number>().DoubleValue();
+      if (!(spin_limit >= 0 && spin_limit <= kMaxSpinMicros)) {
+        throw Napi::RangeError::New(
+          env, std::format("Executor spinLimit must be between 0 and {} microseconds", kMaxSpinMicros));
+      }
+    }
+  }
   queue_->spin = std::chrono::microseconds(static_cast<int64_t>(spin));
+  spin_limit_ =
+    std::max<std::chrono::nanoseconds>(queue_->spin, std::chrono::microseconds(static_cast<int64_t>(spin_limit)));
 }
 
 Executor::~Executor() {
@@ -301,14 +326,12 @@ void Executor::Submit(Napi::Env env, std::unique_ptr<FFIFunction::PreparedCall> 
   last_job_ = id;
   pending_++;
   Hold(env);
-  // Attesa in linea fuori da Deliver, se le ultime non sono scadute e il giro
-  // corrente dell'event loop ha ancora tempo; sotto lock, solo se nessuna
-  // chiamata attende davanti a questa.
-  bool await_inline = queue_->spin.count() > 0 && !delivering_ && InlineSliceLeft();
-  if (await_inline && skip_ > 0) {
-    skip_--;
-    await_inline = false;
-  }
+  // Attesa in linea fuori da Deliver, se la funzione di solito termina entro il
+  // suo budget e il giro corrente dell'event loop ha ancora tempo; sotto lock,
+  // solo se nessuna chiamata attende davanti a questa.
+  const std::chrono::nanoseconds budget =
+    queue_->spin.count() > 0 && !delivering_ ? InlineBudget(call->Function()) : std::chrono::nanoseconds{0};
+  bool await_inline = budget.count() > 0 && InlineSliceLeft();
   bool parked = false;
   uint64_t finished = 0;
   {
@@ -327,8 +350,32 @@ void Executor::Submit(Napi::Env env, std::unique_ptr<FFIFunction::PreparedCall> 
     queue_->wake.notify_one();
   }
   if (await_inline) {
-    AwaitInline(env, finished);
+    AwaitInline(env, finished, budget);
   }
+}
+
+std::chrono::nanoseconds Executor::InlineBudget(const void* function) const {
+  const auto found = timings_.find(function);
+  if (found == timings_.end()) {
+    return queue_->spin;
+  }
+  const std::chrono::nanoseconds wanted = found->second.expected * 3 / 2 + kInlineMargin;
+  if (wanted > spin_limit_) {
+    return std::chrono::nanoseconds{0};
+  }
+  return std::max<std::chrono::nanoseconds>(queue_->spin, wanted);
+}
+
+void Executor::Learn(const void* function, std::chrono::nanoseconds duration) {
+  const std::chrono::nanoseconds clipped = std::min(duration, spin_limit_ * kTimingClip);
+  if (const auto found = timings_.find(function); found != timings_.end()) {
+    found->second.expected += (clipped - found->second.expected) / kTimingWeight;
+    return;
+  }
+  if (timings_.size() >= kMaxTimings) {
+    timings_.clear();
+  }
+  timings_.emplace(function, FunctionTiming{clipped});
 }
 
 bool Executor::InlineSliceLeft() {
@@ -354,8 +401,8 @@ bool Executor::PostTurnMarker() {
   return true;
 }
 
-void Executor::AwaitInline(Napi::Env env, uint64_t finished) {
-  SpinUntilChanged(queue_->finished, finished, queue_->spin);
+void Executor::AwaitInline(Napi::Env env, uint64_t finished, std::chrono::nanoseconds budget) {
+  SpinUntilChanged(queue_->finished, finished, budget);
   std::vector<ExecutorJob> jobs;
   {
     std::lock_guard lock(queue_->mutex);
@@ -368,11 +415,9 @@ void Executor::AwaitInline(Napi::Env env, uint64_t finished) {
     }
   }
   if (jobs.empty()) {
-    misses_ = std::min(misses_ + 1, kMaxSkipShift);
-    skip_ = (1u << misses_) - 1;
     return;
   }
-  misses_ = 0;
+  inline_completed_++;
   // Siamo dentro fn.callOn(): un errore inatteso di Deliver diventa
   // un'eccezione non gestita al prossimo giro dell'event loop, non
   // un'eccezione di callOn.
@@ -393,6 +438,7 @@ std::optional<Napi::Error> Executor::Deliver(Napi::Env env, std::vector<Executor
     const std::unique_ptr<FFIFunction::PreparedCall> call(job.call);
     pending_--;
     completed_++;
+    Learn(call->Function(), call->RunDuration());
     try {
       call->Complete(env);
     } catch (const Napi::Error& e) {
@@ -502,6 +548,10 @@ Napi::Value Executor::GetRunning(const Napi::CallbackInfo& info) {
 
 Napi::Value Executor::GetClosed(const Napi::CallbackInfo& info) {
   return Napi::Boolean::New(info.Env(), closed_);
+}
+
+Napi::Value Executor::GetInlineCompleted(const Napi::CallbackInfo& info) {
+  return Napi::Number::New(info.Env(), static_cast<double>(inline_completed_));
 }
 
 Napi::Value Executor::GetLastJob(const Napi::CallbackInfo& info) {
