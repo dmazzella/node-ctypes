@@ -20,6 +20,10 @@ constexpr std::chrono::nanoseconds kInlineMargin = std::chrono::microseconds(10)
 // Peso di una nuova durata nella media mobile (1/8) e tetto delle durate
 // considerate (multiplo di spinLimit): un'eccezione rara non domina la media.
 constexpr int64_t kTimingWeight = 8;
+// Peso di una durata più breve della tipica (1/2): una prima chiamata lenta
+// (inizializzazioni, page fault) viene dimenticata in poche chiamate, mentre una
+// chiamata lenta isolata sposta poco la media.
+constexpr int64_t kTimingFallWeight = 2;
 constexpr int64_t kTimingClip = 4;
 // Funzioni ricordate per Executor: oltre, la tabella ricomincia.
 constexpr size_t kMaxTimings = 4096;
@@ -399,7 +403,8 @@ std::chrono::nanoseconds Executor::InlineBudget(const void* function) const {
 void Executor::Learn(const void* function, std::chrono::nanoseconds duration) {
   const std::chrono::nanoseconds clipped = std::min(duration, spin_limit_ * kTimingClip);
   if (const auto found = timings_.find(function); found != timings_.end()) {
-    found->second.expected += (clipped - found->second.expected) / kTimingWeight;
+    std::chrono::nanoseconds& expected = found->second.expected;
+    expected += (clipped - expected) / (clipped < expected ? kTimingFallWeight : kTimingWeight);
     return;
   }
   if (timings_.size() >= kMaxTimings) {

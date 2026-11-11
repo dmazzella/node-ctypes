@@ -13,7 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Executor inline wait per function**: the JavaScript thread now waits for
   a call for about one and a half times the typical duration of its function
-  (measured on every call), at least `spin` and at most the new
+  (measured on every call; shorter durations weigh more, so a slow first call
+  is forgotten in a few calls), at least `spin` and at most the new
   `spinLimit` option (microseconds, default 500, `0` for never more than
   `spin`); a function that usually takes longer is not waited for. Before, a
   single backoff per executor skipped the wait for every function after a slow

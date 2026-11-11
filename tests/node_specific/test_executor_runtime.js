@@ -287,7 +287,7 @@ describe("Executor spin", function () {
     try {
       for (let index = 0; index < 5; index++) await busy.callOn(executor, 3000);
       assert.equal(executor._inlineBudget(busy.address), 0);
-      // The typical duration moves by 1/8 per call: about 15 calls to come back within spinLimit.
+      // Shorter durations weigh 1/2: a few calls bring the typical duration back within spinLimit.
       for (let index = 0; index < 30; index++) await busy.callOn(executor, 5);
       assert.ok(executor._inlineBudget(busy.address) >= 50);
     } finally {
