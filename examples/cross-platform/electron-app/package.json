@@ -13,25 +13,26 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "echarts": "^6.1.0",
     "node-ctypes": "file:../../..",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.0",
+    "@eslint/js": "^10.0.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@typescript-eslint/eslint-plugin": "^8.72.0",
-    "@typescript-eslint/parser": "^8.72.0",
-    "@vitejs/plugin-react": "^6.1.2",
-    "electron": "^45.0.0",
-    "electron-builder": "^26.18.0",
-    "eslint": "^10.13.0",
+    "@typescript-eslint/eslint-plugin": "^8.72.2",
+    "@typescript-eslint/parser": "^8.72.2",
+    "@vitejs/plugin-react": "^6.3.0",
+    "electron": "^45.3.1",
+    "electron-builder": "^26.18.1",
+    "eslint": "^10.14.0",
     "eslint-plugin-react-hooks": "^7.1.1",
-    "eslint-plugin-react-refresh": "^ 0.5.7",
+    "eslint-plugin-react-refresh": "^0.5.7",
     "typescript": "^6.0.3",
-    "vite": "^8.3.5",
-    "vite-plugin-electron": "^1.1.2"
+    "vite": "^8.3.8",
+    "vite-plugin-electron": "^1.2.0"
   },
   "main": "dist-electron/main.js"
 }

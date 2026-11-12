@@ -23,6 +23,53 @@ versions and the automatically detected external-buffer policy.
 A read starts immediately, then every second unless the previous read is still
 pending. The timer is cleared when the view unmounts.
 
+## System memory panel
+
+Below the clock, a panel samples the operating system every second and charts
+the memory in use over the last 60 seconds with
+[Apache ECharts](https://echarts.apache.org/) (only the line chart, axes,
+tooltip and canvas renderer are bundled). It also shows the available and total
+memory and the uptime. Each value comes from a native
+call made in the main process by
+[electron/native-system.ts](./electron/native-system.ts):
+
+| Platform | Memory                                                                                    | Uptime                                              |
+| -------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Windows  | `GlobalMemoryStatusEx` fills `MEMORYSTATUSEX` (its `dwLength` is set first)               | `GetTickCount64`                                    |
+| macOS    | `host_statistics64(HOST_VM_INFO64)` fills `vm_statistics64`; `sysctlbyname("hw.memsize")` | `sysctlbyname("kern.boottime")`, a `struct timeval` |
+| Linux    | `sysinfo` fills `struct sysinfo`                                                          | `sysinfo`                                           |
+
+It shows structures filled by the operating system (fixed-width and
+platform-sized integers, 64-bit values as BigInt), in/out size arguments, and
+errors from `GetLastError` / `errno`. "Available" is what each API reports:
+`ullAvailPhys` on Windows; free, inactive and speculative pages on macOS; free
+memory plus buffers on Linux, where `sysinfo` does not report the page cache.
+
+## Processor panel
+
+Next to the memory, a panel shows the usage of each logical processor and the
+total, sampled every second
+([electron/native-cpu.ts](./electron/native-cpu.ts)). No API returns a
+percentage directly: the operating systems count the time each processor spent
+busy and idle, and the usage is the busy share between two readings.
+
+| Platform | Native calls                                                                                                                                                                                                                                  |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Windows  | PDH (`pdh.dll`): a query opened at startup (`PdhOpenQueryW`, `PdhAddEnglishCounterW("\\Processor Information(*)\\% Processor Utility")`), then `PdhCollectQueryData` and `PdhGetFormattedCounterArrayW` every second; `PdhCloseQuery` on quit |
+| macOS    | `host_processor_info(PROCESSOR_CPU_LOAD_INFO)`: per-processor ticks in an array the kernel allocates, freed with `vm_deallocate`                                                                                                              |
+| Linux    | No system call exposes these counters: `/proc/stat`, read with `fopen`/`fread`/`fclose`                                                                                                                                                       |
+
+The Windows side shows an opaque handle kept between calls, wide strings, the
+"call once for the size, then again" pattern (`PDH_MORE_DATA`), an array of
+`PDH_FMT_COUNTERVALUE_ITEM_W` with an anonymous `Union` and names pointing into
+the same buffer, and `PDH_STATUS` errors formatted from `pdh.dll`'s messages.
+The English counter path works on every Windows language. Opening the query
+takes a few hundred milliseconds, once, while PDH loads its providers.
+
+In node-ctypes, `libc.close` and `libc.read` are the library object's own
+methods, not the C functions: the Linux reader uses C stdio instead. Results of
+`wintypes.DWORD` and `wintypes.LONG` are BigInt.
+
 ## Run
 
 Build node-ctypes for the current operating system and architecture first.
@@ -61,12 +108,20 @@ preview and does not provide the native bridge.
 
 ## Process boundary
 
-- [electron/native-clock.ts](./electron/native-clock.ts) owns all DLL handles,
-  signatures, allocations and native-memory views.
-- [electron/main.ts](./electron/main.ts) exposes one IPC operation and checks the
-  sender. Native libraries are closed when the application quits.
+- [electron/native-runtime.ts](./electron/native-runtime.ts) reads the versions
+  and the native process ID once, at startup;
+  [electron/native-clock.ts](./electron/native-clock.ts) reads the clock,
+  [electron/native-system.ts](./electron/native-system.ts) the memory and
+  [electron/native-cpu.ts](./electron/native-cpu.ts) the processors, every
+  second. They own all DLL handles, signatures, allocations and native-memory
+  views, declared as in Python ctypes (`argtypes`, `restype`, `errcheck`).
+- [electron/main.ts](./electron/main.ts) exposes one read-only IPC operation for
+  each and checks the sender. Native libraries are closed when the application
+  quits.
 - [electron/preload.ts](./electron/preload.ts) exposes only the typed
-  `window.nativeClock.read()` operation, not a generic IPC or FFI interface.
+  `window.nativeRuntime.read()`, `window.nativeClock.read()`,
+  `window.nativeSystem.read()` and `window.nativeCpu.read()` operations, not a
+  generic IPC or FFI interface.
 - [src/App.tsx](./src/App.tsx) receives serializable data. It has no Node access.
 
 The renderer has `nodeIntegration: false`, `contextIsolation: true` and
@@ -120,3 +175,10 @@ Windows was also tested successfully by the project maintainer. The detailed
 checks above refer to macOS only.
 
 The Linux implementation is included but still requires native validation.
+
+The system memory panel was checked on Windows x64 (Electron 45.3.1): total
+memory, available memory and uptime matched Node's `os` module. Its
+macOS and Linux implementations are included but still require native
+validation. The processor panel was checked on Windows x64 too (four logical
+processors and the total, also under load); its macOS and Linux implementations
+still require native validation.
