@@ -93,7 +93,11 @@
 // `{ stdout: "node", stderr: "node" }` writes Python's output through
 // process.stdout / process.stderr, in order with console.log (Python writes
 // to the file descriptors directly, while Node.js queues writes to pipes on
-// macOS and to terminals on Windows), and a function captures it.
+// macOS and to terminals on Windows), "console" sends whole lines to
+// console.log / console.error, and a function captures it. Without a console
+// (an Electron renderer, a packaged GUI app on Windows) sys.stdout and
+// sys.stderr are None and "inherit" discards the output, as pythonw does: use
+// "console" (DevTools) or a function.
 //
 // Interpreter: `Python.initialize({ executable })`, the PYTHON environment
 // variable, or python3 / python / py on PATH. Its sys.path is used, so virtual
@@ -222,7 +226,7 @@ const TYPES = ["PyBool_Type", "PyLong_Type", "PyFloat_Type", "PyUnicode_Type", "
 
 // Private helper module run inside the embedded interpreter.
 const BRIDGE = `
-import asyncio, collections, collections.abc, concurrent.futures, ctypes, datetime, inspect, io, itertools, numbers, queue, signal, sys, threading, traceback, warnings, weakref, zoneinfo
+import asyncio, collections, collections.abc, concurrent.futures, ctypes, datetime, inspect, io, itertools, numbers, queue, signal, sys, threading, time, traceback, warnings, weakref, zoneinfo
 
 _main = threading.get_ident()
 _released = collections.deque()  # JavaScript functions no longer referenced
@@ -230,7 +234,8 @@ _released_objects = collections.deque()  # JavaScript objects (JsProxy) no longe
 
 # Python and Node.js write to the same stdout and stderr: UTF-8 like Node.js
 # (an embedded Python does not switch to UTF-8 in the C/POSIX locale), and
-# flushed at every line to keep the output in order.
+# flushed at every line to keep the output in order. None without a console
+# (an Electron renderer, a packaged GUI app on Windows).
 for _stream in (sys.stdout, sys.stderr):
     try:
         _stream.reconfigure(encoding="utf-8", line_buffering=True)
@@ -245,12 +250,17 @@ class JsStream(io.TextIOBase):
     encoding = "utf-8"
     errors = "strict"
 
-    def __init__(self, name, write):
+    def __init__(self, name, write, flush=None):
         self.name = name
         self._write = write
+        self._flush = flush
 
     def writable(self):
         return True
+
+    def flush(self):
+        if self._flush is not None:
+            self._flush()
 
     def write(self, text):
         if not isinstance(text, str):
@@ -259,8 +269,8 @@ class JsStream(io.TextIOBase):
             self._write(text)
         return len(text)
 
-def redirect(name, write):
-    setattr(sys, name, JsStream(f"<node {name}>", write))
+def redirect(name, write, flush=None):
+    setattr(sys, name, JsStream(f"<node {name}>", write, flush))
 
 def wrap(cfunc, fid):
     """Python function calling the JavaScript function cfunc: directly on the
@@ -686,6 +696,7 @@ class JsFuture(concurrent.futures.Future):
 # of Ctrl+C too, which is set to wake it.
 _wakeup = None  # the signal, when its handler is installed
 _interrupt_event = None  # Windows, Python 3.14+
+_wakes = queue.SimpleQueue()  # tokens of the calls the main thread must serve (SIGURG)
 
 def _serve(token):
     try:
@@ -718,6 +729,21 @@ def install_wakeup():
         return  # another runtime (e.g. Go) uses it
     signal.signal(signal.SIGURG, _serve_waiting)
     _wakeup = signal.SIGURG
+    threading.Thread(target=_waker, name="node-ctypes-waker", daemon=True).start()
+
+def _waker():
+    # A signal that lands just before the main thread parks (e.g. in
+    # Thread.join()) does not interrupt the wait: repeat it until the call is
+    # served, or the main thread stops running Python.
+    while True:
+        token = _wakes.get()
+        delay = 0.001
+        while True:
+            time.sleep(delay)
+            if token not in _requests or not _main_busy.value or _closing:
+                break
+            signal.pthread_kill(_main, _wakeup)
+            delay = min(delay * 2, 0.05)
 
 _PENDING = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
 _add_pending_call = ctypes.pythonapi.Py_AddPendingCall
@@ -733,6 +759,7 @@ _serve_pending_c = _PENDING(_serve_pending)
 def _wake_main(token):
     if _wakeup is not None:
         signal.pthread_kill(_main, _wakeup)
+        _wakes.put(token)  # repeated by _waker if it is lost
     else:
         _add_pending_call(_serve_pending_c, token)
         if _interrupt_event:
@@ -969,6 +996,9 @@ export function cancellable(fn) {
 // A JavaScript error raised in Python as a specific built-in exception.
 const PY_TYPE = Symbol("python exception type");
 const pythonError = (type, message) => Object.assign(new Error(message), { [PY_TYPE]: type });
+// SharedArrayBuffer is not defined where the page is not cross-origin isolated
+// (e.g. an Electron renderer): only an ArrayBuffer can be passed there.
+const isArrayBuffer = (value) => value instanceof ArrayBuffer || (typeof SharedArrayBuffer === "function" && value instanceof SharedArrayBuffer);
 const isClass = (fn) => /^class[\s{]/.test(Function.prototype.toString.call(fn));
 const typeName = (value) => value?.constructor?.name ?? typeof value;
 // Typed array → memoryview format.
@@ -987,6 +1017,28 @@ class Kwargs {
  */
 export function kwargs(values) {
   return new Kwargs(values);
+}
+
+/**
+ * Whole lines for `emit` (e.g. console.log) from text written in pieces:
+ * `print("a", "b")` writes "a", " ", "b", "\n". A line without its newline
+ * is emitted by `flush` (Python's flush(), and the flush at finalization).
+ */
+function lineWriter(emit) {
+  let pending = "";
+  return {
+    write(text) {
+      const lines = (pending + text).split("\n");
+      pending = lines.pop();
+      for (const line of lines) emit(line);
+    },
+    flush() {
+      if (!pending) return;
+      const line = pending;
+      pending = "";
+      emit(line);
+    },
+  };
 }
 
 // ─── Python ─────────────────────────────────────────────────────────
@@ -1121,8 +1173,8 @@ export class Python {
    * @param {string} [options.executable] - Python interpreter whose library and environment are used (default: $PYTHON, python3, python, py)
    * @param {string} [options.library] - Explicit path of the Python shared library (default: $PYTHON_LIBRARY); same version as the interpreter
    * @param {boolean} [options.stdin=true] - false: Python does not read the process stdin (sys.stdin is None), left to Node.js
-   * @param {"inherit"|"node"|Function} [options.stdout="inherit"] - sys.stdout: the process stdout ("inherit"), process.stdout of Node.js, in order with console.log ("node"), or a function receiving the text
-   * @param {"inherit"|"node"|Function} [options.stderr="inherit"] - sys.stderr, as stdout
+   * @param {"inherit"|"node"|"console"|Function} [options.stdout="inherit"] - sys.stdout: the process stdout ("inherit"), process.stdout of Node.js, in order with console.log ("node"), whole lines to console.log ("console", e.g. DevTools in an Electron renderer), or a function receiving the text
+   * @param {"inherit"|"node"|"console"|Function} [options.stderr="inherit"] - sys.stderr, as stdout ("console": console.error)
    * @returns {Python}
    */
   static initialize(options = {}) {
@@ -1142,7 +1194,7 @@ export class Python {
   constructor({ executable, library = process.env.PYTHON_LIBRARY, stdin = true, stdout = "inherit", stderr = "inherit" } = {}) {
     if (!constructing) throw new TypeError("Use Python.initialize()");
     for (const [name, value] of Object.entries({ stdout, stderr })) {
-      if (value !== "inherit" && value !== "node" && typeof value !== "function") throw new TypeError(`options.${name} must be "inherit", "node" or a function`);
+      if (value !== "inherit" && value !== "node" && value !== "console" && typeof value !== "function") throw new TypeError(`options.${name} must be "inherit", "node", "console" or a function`);
     }
 
     claimHost(); // one interpreter per process (see HOST_LOCK)
@@ -1298,6 +1350,11 @@ export class Python {
     for (const name of ["stdout", "stderr"]) {
       const target = streams[name];
       if (target === "inherit") continue;
+      if (target === "console") {
+        const lines = lineWriter(name === "stdout" ? (line) => console.log(line) : (line) => console.error(line));
+        this.#bridge.redirect(name, lines.write, lines.flush);
+        continue;
+      }
       const write = target === "node" ? (text) => void process[name].write(text) : (text) => void target(text);
       this.#bridge.redirect(name, write);
     }
@@ -1777,7 +1834,7 @@ export class Python {
         );
     }
     if (value instanceof Uint8Array && !(value instanceof Uint8ClampedArray)) return this.#check(api.PyBytes_FromStringAndSize(value, value.byteLength));
-    if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer || value instanceof SharedArrayBuffer) return this.#memoryview(value);
+    if (ArrayBuffer.isView(value) || isArrayBuffer(value)) return this.#memoryview(value);
     if (value instanceof Tuple) {
       return this.#filled(api.PyTuple_New(value.length), (tuple) => {
         for (let i = 0; i < value.length; i++) api.PyTuple_SetItem(tuple, i, this.#toPy(value[i])); // steals the item
@@ -1806,7 +1863,7 @@ export class Python {
 
   /** byReference(value) → new reference. */
   #reference(value) {
-    if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer || value instanceof SharedArrayBuffer) return this.#memoryview(value);
+    if (ArrayBuffer.isView(value) || isArrayBuffer(value)) return this.#memoryview(value);
     if (value === null || typeof value !== "object" || this.#states.has(value)) return this.#toPy(value);
     return this.#jsProxy(value);
   }
@@ -1838,7 +1895,7 @@ export class Python {
 
   /** memoryview sharing the memory of a typed array / ArrayBuffer / DataView (new reference). */
   #memoryview(value) {
-    const view = value instanceof ArrayBuffer || value instanceof SharedArrayBuffer ? new Uint8Array(value) : value;
+    const view = isArrayBuffer(value) ? new Uint8Array(value) : value;
     const bytes = Buffer.from(view.buffer, view.byteOffset, view.byteLength);
     const format = FORMATS[view.constructor.name] ?? "B"; // DataView: bytes
     const address = bytes.length ? addressof(bytes) : 0n;
