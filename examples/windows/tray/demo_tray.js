@@ -34,6 +34,24 @@ async function main() {
     return true;
   });
 
+  // A submenu (an extension of this port): hover it, click it or press Right.
+  const reports = tray.add_submenu("Reports", join(assets, "fa-line-chart.ico"));
+  for (const period of ["Daily", "Weekly", "Monthly"]) {
+    reports.add_menu(period, "", false, () => {
+      console.log(`Report: ${period}`);
+      return true;
+    });
+  }
+  reports.add_separator();
+  // Submenus nest.
+  const exportAs = reports.add_submenu("Export as", join(assets, "fa-download.ico"));
+  for (const format of ["CSV", "JSON", "PDF"]) {
+    exportAs.add_menu(format, "", false, () => {
+      console.log(`Export as ${format}`);
+      return true;
+    });
+  }
+
   tray.add_separator();
 
   tray.add_menu(
