@@ -177,8 +177,8 @@ checks above refer to macOS only.
 The Linux implementation is included but still requires native validation.
 
 The system memory panel was checked on Windows x64 (Electron 45.3.1): total
-memory, available memory and uptime matched Node's `os` module. Its
-macOS and Linux implementations are included but still require native
-validation. The processor panel was checked on Windows x64 too (four logical
-processors and the total, also under load); its macOS and Linux implementations
-still require native validation.
+memory, available memory and uptime matched Node's `os` module. The processor
+panel was checked on Windows x64 too (four logical processors and the total,
+also under load). The project maintainer validated the whole application on
+macOS, memory and processor panels included; their Linux implementations still
+require native validation.
