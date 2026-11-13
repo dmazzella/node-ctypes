@@ -17,9 +17,9 @@
 //   obj.Release();
 //   CoUninitialize();
 
-import { OleDLL, WINFUNCTYPE, Structure, POINTER, array, byref, cast, c_void_p, HRESULT as _HRESULT } from "node-ctypes";
+import { OleDLL, WINFUNCTYPE, WinError, Structure, POINTER, array, byref, cast, c_void_p, HRESULT as _HRESULT } from "node-ctypes";
 import { wintypes } from "node-ctypes";
-const { DWORD, WORD, BYTE, LPVOID } = wintypes;
+const { DWORD, WORD, BYTE, LONG, LPVOID } = wintypes;
 // ═══════════════════════════════════════════════════════════════════════
 // GUID — COM Globally Unique Identifier (16 bytes)
 // ═══════════════════════════════════════════════════════════════════════
@@ -109,7 +109,9 @@ export function FAILED(hr) {
 export function checkHR(hr, methodName) {
   if (FAILED(hr)) {
     const hex = "0x" + (hr >>> 0).toString(16).toUpperCase().padStart(8, "0");
-    const err = new Error(`COM error ${hex} in ${methodName || "?"}`);
+    // The system message of the HRESULT, when Windows has one.
+    const message = WinError(hr >>> 0).message.replace(/^\[WinError -?\d+\] /, "");
+    const err = new Error(`COM error ${hex} in ${methodName || "?"}${message.startsWith("Unknown error") ? "" : `: ${message}`}`);
     err.hresult = hr | 0;
     throw err;
   }
@@ -240,7 +242,9 @@ function _getProto(restype, argtypes) {
   let proto = _protoCache.get(key);
   if (!proto) {
     // All COM methods have an implicit `this` (LPVOID) as first arg
-    proto = WINFUNCTYPE(restype, LPVOID, ...argtypes);
+    // HRESULT methods return a LONG: _hresultErrcheck raises the error with
+    // the method name (the HRESULT type would raise its own generic error first).
+    proto = WINFUNCTYPE(restype === HRESULT ? LONG : restype, LPVOID, ...argtypes);
     _protoCache.set(key, proto);
   }
   return proto;
