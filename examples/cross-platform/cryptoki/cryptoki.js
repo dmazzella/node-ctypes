@@ -4299,8 +4299,13 @@ function tableType(version, types) {
 }
 
 function interfaceName(pointer) {
-  if (pointer.isNull) throw new Error("Provider returned a NULL interface name");
-  return ctypes.string_at(pointer);
+  if (pointer === null || pointer.isNull) throw new Error("Provider returned a NULL interface name");
+  return ctypes.string_at(pointer.address);
+}
+
+// The value of a ctypes instance passed as an argument (CK_SESSION_HANDLE, c_char_p, ...), or the argument itself.
+function argumentValue(value) {
+  return (typeof value === "object" || typeof value === "function") && value !== null && "value" in value ? value.value : value;
 }
 
 function discover(library, types, requested) {
@@ -4471,9 +4476,26 @@ export class Cryptoki {
   }
 
   #observe(name, rv, args) {
-    const first = args[0]?.value ?? args[0];
+    // Any function can return CKR_PENDING and require argument retention;
+    // otherwise only the lifecycle functions below change the tracked state.
+    if (rv !== CKR_PENDING) {
+      switch (name) {
+        case "C_Initialize":
+        case "C_Finalize":
+        case "C_OpenSession":
+        case "C_CloseSession":
+        case "C_CloseAllSessions":
+        case "C_AsyncComplete":
+        case "C_AsyncGetID":
+        case "C_AsyncJoin":
+          break;
+        default:
+          return;
+      }
+    }
+    const first = argumentValue(args[0]) ?? args[0];
     const session = typeof first === "bigint" || typeof first === "number" ? BigInt(first).toString() : "";
-    if (name.startsWith("C_Async") && (args[1] == null || args[1] === 0n || args[1]?.isNull === true || args[1]?.value === null || args[1]?.value === 0n)) return;
+    if (name.startsWith("C_Async") && (args[1] == null || args[1] === 0n || args[1]?.isNull === true || argumentValue(args[1]) === null || argumentValue(args[1]) === 0n)) return;
     const functionName = name.startsWith("C_Async") ? ctypes.string_at(args[1]) : name;
     const key = `${session}:${functionName}`;
     if (rv === CKR_PENDING && name !== "C_AsyncComplete" && name !== "C_AsyncGetID") this.#pending.set(key, [...(this.#pending.get(key) ?? []), ...args]);
