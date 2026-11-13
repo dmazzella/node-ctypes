@@ -71,6 +71,11 @@ advapi32.ConvertSidToStringSidW.restype = BOOL;
 kernel32.LocalFree.argtypes = [HANDLE];
 kernel32.LocalFree.restype = HANDLE;
 
+// BOOL GetComputerNameExW(COMPUTER_NAME_FORMAT NameType, LPWSTR lpBuffer, LPDWORD nSize);
+kernel32.GetComputerNameExW.argtypes = [INT, LPWSTR, POINTER(DWORD)];
+kernel32.GetComputerNameExW.restype = BOOL;
+const ComputerNameDnsDomain = 2;
+
 // int StringFromGUID2(REFGUID rguid, LPOLESTR lpsz, int cchMax);
 ole32.StringFromGUID2.argtypes = [LPVOID, LPWSTR, INT];
 ole32.StringFromGUID2.restype = INT;
@@ -256,20 +261,23 @@ function ADsOpenObject(path, interfaceDef, username = null, password = null, aut
 // ─── Detect domain base DN from environment ─────────────────────────
 
 function detectBasePath() {
-  // Use USERDNSDOMAIN (e.g. "corp.example.com") → "LDAP://DC=corp,DC=example,DC=com"
-  const dnsDomain = process.env.USERDNSDOMAIN;
-  if (dnsDomain) {
-    const dcParts = dnsDomain
-      .split(".")
-      .map((p) => `DC=${p}`)
-      .join(",");
-    return `LDAP://${dcParts}`;
-  }
+  // The user's logon domain (e.g. "corp.example.com"), set in interactive
+  // sessions; otherwise the DNS domain of the computer. USERDOMAIN is the
+  // NetBIOS name, not a DNS name: it cannot build the DN.
+  const dnsDomain = process.env.USERDNSDOMAIN || computerDnsDomain();
+  if (!dnsDomain) return null;
+  const dcParts = dnsDomain
+    .split(".")
+    .map((p) => `DC=${p}`)
+    .join(",");
+  return `LDAP://${dcParts}`;
+}
 
-  const userDomain = process.env.USERDOMAIN;
-  if (userDomain) return `LDAP://DC=${userDomain}`;
-
-  return null;
+/** GetComputerNameExW(ComputerNameDnsDomain): "" when the computer is not in a domain. */
+function computerDnsDomain() {
+  const name = create_unicode_buffer(256);
+  const size = new DWORD(256);
+  return kernel32.GetComputerNameExW(ComputerNameDnsDomain, name, byref(size)) ? name.value : "";
 }
 
 // ─── CLI argument parsing ───────────────────────────────────────────
@@ -352,6 +360,7 @@ function main() {
   CoInitializeEx();
 
   let directorySearch;
+  let hSearch = null; // ADS_SEARCH_HANDLE, closed in finally
   try {
     // Bind to AD using ADsOpenObject
     directorySearch = ADsOpenObject(basePath, IDirectorySearch, username, password);
@@ -373,8 +382,8 @@ function main() {
     // (Python: (LPCWSTR * n)(*attrList)).
     const attrNames = attrList.length ? array(LPCWSTR, attrList.length)(...attrList) : null;
     const hSearchOut = new HANDLE();
-    directorySearch.ExecuteSearch(searchFilter, attrNames, attrList.length ? attrList.length : -1, byref(hSearchOut));
-    const hSearch = hSearchOut.value;
+    directorySearch.ExecuteSearch(searchFilter, attrNames, attrList.length ? attrList.length : 0xffffffff, byref(hSearchOut));
+    hSearch = hSearchOut.value;
 
     console.time("Enumerating rows");
 
@@ -498,12 +507,11 @@ function main() {
     }
 
     console.log(`Enumerated ${rows.length} row(s) — output: ${outputType === OUTPUT_TYPE.TREE ? "tree" : "flat"}`);
-
-    directorySearch.AbandonSearch(hSearch);
-    directorySearch.CloseSearchHandle(hSearch);
   } catch (err) {
     console.error("Error:", err.message);
   } finally {
+    // The search handle is closed also when the enumeration fails midway.
+    if (hSearch !== null) directorySearch.CloseSearchHandle(hSearch);
     if (directorySearch) directorySearch.Release();
     CoUninitialize();
 

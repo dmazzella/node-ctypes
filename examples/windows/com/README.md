@@ -19,16 +19,16 @@ node examples/windows/com/demo_com_active_directory.js
 node examples/windows/com/demo_com_active_directory.js --base "LDAP://DC=contoso,DC=com" --filter "(objectClass=user)" --attributes "sAMAccountName,mail" --tree
 ```
 
-| Option (Active Directory)             | Description                                    |
-| ------------------------------------- | ---------------------------------------------- |
-| `--base <path>`                       | LDAP base path (default: from `USERDNSDOMAIN`) |
-| `--user <name>` / `--pass <password>` | Explicit credentials                           |
-| `--filter <filter>`                   | LDAP filter (default: users)                   |
-| `--scope base\|onelevel\|subtree`     | Search scope                                   |
-| `--attributes a,b,c`                  | Attributes to read                             |
-| `--page-size <n>`                     | Page size                                      |
-| `--tree`                              | Group results by OU path                       |
-| `--debug`                             | Print the results                              |
+| Option (Active Directory)             | Description                                                                  |
+| ------------------------------------- | ---------------------------------------------------------------------------- |
+| `--base <path>`                       | LDAP base path (default: `USERDNSDOMAIN`, or the DNS domain of the computer) |
+| `--user <name>` / `--pass <password>` | Explicit credentials                                                         |
+| `--filter <filter>`                   | LDAP filter (default: users)                                                 |
+| `--scope base\|onelevel\|subtree`     | Search scope                                                                 |
+| `--attributes a,b,c`                  | Attributes to read                                                           |
+| `--page-size <n>`                     | Page size                                                                    |
+| `--tree`                              | Group results by OU path                                                     |
+| `--debug`                             | Print the results                                                            |
 
 The Active Directory demo reuses the tree helpers of [../ldap/ldap.js](../ldap/ldap.js).
 

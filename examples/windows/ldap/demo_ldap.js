@@ -1,5 +1,7 @@
 // LDAP Demo — using the reusable Ldap wrapper
-// Demonstrates: query, queryBegin, findObjects, queryEnd, modify, parsePathComponents
+// Demonstrates: query (paged, high level) and queryBegin / findObjects /
+// queryEnd (low level). Ldap.modify() is shown in the README: this demo only
+// reads the directory.
 //
 // Run on a domain-joined Windows machine:
 //   node examples/windows/ldap/demo_ldap.js
@@ -10,7 +12,10 @@
 // With a custom base path:
 //   node examples/windows/ldap/demo_ldap.js --base "LDAP://DC=corp,DC=example,DC=com"
 
-import { Ldap, SCOPE, OUTPUT_TYPE, MOD_OP, query, queryBegin, findObjects, queryEnd, modify, parsePathComponents, toTree, sortByDN, sortTreeByDN } from "./ldap.js";
+import { WinDLL, POINTER, byref, create_unicode_buffer } from "node-ctypes";
+import { wintypes } from "node-ctypes";
+import { Ldap, SCOPE, OUTPUT_TYPE, queryBegin, findObjects, queryEnd } from "./ldap.js";
+const { BOOL, DWORD, INT, LPWSTR } = wintypes;
 
 // ─── CLI argument parsing ───────────────────────────────────────────
 
@@ -50,26 +55,32 @@ function parseArgs() {
   return opts;
 }
 
-// ─── Detect domain base DN from environment ─────────────────────────
+// ─── Detect domain base DN ──────────────────────────────────────────
+
+const kernel32 = new WinDLL("kernel32.dll");
+// BOOL GetComputerNameExW(COMPUTER_NAME_FORMAT NameType, LPWSTR lpBuffer, LPDWORD nSize);
+kernel32.GetComputerNameExW.argtypes = [INT, LPWSTR, POINTER(DWORD)];
+kernel32.GetComputerNameExW.restype = BOOL;
+const ComputerNameDnsDomain = 2;
+
+/** GetComputerNameExW(ComputerNameDnsDomain): "" when the computer is not in a domain. */
+function computerDnsDomain() {
+  const name = create_unicode_buffer(256);
+  const size = new DWORD(256);
+  return kernel32.GetComputerNameExW(ComputerNameDnsDomain, name, byref(size)) ? name.value : "";
+}
 
 function detectBasePath() {
-  // Use USERDNSDOMAIN environment variable (e.g. "corp.example.com")
-  const dnsDomain = process.env.USERDNSDOMAIN;
-  if (dnsDomain) {
-    const dcParts = dnsDomain
-      .split(".")
-      .map((p) => `DC=${p}`)
-      .join(",");
-    return `LDAP://${dcParts}`;
-  }
-
-  // Fallback to LOGONSERVER + USERDOMAIN
-  const userDomain = process.env.USERDOMAIN;
-  if (userDomain) {
-    return `LDAP://DC=${userDomain}`;
-  }
-
-  return null;
+  // The user's logon domain (e.g. "corp.example.com"), set in interactive
+  // sessions; otherwise the DNS domain of the computer. USERDOMAIN is the
+  // NetBIOS name, not a DNS name: it cannot build the DN.
+  const dnsDomain = process.env.USERDNSDOMAIN || computerDnsDomain();
+  if (!dnsDomain) return null;
+  const dcParts = dnsDomain
+    .split(".")
+    .map((p) => `DC=${p}`)
+    .join(",");
+  return `LDAP://${dcParts}`;
 }
 
 // ─── Main demo ──────────────────────────────────────────────────────
@@ -94,16 +105,16 @@ function main() {
   if (opts.maxObjects) queryOpts.maxObjects = opts.maxObjects;
   if (opts.outputType) queryOpts.outputType = opts.outputType;
   if (opts.debug) queryOpts.debug = opts.debug;
-  // ── 1. Query users (high-level API) ──────────────────────────────
+
+  // ── 1. Query users (high-level API, paged, signed and sealed) ────
 
   console.log("\n[1] Querying users (Ldap.query) ...");
 
   const userFilter = "(&(objectClass=user)(objectCategory=person))";
-  const scope = SCOPE.SUBTREE;
   const properties = ["distinguishedName", "cn", "displayName", "userPrincipalName", "givenName", "sn", "mail", "objectSid", "objectGUID", "jpegPhoto"];
 
   console.time("Query time");
-  const users = Ldap.query(userFilter, basePath, scope, properties, queryOpts);
+  const users = Ldap.query(userFilter, basePath, SCOPE.SUBTREE, properties, queryOpts);
   console.timeEnd("Query time");
 
   // In TREE mode `users` is the tree root (top-level OU nodes). Count leaves
@@ -116,38 +127,24 @@ function main() {
     console.dir(users, { depth: null });
   }
 
-  // // ── 2. Low-level API demo (queryBegin / findObjects / queryEnd) ──
+  // ── 2. Low-level API (queryBegin / findObjects / queryEnd) ───────
 
-  // console.log("\n[2] Low-level API demo (queryBegin → findObjects → queryEnd) ...");
+  console.log("\n[2] Low-level API (queryBegin → findObjects → queryEnd) ...");
 
-  // const { ld, searchResult } = queryBegin(queryOpts.host || null, basePath.replace(/^LDAP:\/\//, ""), SCOPE.SUBTREE, "(&(objectClass=organizationalUnit))", ["ou", "description", "distinguishedName"], queryOpts);
-
-  // try {
-  //   const ous = findObjects(ld, searchResult, 10);
-  //   console.log(`\n  Retrieved ${ous.length} OU(s).`);
-  //   if (opts.debug) {
-  //     console.log(ous);
-  //   }
-  // } finally {
-  //   queryEnd(ld, searchResult);
-  // }
-
-  // // ── 3. Modify attributes ──────────────────────────────────────
-
-  // console.log("\n[3] Modifying user attributes ...");
-
-  // const targetDn = "CN=John Doe,OU=Users,DC=example,DC=com";
-  // Ldap.modify(targetDn, [
-  //   { op: MOD_OP.REPLACE, attr: "mail", values: ["john.doe@example.com"] },
-  //   { op: MOD_OP.ADD, attr: "telephoneNumber", values: ["+39 02 1234567"] },
-  //   { op: MOD_OP.DELETE, attr: "facsimileTelephoneNumber" },
-  // ], basePath, queryOpts);
-
-  // console.log(`  Modified: ${targetDn}`);
+  const baseDn = basePath.replace(/^LDAP:\/\/(?:[^/=]+\/)?/, "");
+  const { ld, searchResult } = queryBegin(queryOpts.host || null, baseDn, SCOPE.SUBTREE, "(objectClass=organizationalUnit)", ["ou", "description", "distinguishedName"], queryOpts);
+  try {
+    const ous = findObjects(ld, searchResult, 10);
+    console.log(`  First ${ous.length} OU(s):`);
+    for (const ou of ous) console.log(`    ${ou.distinguishedName?.[0]}`);
+  } finally {
+    queryEnd(ld, searchResult);
+  }
 
   // ── Cleanup ──────────────────────────────────────────────────────
 
   Ldap.close();
+  kernel32.close();
   console.log("\nDone.");
 }
 

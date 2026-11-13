@@ -5,7 +5,7 @@
 //   https://learn.microsoft.com/en-us/windows/win32/api/objidl/nn-objidl-ipersistfile
 
 import { wintypes } from "node-ctypes";
-const { INT, DWORD, LPVOID, LPCWSTR } = wintypes;
+const { INT, DWORD, WORD, LPVOID, LPCWSTR } = wintypes;
 import { COMInterface, STDMETHOD, HRESULT, IUnknown } from "../comtypes.js";
 
 // Re-export IPersist/IPersistFile from their dedicated module for convenience
@@ -43,7 +43,7 @@ export const IShellLinkW = COMInterface({
     // slot 12: GetHotkey(pwHotkey)
     STDMETHOD(HRESULT, "GetHotkey", [LPVOID]),
     // slot 13: SetHotkey(wHotkey)
-    STDMETHOD(HRESULT, "SetHotkey", [DWORD]),
+    STDMETHOD(HRESULT, "SetHotkey", [WORD]),
     // slot 14: GetShowCmd(piShowCmd)
     STDMETHOD(HRESULT, "GetShowCmd", [LPVOID]),
     // slot 15: SetShowCmd(iShowCmd)

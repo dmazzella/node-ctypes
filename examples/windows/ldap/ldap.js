@@ -59,11 +59,15 @@ export const MOD_OP = Object.freeze({
 const LDAP_PORT = 389;
 const LDAP_VERSION3 = 3;
 const LDAP_OPT_OFF = 0x00;
+const LDAP_OPT_ON = 0x01; // ((void *) 1): passed as the value itself
 const LDAP_OPT_VERSION = 0x11;
 const LDAP_OPT_REFERRALS = 0x08;
+const LDAP_OPT_SIGN = 0x95;
+const LDAP_OPT_ENCRYPT = 0x96;
 const LDAP_AUTH_NEGOTIATE = 0x0486;
 const LDAP_SUCCESS = 0x00;
 const SEC_WINNT_AUTH_IDENTITY_UNICODE = 0x02;
+const DEFAULT_TIMEOUT_SECONDS = 10;
 
 // ─── AD Attribute Syntax OIDs ───────────────────────────────────────
 // https://learn.microsoft.com/en-us/windows/win32/adschema/syntaxes
@@ -131,6 +135,14 @@ class SEC_WINNT_AUTH_IDENTITY_W extends Structure {
   ];
 }
 
+// struct l_timeval { LONG tv_sec; LONG tv_usec; } — the ldap_connect timeout
+class LDAP_TIMEVAL extends Structure {
+  static _fields_ = [
+    ["tv_sec", LONG],
+    ["tv_usec", LONG],
+  ];
+}
+
 // ─── Lazy-loaded DLLs ───────────────────────────────────────────────
 
 let _wldap32 = null;
@@ -148,6 +160,17 @@ function wldap32() {
 
     _wldap32.ldap_set_optionW.argtypes = [LDAP, INT, LPVOID];
     _wldap32.ldap_set_optionW.restype = ULONG;
+
+    _wldap32.ldap_get_optionW.argtypes = [LDAP, INT, LPVOID];
+    _wldap32.ldap_get_optionW.restype = ULONG;
+
+    // ldap_initW only stores the host: ldap_connect opens the connection, with a timeout.
+    _wldap32.ldap_connect.argtypes = [LDAP, LPVOID];
+    _wldap32.ldap_connect.restype = ULONG;
+
+    // Static message for an LDAP error code (not freed).
+    _wldap32.ldap_err2stringW.argtypes = [ULONG];
+    _wldap32.ldap_err2stringW.restype = LPVOID;
 
     // lpCred is either NULL or a pointer to SEC_WINNT_AUTH_IDENTITY_W — LPVOID.
     _wldap32.ldap_bind_sW.argtypes = [LDAP, LPCWSTR, LPVOID, ULONG];
@@ -269,7 +292,10 @@ function check(rc, fn) {
   // always lossless.
   const code = Number(rc);
   if (code !== LDAP_SUCCESS) {
-    throw new Error(`${fn} failed (LDAP error 0x${code.toString(16)})`);
+    const message = readWideString(wldap32().ldap_err2stringW(code));
+    const err = new Error(`${fn} failed: ${message ?? "LDAP error"} (0x${code.toString(16)})`);
+    err.ldapError = code;
+    throw err;
   }
 }
 
@@ -650,6 +676,20 @@ function ldapConnect(host, options = {}) {
     rc = ldap.ldap_set_optionW(ld, LDAP_OPT_REFERRALS, byref(referrals));
     check(rc, "ldap_set_optionW(LDAP_OPT_REFERRALS)");
 
+    // Signing and sealing (Kerberos / NTLM after the NEGOTIATE bind): the
+    // session is integrity-protected and encrypted on port 389, as domain
+    // controllers that require LDAP signing expect. options.encrypt = false
+    // turns it off.
+    if (options.encrypt !== false) {
+      check(ldap.ldap_set_optionW(ld, LDAP_OPT_SIGN, LDAP_OPT_ON), "ldap_set_optionW(LDAP_OPT_SIGN)");
+      check(ldap.ldap_set_optionW(ld, LDAP_OPT_ENCRYPT, LDAP_OPT_ON), "ldap_set_optionW(LDAP_OPT_ENCRYPT)");
+    }
+
+    // Connect now, with a timeout: otherwise an unreachable server blocks
+    // the bind for the TCP connection timeout.
+    const timeout = new LDAP_TIMEVAL(options.timeout ?? DEFAULT_TIMEOUT_SECONDS, 0);
+    check(ldap.ldap_connect(ld, byref(timeout)), `ldap_connect(${host || "default server"})`);
+
     if (options.username && options.password) {
       // SEC_WINNT_AUTH_IDENTITY_W fields are LPCWSTR — assigning strings uses
       // the c_wchar_p struct-field keepalive (Python parity).
@@ -706,12 +746,13 @@ function ensureSchema(basePath, options) {
   _loadingSchema = true;
 
   try {
-    const { baseDn } = parseLdapPath(basePath);
+    const { host, baseDn } = parseLdapPath(basePath);
     const dcPart = baseDn.match(/DC=.*/i)?.[0];
     if (!dcPart) return;
 
+    // Same server as the query (an explicit "LDAP://server/..." included).
     const schemaDn = `CN=Schema,CN=Configuration,${dcPart}`;
-    const schemaPath = `LDAP://${schemaDn}`;
+    const schemaPath = host ? `LDAP://${host}/${schemaDn}` : `LDAP://${schemaDn}`;
 
     const attrs = query("(objectClass=attributeSchema)", schemaPath, SCOPE.ONELEVEL, ["lDAPDisplayName", "attributeSyntax"], { ...options, maxObjects: -1 });
 
@@ -757,6 +798,7 @@ export function queryBegin(host, baseDn, scope, filter, properties, options = {}
 
     // baseDn / filter pass through LPCWSTR argtype as plain strings.
     const rc = ldap.ldap_search_sW(ld, baseDn, scope, filter, attrList, 0, byref(resultPtr));
+    if (Number(rc) !== LDAP_SUCCESS && resultPtr.value) ldap.ldap_msgfree(resultPtr.value); // allocated also on failure
     check(rc, "ldap_search_sW");
 
     return { ld, searchResult: resultPtr.value };
@@ -951,95 +993,83 @@ export function query(filter, basePath, scope = SCOPE.SUBTREE, properties = [], 
 
   const ld = ldapConnect(options.host || host, options);
 
+  // Cookie for paging — starts as NULL (empty berval); freed in finally.
+  let cookiePtr = null; // berval* for the cookie
+
   try {
     const attrList = buildAttrList(properties);
     const allResults = [];
-
-    // Cookie for paging — starts as NULL (empty berval)
-    let cookiePtr = null; // berval* for the cookie
 
     // eslint-disable-next-line no-constant-condition
     while (true) {
       // 1. Create page control
       const pageControlPtr = new c_void_p();
-      let rc = ldap.ldap_create_page_controlW(ld, pageSize, cookiePtr, 1, byref(pageControlPtr));
-      check(rc, "ldap_create_page_controlW");
+      check(ldap.ldap_create_page_controlW(ld, pageSize, cookiePtr, 1, byref(pageControlPtr)), "ldap_create_page_controlW");
 
-      // 2. Build server controls array: [pageControl, NULL]
-      const serverControls = buildControlsArray(pageControlPtr.value);
-
-      // 3. Paged search — baseDn / filter as plain strings (LPCWSTR).
+      // The page's result, control and returned controls are freed even when
+      // a step fails.
       const resultPtr = new c_void_p();
-      rc = ldap.ldap_search_ext_sW(
-        ld,
-        baseDn,
-        scope,
-        filter,
-        attrList,
-        0, // attrsonly
-        serverControls, // server controls
-        null, // client controls
-        null, // timeout
-        0, // sizelimit (0 = server default)
-        byref(resultPtr),
-      );
-      check(rc, "ldap_search_ext_sW");
-
-      // 4. Process this page of results
-      const pageResults = findObjects(ld, resultPtr.value, maxObjects === -1 ? -1 : maxObjects - allResults.length);
-      allResults.push(...pageResults);
-
-      // 5. Parse server controls from result to get the cookie for next page
       const returnedControlsPtr = new c_void_p();
-      const returnCode = new c_uint32();
-      rc = ldap.ldap_parse_resultW(ld, resultPtr.value, byref(returnCode), null, null, null, byref(returnedControlsPtr), 0);
+      let newCookie = null;
+      try {
+        // 2. Build server controls array: [pageControl, NULL]
+        const serverControls = buildControlsArray(pageControlPtr.value);
 
-      // Free search result
-      ldap.ldap_msgfree(resultPtr.value);
-      // Free page control
-      ldap.ldap_control_freeW(pageControlPtr.value);
+        // 3. Paged search — baseDn / filter as plain strings (LPCWSTR).
+        const rc = ldap.ldap_search_ext_sW(
+          ld,
+          baseDn,
+          scope,
+          filter,
+          attrList,
+          0, // attrsonly
+          serverControls, // server controls
+          null, // client controls
+          null, // timeout
+          0, // sizelimit (0 = server default)
+          byref(resultPtr),
+        );
+        check(rc, "ldap_search_ext_sW");
 
-      // ldap_parse_resultW returned ULONG as BigInt — compare via Number.
-      if (Number(rc) !== LDAP_SUCCESS || !returnedControlsPtr.value) {
-        break;
+        // 4. Process this page of results
+        const pageResults = findObjects(ld, resultPtr.value, maxObjects === -1 ? -1 : maxObjects - allResults.length);
+        allResults.push(...pageResults);
+
+        // 5. Parse server controls from result to get the cookie for next page
+        const returnCode = new c_uint32();
+        const parsed = ldap.ldap_parse_resultW(ld, resultPtr.value, byref(returnCode), null, null, null, byref(returnedControlsPtr), 0);
+        if (Number(parsed) === LDAP_SUCCESS && returnedControlsPtr.value) {
+          // 6. Extract cookie from returned controls
+          const totalCount = new c_uint32();
+          const newCookiePtr = new c_void_p(); // will receive berval*
+          if (Number(ldap.ldap_parse_page_controlW(ld, returnedControlsPtr.value, byref(totalCount), byref(newCookiePtr))) === LDAP_SUCCESS) {
+            newCookie = newCookiePtr.value;
+          }
+        }
+      } finally {
+        // Free search result (allocated also by a failed search), page control
+        // and returned server controls
+        if (resultPtr.value) ldap.ldap_msgfree(resultPtr.value);
+        ldap.ldap_control_freeW(pageControlPtr.value);
+        if (returnedControlsPtr.value) ldap.ldap_controls_freeW(returnedControlsPtr.value);
       }
 
-      // 6. Extract cookie from returned controls
-      const totalCount = new c_uint32();
-      const newCookiePtr = new c_void_p(); // will receive berval*
-      rc = ldap.ldap_parse_page_controlW(ld, returnedControlsPtr.value, byref(totalCount), byref(newCookiePtr));
-
-      // Free returned server controls
-      ldap.ldap_controls_freeW(returnedControlsPtr.value);
-
-      if (Number(rc) !== LDAP_SUCCESS) break;
-
-      // 7. Check if cookie is empty (no more pages)
-      if (!newCookiePtr.value) break;
-
-      // Empty cookie (bv_len 0) → no more pages
-      if (!LDAP_BERVAL.from_address(newCookiePtr.value).bv_len) {
-        // free the empty cookie berval
-        ldap.ber_bvfree(newCookiePtr.value);
+      // 7. No cookie, or an empty one (bv_len 0): no more pages
+      if (!newCookie) break;
+      if (!LDAP_BERVAL.from_address(newCookie).bv_len) {
+        ldap.ber_bvfree(newCookie);
         break;
       }
 
       // Free the previous cookie before moving to the next one
-      if (cookiePtr) {
-        ldap.ber_bvfree(cookiePtr);
-      }
-      cookiePtr = newCookiePtr.value;
+      if (cookiePtr) ldap.ber_bvfree(cookiePtr);
+      cookiePtr = newCookie;
 
       // Check maxObjects limit
       if (maxObjects !== -1 && allResults.length >= maxObjects) {
         allResults.length = maxObjects;
         break;
       }
-    }
-
-    // Free the last cookie if the loop exited with one still allocated
-    if (cookiePtr) {
-      ldap.ber_bvfree(cookiePtr);
     }
 
     // ── Output type handling ──
@@ -1076,6 +1106,8 @@ export function query(filter, basePath, scope = SCOPE.SUBTREE, properties = [], 
 
     return allResults;
   } finally {
+    // The last cookie, if the loop exited with one still allocated
+    if (cookiePtr) ldap.ber_bvfree(cookiePtr);
     ldap.ldap_unbind(ld);
   }
 }

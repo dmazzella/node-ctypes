@@ -16,14 +16,14 @@ node examples/windows/ldap/demo_ldap.js --user admin --pass secret --domain EXAM
 node examples/windows/ldap/demo_ldap.js --base "LDAP://DC=corp,DC=example,DC=com" --tree
 ```
 
-| Option                         | Description                                    |
-| ------------------------------ | ---------------------------------------------- |
-| `--base <path>`                | LDAP base path (default: from `USERDNSDOMAIN`) |
-| `--host <server>`              | LDAP server                                    |
-| `--user`, `--pass`, `--domain` | Explicit credentials                           |
-| `--max <n>`                    | Maximum number of objects                      |
-| `--tree`                       | Group results by OU path                       |
-| `--debug`                      | Print the results                              |
+| Option                         | Description                                                                  |
+| ------------------------------ | ---------------------------------------------------------------------------- |
+| `--base <path>`                | LDAP base path (default: `USERDNSDOMAIN`, or the DNS domain of the computer) |
+| `--host <server>`              | LDAP server                                                                  |
+| `--user`, `--pass`, `--domain` | Explicit credentials                                                         |
+| `--max <n>`                    | Maximum number of objects                                                    |
+| `--tree`                       | Group results by OU path                                                     |
+| `--debug`                      | Print the results                                                            |
 
 ## Use the library
 
@@ -37,6 +37,10 @@ Ldap.modify("CN=Alice,OU=Users,DC=corp,DC=example,DC=com", [{ op: MOD_OP.REPLACE
 Ldap.close();
 ```
 
+The demo only reads the directory: `Ldap.modify()` is shown here.
+
+Connections are signed and sealed (`LDAP_OPT_SIGN`, `LDAP_OPT_ENCRYPT`) after the Negotiate bind, as domain controllers requiring LDAP signing expect; pass `{ encrypt: false }` to turn it off. `ldap_connect` opens the connection with a timeout (`{ timeout }` in seconds, default 10). Errors carry the LDAP message (`ldap_err2stringW`) and the code (`error.ldapError`); paged searches free their results, controls and cookies also when a page fails.
+
 ## node-ctypes features used
 
-`Structure` with `c_wchar_p` fields (`LDAPModW`, `SEC_WINNT_AUTH_IDENTITY_W`) · arrays of `c_wchar_p` and of `POINTER(LDAPModW)` · `POINTER(POINTER(LDAP_BERVAL))` results indexed like Python (`vals[i].contents`) · `from_address()` · `memmove` from an address · `byref()` output parameters
+`Structure` with `c_wchar_p` fields (`LDAPModW`, `SEC_WINNT_AUTH_IDENTITY_W`) · arrays of `c_wchar_p` and of `POINTER(LDAPModW)` · `POINTER(POINTER(LDAP_BERVAL))` results indexed like Python (`vals[i].contents`) · `from_address()` · `memmove` from an address · `byref()` output parameters · option values passed as a pointer-sized integer (`LDAP_OPT_ON`)
