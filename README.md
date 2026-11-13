@@ -995,7 +995,7 @@ Each example in `examples/` has its own README; see the [index](examples/README.
 - [Cryptoki (PKCS #11)](examples/cross-platform/cryptoki/README.md) — complete 3.2 declarations with 2.20–3.2 dispatch and a standalone SoftHSM demo: temporary token, login, RSA, ECDSA, AES and SHA-256
 - [Accessibility](examples/macos/accessibility/README.md) — macOS UI automation with the Accessibility API
 - [COM automation](examples/windows/com/README.md) — shell shortcuts (`IShellLinkW`) and Active Directory (`IDirectorySearch`)
-- [Controls](examples/windows/controls/README.md) — Win32 common controls
+- [Controls](examples/windows/controls/README.md) — a small Win32 application with the common controls
 - [LDAP](examples/windows/ldap/README.md) — LDAPv3 paged search (`wldap32`)
 - [Registry](examples/windows/registry/README.md) — `setValue` / `getValue` / `openKey` / `deleteKey`
 - [System tray](examples/windows/tray/README.md) — tray icon + popup menu
