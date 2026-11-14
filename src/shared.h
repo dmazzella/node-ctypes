@@ -106,6 +106,13 @@ template <TypeTaggedWrap T>
   return object.CheckTypeTag(&T::kTypeTag) ? Napi::ObjectWrap<T>::Unwrap(object) : nullptr;
 }
 
+// Id del thread corrente: std::this_thread::get_id() passa da una funzione del
+// runtime (MSVC: _Thrd_id), letta qui una volta per thread.
+[[nodiscard]] inline std::thread::id CurrentThreadId() noexcept {
+  static thread_local const std::thread::id id = std::this_thread::get_id();
+  return id;
+}
+
 // Thread nativi in attesa del thread JavaScript (callback thread-safe invocati
 // da un altro thread, es. durante una chiamata su un Executor): un'attesa in
 // linea del thread JavaScript si interrompe, perché quel thread deve tornare

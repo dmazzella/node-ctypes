@@ -172,11 +172,9 @@ inline void ZeroReturnValue(CType type, void* destination) noexcept {
   }
 }
 
-inline void StoreCallbackValue(CType type, const void* source, void* destination) noexcept {
-  if (CTypeSize(type) >= sizeof(AbiWord) || !IsIntegralReturn(type)) {
-    std::memcpy(destination, source, CTypeSize(type));
-    return;
-  }
+// Intero più stretto di una parola ABI (ReturnStorageSize > CTypeSize), esteso
+// alla parola intera; gli altri tipi si scrivono direttamente.
+inline void StoreNarrowIntegerValue(CType type, const void* source, void* destination) noexcept {
   switch (type) {
     case CType::CTYPES_INT8:
       StoreReturnValue(destination, LoadAs<int8_t>(source));
@@ -266,6 +264,10 @@ inline void StoreCallbackValue(CType type, const void* source, void* destination
 // bit del tipo). Un number non intero o non finito è un float, che Python
 // rifiuta per i tipi interi: TypeError.
 [[nodiscard]] uint64_t IntegerBitsFromDouble(const Napi::Value& value, double d);
+// Bit di un intero dal valore `d` del number `value` (già letto), come
+// JSToC: un intero esatto, altrimenti IntegerBitsFromDouble (errore per i
+// valori non interi, modulo 2^64 per quelli fuori range).
+[[nodiscard]] uint64_t IntegerBitsFromNumber(const Napi::Value& value, double d);
 
 // Number, boolean o BigInt nel range int64/uint64; nessuna coercizione di oggetti.
 [[nodiscard]] double RealFromJS(const Napi::Value& value);

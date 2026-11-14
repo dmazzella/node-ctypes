@@ -96,6 +96,13 @@ bool FFIFunction::PrepareExtraFFI(Napi::Env env, ExtraCallCache& entry) {
     return false;
   }
   entry.plan = ffi_call_plan_alloc(&entry.cif);
+  // Senza argtypes la firma dedotta è fissa; argomenti variadici solo dove il
+  // frame li passa come una funzione variadica (frame::kVariadicCalls).
+  if (UsesDefaultABI() && (fixed_args == 0 || frame::kVariadicCalls)) {
+    std::vector<CType> types(arg_types_);
+    types.insert(types.end(), entry.extra_types.begin(), entry.extra_types.end());
+    entry.frame.Prepare(return_type_, types);
+  }
   entry.cif_prepared = true;
   return true;
 }

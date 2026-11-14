@@ -48,6 +48,53 @@ describe("Native callback ABI", { skip: !existsSync(fixture) && "native fixture 
         return callback;
       }
 
+      // Inside a synchronous call the first callbacks reuse the caller's
+      // handle scope; later ones, and callbacks of a nested call, open their own.
+      it("runs many callbacks in one call and callbacks of nested calls", () => {
+        const loop = caller("fixture_callback_loop", c.c_int64, [c.c_int32]);
+        const increment = make((value) => value + 1, c.c_int32, [c.c_int32]);
+        assert.equal(loop(increment, 100000), 5000050000n);
+        const nested = make((value) => Number(loop(increment, 100)) + value, c.c_int32, [c.c_int32]);
+        assert.equal(loop(nested, 200), 1029900n);
+      });
+
+      // A Number result of an integer callback is checked before any conversion:
+      // outside the int64 range it wraps modulo 2^64, NaN and infinities are errors
+      // (zero result, a CallbackError warning, the error recorded).
+      it("converts out-of-range and non-finite Number results of integer callbacks", async () => {
+        let next = 0;
+        const integer = {
+          i64: make(() => next, c.c_int64, [c.c_int64]),
+          u64: make(() => next, c.c_uint64, [c.c_uint64]),
+          i32: make(() => next, c.c_int32, [c.c_int32]),
+        };
+        const types = { i64: c.c_int64, u64: c.c_uint64, i32: c.c_int32 };
+        const results = async (name) => {
+          const call = caller(`fixture_callback_${name}`, types[name], [types[name]]);
+          const value = name === "i32" ? 0 : 0n;
+          return safe ? [call(integer[name], value), await call.callAsync(integer[name], value)] : [call(integer[name], value)];
+        };
+        for (const [value, i64, u64, i32] of [
+          [2 ** 63, -(2n ** 63n), 2n ** 63n, 0],
+          [2 ** 64, 0n, 0n, 0],
+          [-(2 ** 63), -(2n ** 63n), 2n ** 63n, 0],
+          [2 ** 32 + 5, 2n ** 32n + 5n, 2n ** 32n + 5n, 5],
+        ]) {
+          next = value;
+          for (const result of await results("i64")) assert.equal(result, i64, `i64 ${value}`);
+          for (const result of await results("u64")) assert.equal(result, u64, `u64 ${value}`);
+          for (const result of await results("i32")) assert.equal(result, i32, `i32 ${value}`);
+        }
+        for (const callback of Object.values(integer)) assert.equal(callback._callback.getLastError(), null);
+        for (const value of [NaN, Infinity, -Infinity]) {
+          next = value;
+          for (const name of ["i64", "u64", "i32"]) {
+            for (const result of await results(name)) assert.equal(result, name === "i32" ? 0 : 0n, `${name} ${value}`);
+            assert.match(integer[name]._callback.getLastError(), /cannot be interpreted as an integer/);
+          }
+        }
+      });
+
       for (const [name, type, values] of scalars) {
         it(`receives and returns ${name} through an independent C caller`, async () => {
           const received = [];

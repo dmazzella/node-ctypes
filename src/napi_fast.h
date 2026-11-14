@@ -50,6 +50,18 @@ inline constexpr size_t kMaxUtf8CharBytes = 4;
   return copied;
 }
 
+// Lunghezza UTF-8 di una stringa, senza terminatore, con una sola chiamata:
+// std::nullopt se il valore non è una stringa.
+[[nodiscard]] inline std::optional<size_t> Utf8LengthIfString(const Napi::Value& value) {
+  size_t length = 0;
+  const napi_status status = napi_get_value_string_utf8(value.Env(), value, nullptr, 0, &length);
+  if (status == napi_string_expected) {
+    return std::nullopt;
+  }
+  NAPI_THROW_IF_FAILED(value.Env(), status, std::nullopt);
+  return length;
+}
+
 // Memoria di una vista (Buffer, ogni TypedArray, DataView) con una sola
 // chiamata: Node accetta qualunque ArrayBufferView in napi_get_buffer_info.
 // nullptr se il valore non è una vista (o una versione di Node la rifiuta): il
@@ -99,6 +111,14 @@ inline std::atomic<bool> buffer_info_checks_type{true};
 
 [[nodiscard]] inline bool TryBool(const Napi::Value& value, bool& out) {
   return napi_get_value_bool(value.Env(), value, &out) == napi_ok;
+}
+
+// I 64 bit bassi di un BigInt (un indirizzo) con una sola chiamata a V8: false
+// se il valore non è un BigInt. Napi::Value::Type() + BigInt::Uint64Value() ne
+// fanno due, dopo la prova della vista: ~9 ns in più per un handle BigInt.
+[[nodiscard]] inline bool TryBigIntWord(const Napi::Value& value, uint64_t& out) {
+  bool lossless;
+  return napi_get_value_bigint_uint64(value.Env(), value, &out, &lossless) == napi_ok;
 }
 
 // Number da un intero a 32 bit: v8::Integer::New crea direttamente uno Smi,

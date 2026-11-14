@@ -2,6 +2,7 @@
 
 #include "addon.h"
 #include "call_abi.h"
+#include "frame_call.h"
 #include "layout.h"
 #include "libffi_call.h"
 #include "library.h"
@@ -34,6 +35,8 @@ struct ExtraCallCache : LibffiExtraCallState {
   // Chiamate in corso che usano la firma: una chiamata rientrante (da un
   // callback) non può ricostruire lo slot mentre la chiamata esterna lo usa.
   uint32_t in_use = 0;
+  // Chiamata a registri della firma completa (SimpleCall), se consentita.
+  frame::Plan frame;
 };
 
 // Buffer heap di una chiamata sincrona. L'istanza ne riusa uno (capacità
@@ -134,6 +137,10 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
   Napi::Value CallOn(const Napi::CallbackInfo& info);
   Napi::Value CallOnChecked(const Napi::CallbackInfo& info);
   Napi::Value MakeCheckedCall(const Napi::CallbackInfo& info);
+  // _makeEntry(fallback, name): la funzione restituita da CDLL.func (vedi
+  // FastEntry); _setEntryDefer(bool): tutte le chiamate al fallback (errcheck).
+  Napi::Value MakeEntry(const Napi::CallbackInfo& info);
+  Napi::Value SetEntryDefer(const Napi::CallbackInfo& info);
 
   // ==========================================================================
   // CallContext — mutable state shared tra le fasi di Call().
@@ -191,7 +198,12 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
                                                  const std::shared_ptr<ArrayInfo>& array_info,
                                                  bool struct_as_buffer,
                                                  bool scalar_as_buffer = false);
-  [[nodiscard]] static inline bool MarshalPrimitive(const Napi::Value& val, CType type, uint8_t* slot);
+  // memory: se non nullo, true quando l'argomento era memoria JS (Buffer o
+  // ArrayBuffer passato a un intero a 64 bit, estensione node-ctypes).
+  [[nodiscard]] static inline bool MarshalPrimitive(const Napi::Value& val,
+                                                    CType type,
+                                                    uint8_t* slot,
+                                                    bool* memory = nullptr);
   [[nodiscard]] static bool MarshalStructArg(Napi::Env env,
                                              const Napi::Value& val,
                                              size_t arg_index,
@@ -221,7 +233,18 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
 
   // Entry point of the per-instance `call` function: the FFIFunction* is the
   // function's N-API data, so the hot path skips the napi_unwrap of InstanceMethod.
+  // Capacity: argomenti letti dalla prima napi_get_cb_info, 2, 4 o kFastCallArgs
+  // secondo quelli dichiarati (napi_get_cb_info scrive undefined negli slot oltre
+  // argc). Solo tre valori: ogni istanza contiene una copia di SimpleCall.
+  template <size_t Capacity>
   static napi_value FastCall(napi_env env, napi_callback_info info);
+  // Funzione d'ingresso (_makeEntry), la funzione restituita all'utente: le
+  // chiamate con argomenti che il wrapper JS passerebbe così come sono vanno
+  // direttamente a SimpleCall; le altre (oggetti, errcheck, firme che
+  // SimpleCall non copre) al wrapper JS, il fallback, con gli stessi argomenti.
+  template <size_t Capacity>
+  static napi_value FastEntry(napi_env env, napi_callback_info info);
+  napi_value CallEntryFallback(napi_env env, napi_callback_info info);
   Napi::Value CallFromInfo(const Napi::CallbackInfo& info);
   static Napi::Value FastCheckedCall(const Napi::CallbackInfo& info);
   void InstallFastCall(Napi::Env env);
@@ -229,13 +252,22 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
 
   // Firma semplice (vedi SimpleCall): scalari, puntatori, stringhe e piccoli
   // aggregati negli slot inline. Calcolato in PrepareCall.
-  static constexpr size_t kMaxSimpleArgs = 8;
+  static constexpr size_t kMaxSimpleArgs = 32;
+  // Argomenti letti da FastCall con la prima napi_get_cb_info.
+  static constexpr size_t kFastCallArgs = 8;
   static constexpr size_t kMaxSimpleStructReturn = 64;
   bool simple_call_ = false;
   // Percorso veloce delle firme semplici; false (senza effetti) se un
-  // argomento richiede Call(): stringa lunga o chiamata rientrante.
-  template <ArgumentList Args, bool HasErrcheck = true>
-  [[nodiscard]] bool SimpleCall(const Args& info, Napi::Value& result, const Napi::Function* errcheck);
+  // argomento richiede Call() (per esempio una chiamata rientrante).
+  // Entry: dalla funzione d'ingresso, false anche per un oggetto o una
+  // funzione, e allora *needs_js è true (il wrapper JS deve convertirlo).
+  // Sempre espansa: con più chiamanti gcc ne farebbe una copia fuori linea
+  // (+10% sulle chiamate brevi).
+  template <ArgumentList Args, bool HasErrcheck = true, bool Entry = false>
+  [[nodiscard]] CTYPES_ALWAYS_INLINE bool SimpleCall(const Args& info,
+                                                     Napi::Value& result,
+                                                     const Napi::Function* errcheck,
+                                                     bool* needs_js = nullptr);
   template <typename Args, bool HasErrcheck = true>
     requires(std::same_as<Args, Napi::CallbackInfo> || std::same_as<Args, FunctionArguments>)
   Napi::Value InvokeCall(const Args& info, const Napi::Function* errcheck);
@@ -253,6 +285,10 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
   [[nodiscard]] uint64_t CallbackEpoch() const noexcept { return addon_ != nullptr ? addon_->callback_epoch : 0; }
   template <ArgumentList Args>
   static void ThrowIfArgumentDetached(const Args& info);
+  // Solo gli argomenti segnati in `memory` (bit i: argomento i), le viste e
+  // gli ArrayBuffer passati a SimpleCall.
+  template <ArgumentList Args>
+  static void ThrowIfArgumentDetached(const Args& info, uint32_t memory);
 
   // Per-section helpers for Call(). `always_inline` marcato sulla definition
   // (vedi function.cc) — vengono chiamati esattamente una volta dal
@@ -390,6 +426,22 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
 
   // Direct per la firma fissa; nullptr seleziona libffi.
   FixedInvoker fixed_invoker_ = nullptr;
+  // Senza invoker direct: chiamata a registri (frame_call.h) delle firme
+  // semplici in SimpleCall, se la piattaforma e la firma la consentono.
+  frame::Plan frame_plan_;
+
+  // Argomenti puntatore di SimpleCall: il tipo di valore visto l'ultima volta in
+  // ogni posizione (un call site passa di solito sempre lo stesso), letto per
+  // primo con una sola chiamata a V8. Solo un suggerimento: se non corrisponde,
+  // la sequenza completa.
+  enum class PointerHint : uint8_t { kNone, kView, kBigInt, kNumber, kNullish };
+  std::array<PointerHint, kMaxSimpleArgs> pointer_hints_{};
+  [[nodiscard]] static bool HintedPointer(const Napi::Value& val, PointerHint hint, void*& ptr, bool& memory);
+
+  // Funzione d'ingresso: il wrapper JS (riferimento debole: lo tiene vivo una
+  // proprietà della funzione d'ingresso) e se ogni chiamata va a lui.
+  Napi::FunctionReference entry_fallback_;
+  bool entry_defer_ = false;
 
   // Tipi
   CType return_type_;

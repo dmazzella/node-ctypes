@@ -205,6 +205,11 @@ FIXTURE_API size_t fixture_string_length(const char* value) {
   return strlen(value);
 }
 
+// strlen(first) with a NULL second, otherwise strlen(first) + strlen(second) + 1.
+FIXTURE_API size_t fixture_string_lengths_nullable(const char* first, const char* second) {
+  return second == NULL ? strlen(first) : strlen(first) + strlen(second) + 1;
+}
+
 FIXTURE_API size_t fixture_wstring_length(const wchar_t* value) {
   return wcslen(value);
 }

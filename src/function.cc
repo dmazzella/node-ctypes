@@ -168,6 +168,22 @@ inline void* PointerArg(const Napi::Value& val, napi_valuetype kind, CType type)
   ThrowWrongType(val, type);
 }
 
+// Un oggetto o una funzione: argomento che solo il JavaScript sa convertire
+// (istanze CData, from_param, _as_parameter_, ...).
+[[nodiscard]] inline bool IsObjectLike(const Napi::Value& val) {
+  const napi_valuetype kind = val.Type();
+  return kind == napi_object || kind == napi_function;
+}
+
+[[nodiscard]] inline bool HasObjectArgument(const Napi::CallbackInfo& info) {
+  for (size_t i = 0; i < info.Length(); i++) {
+    if (IsObjectLike(info[i])) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Argomenti numerici, parity Python ctypes: accettano number, boolean
 // (true → 1) e BigInt (troncato ai bit del tipo, come Python maschera gli int);
 // stringhe, null e oggetti sono un TypeError (Python: ArgumentError).
@@ -194,26 +210,44 @@ CTYPES_NOINLINE int64_t IntegerArgSlow(const Napi::Value& val) {
   }
 }
 
+// Interi dal valore `d` del number `val` (già letto).
+CTYPES_ALWAYS_INLINE int32_t Int32FromNumber(const Napi::Value& val, double d) {
+  if (d >= -2147483648.0 && d <= 2147483647.0) [[likely]] {
+    if (const auto v = static_cast<int32_t>(d); static_cast<double>(v) == d) [[likely]] {
+      return v;
+    }
+  }
+  return static_cast<int32_t>(static_cast<uint32_t>(IntegerBitsFromDouble(val, d)));
+}
+
+CTYPES_ALWAYS_INLINE uint32_t Uint32FromNumber(const Napi::Value& val, double d) {
+  if (d >= 0.0 && d <= 4294967295.0) [[likely]] {
+    if (const auto v = static_cast<uint32_t>(d); static_cast<double>(v) == d) [[likely]] {
+      return v;
+    }
+  }
+  return static_cast<uint32_t>(IntegerBitsFromDouble(val, d));
+}
+
+CTYPES_ALWAYS_INLINE int64_t Int64FromNumber(const Napi::Value& val, double d) {
+  if (d >= -9223372036854775808.0 && d < 9223372036854775808.0) [[likely]] {
+    if (const auto v = static_cast<int64_t>(d); static_cast<double>(v) == d) [[likely]] {
+      return v;
+    }
+  }
+  return static_cast<int64_t>(IntegerBitsFromDouble(val, d));
+}
+
 CTYPES_ALWAYS_INLINE int32_t Int32Arg(const Napi::Value& val) {
   if (double d; napi_fast::TryDouble(val, d)) [[likely]] {
-    if (d >= -2147483648.0 && d <= 2147483647.0) [[likely]] {
-      if (const auto v = static_cast<int32_t>(d); static_cast<double>(v) == d) [[likely]] {
-        return v;
-      }
-    }
-    return static_cast<int32_t>(static_cast<uint32_t>(IntegerBitsFromDouble(val, d)));
+    return Int32FromNumber(val, d);
   }
   return static_cast<int32_t>(IntegerArgSlow(val));
 }
 
 CTYPES_ALWAYS_INLINE uint32_t Uint32Arg(const Napi::Value& val) {
   if (double d; napi_fast::TryDouble(val, d)) [[likely]] {
-    if (d >= 0.0 && d <= 4294967295.0) [[likely]] {
-      if (const auto v = static_cast<uint32_t>(d); static_cast<double>(v) == d) [[likely]] {
-        return v;
-      }
-    }
-    return static_cast<uint32_t>(IntegerBitsFromDouble(val, d));
+    return Uint32FromNumber(val, d);
   }
   return static_cast<uint32_t>(IntegerArgSlow(val));
 }
@@ -225,13 +259,7 @@ CTYPES_ALWAYS_INLINE bool TryInt64Number(const Napi::Value& val, int64_t& out) {
   if (!napi_fast::TryDouble(val, d)) {
     return false;
   }
-  if (d >= -9223372036854775808.0 && d < 9223372036854775808.0) [[likely]] {
-    if (const auto v = static_cast<int64_t>(d); static_cast<double>(v) == d) [[likely]] {
-      out = v;
-      return true;
-    }
-  }
-  out = static_cast<int64_t>(IntegerBitsFromDouble(val, d));
+  out = Int64FromNumber(val, d);
   return true;
 }
 
@@ -272,7 +300,8 @@ CTYPES_ALWAYS_INLINE double DoubleArg(const Napi::Value& val) {
 
 CTYPES_ALWAYS_INLINE void StoreVariadicNumber(double number, CType type, uint8_t* slot) {
   if (type == CType::CTYPES_INT32) {
-    const int32_t value = static_cast<int32_t>(number);
+    // Estesa a una parola come gli altri argomenti (vedi StoreArgument).
+    const int64_t value = static_cast<int32_t>(number);
     memcpy(slot, &value, sizeof(value));
   } else if (type == CType::CTYPES_INT64) {
     const int64_t value = static_cast<int64_t>(number);
@@ -310,6 +339,8 @@ Napi::Function FFIFunction::GetClass(Napi::Env env) {
                        InstanceMethod("callOn", &FFIFunction::CallOn),
                        InstanceMethod("_callOnWithErrcheck", &FFIFunction::CallOnChecked),
                        InstanceMethod("_makeCheckedCall", &FFIFunction::MakeCheckedCall),
+                       InstanceMethod("_makeEntry", &FFIFunction::MakeEntry),
+                       InstanceMethod("_setEntryDefer", &FFIFunction::SetEntryDefer),
                        InstanceMethod("setErrcheck", &FFIFunction::SetErrcheck),
                        InstanceMethod("getCapturedLastError", &FFIFunction::GetLastErrorCaptured),
                        InstanceMethod("getCapturedErrno", &FFIFunction::GetErrnoCaptured),
@@ -460,23 +491,34 @@ CTYPES_ALWAYS_INLINE Napi::Value FFIFunction::InvokeCall(const Args& args, const
 }
 
 // Firme semplici senza errcheck: argomenti letti con una sola napi_get_cb_info
-// e SimpleCall diretta. Il resto (più argomenti, errcheck, stringhe lunghe,
-// rientranza) passa a CallFromInfo, che rilegge gli argomenti. Fuori da
+// e SimpleCall diretta. Il resto (più argomenti, errcheck, rientranza) passa
+// a CallFromInfo, che rilegge gli argomenti. Fuori da
 // node-addon-api, quindi le eccezioni C++ si convertono qui come in
 // details::WrapCallback (NODE_ADDON_API_CPP_EXCEPTIONS_ALL).
+template <size_t Capacity>
 napi_value FFIFunction::FastCall(napi_env env, napi_callback_info info) {
   try {
-    std::array<napi_value, kMaxSimpleArgs> argv;
+    // napi_get_cb_info scrive undefined in tutti gli slot oltre argc: la prima
+    // lettura ne ha quanti gli argomenti dichiarati, oltre si rilegge tutto.
+    std::array<napi_value, Capacity> argv;
     size_t argc = 0;
     void* data = nullptr;
     if (!napi_fast::GetArguments(env, info, argv, argc, data)) [[unlikely]] {
       return nullptr;
     }
     FFIFunction* self = static_cast<FFIFunction*>(data);
-    if (self->simple_call_ && argc <= argv.size() && argc >= self->arg_types_.size() &&
-        self->errcheck_callback_.IsEmpty()) [[likely]] {
-      if (Napi::Value result; self->SimpleCall<RawArguments, false>(RawArguments{Napi::Env(env), argv.data(), argc},
-                                                                    result, nullptr)) [[likely]] {
+    if (self->simple_call_ && argc >= self->arg_types_.size() && self->errcheck_callback_.IsEmpty() &&
+        argc <= kMaxSimpleArgs) [[likely]] {
+      std::array<napi_value, kMaxSimpleArgs> all;
+      napi_value* values = argv.data();
+      if (argc > argv.size()) [[unlikely]] {
+        if (!napi_fast::GetArguments(env, info, all, argc, data)) [[unlikely]] {
+          return nullptr;
+        }
+        values = all.data();
+      }
+      if (Napi::Value result; self->SimpleCall<RawArguments, false>(RawArguments{Napi::Env(env), values, argc}, result,
+                                                                    nullptr)) [[likely]] {
         return result;
       }
     }
@@ -489,6 +531,130 @@ napi_value FFIFunction::FastCall(napi_env env, napi_callback_info info) {
     Napi::Error::New(env, "A native exception was thrown").ThrowAsJavaScriptException();
   }
   return nullptr;
+}
+
+// Puntatore letto secondo il suggerimento della sua posizione (pointer_hints_):
+// false se il valore è di un altro tipo. Fuori linea: il percorso delle viste
+// per c_void_p, che non usa suggerimenti, resta compatto.
+CTYPES_NOINLINE bool FFIFunction::HintedPointer(const Napi::Value& val, PointerHint hint, void*& ptr, bool& memory) {
+  switch (hint) {
+    case PointerHint::kView:
+      ptr = napi_fast::TryViewData(val);
+      memory = ptr != nullptr;
+      return memory;
+    case PointerHint::kBigInt:
+      if (uint64_t bits; napi_fast::TryBigIntWord(val, bits)) {
+        ptr = reinterpret_cast<void*>(static_cast<uintptr_t>(bits));
+        return true;
+      }
+      return false;
+    case PointerHint::kNumber:
+      if (double number; napi_fast::TryDouble(val, number)) {
+        ptr = reinterpret_cast<void*>(static_cast<uintptr_t>(IntegerBitsFromNumber(val, number)));
+        return true;
+      }
+      return false;
+    case PointerHint::kNullish: {
+      const napi_valuetype kind = val.Type();
+      ptr = nullptr;
+      return kind == napi_null || kind == napi_undefined;
+    }
+    default:
+      return false;
+  }
+}
+
+template <size_t Capacity>
+napi_value FFIFunction::FastEntry(napi_env env, napi_callback_info info) {
+  try {
+    std::array<napi_value, Capacity> argv;
+    size_t argc = 0;
+    void* data = nullptr;
+    if (!napi_fast::GetArguments(env, info, argv, argc, data)) [[unlikely]] {
+      return nullptr;
+    }
+    FFIFunction* self = static_cast<FFIFunction*>(data);
+    if (!self->entry_defer_ && argc >= self->arg_types_.size() && self->errcheck_callback_.IsEmpty()) [[likely]] {
+      bool needs_js = argc > kMaxSimpleArgs;
+      if (!needs_js) [[likely]] {
+        std::array<napi_value, kMaxSimpleArgs> all;
+        napi_value* values = argv.data();
+        if (argc > argv.size()) [[unlikely]] {
+          if (!napi_fast::GetArguments(env, info, all, argc, data)) [[unlikely]] {
+            return nullptr;
+          }
+          values = all.data();
+        }
+        if (Napi::Value result; self->SimpleCall<RawArguments, false, true>(RawArguments{Napi::Env(env), values, argc},
+                                                                            result, nullptr, &needs_js)) [[likely]] {
+          return result;
+        }
+      }
+      // Nessun argomento da convertire in JS (chiamata rientrante) e nessun
+      // oggetto tra gli argomenti non ancora esaminati: il percorso nativo
+      // generale, come dal wrapper.
+      if (!needs_js) {
+        const Napi::CallbackInfo call(env, info);
+        if (!HasObjectArgument(call)) {
+          return self->CallFromInfo(call);
+        }
+      }
+    }
+    return self->CallEntryFallback(env, info);
+  } catch (const Napi::Error& e) {
+    e.ThrowAsJavaScriptException();
+  } catch (const std::exception& e) {
+    Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
+  } catch (...) {
+    Napi::Error::New(env, "A native exception was thrown").ThrowAsJavaScriptException();
+  }
+  return nullptr;
+}
+
+// Il wrapper JS con this e argomenti della chiamata.
+napi_value FFIFunction::CallEntryFallback(napi_env env, napi_callback_info info) {
+  const Napi::CallbackInfo call(env, info);
+  // Gli argomenti sullo stack (fino a kMaxSimpleArgs), senza allocazioni.
+  const size_t argc = call.Length();
+  std::array<napi_value, kMaxSimpleArgs> inline_args;
+  std::vector<napi_value> heap_args;
+  napi_value* args = inline_args.data();
+  if (argc > inline_args.size()) [[unlikely]] {
+    heap_args.resize(argc);
+    args = heap_args.data();
+  }
+  for (size_t i = 0; i < argc; i++) {
+    args[i] = call[i];
+  }
+  Napi::Function fallback = entry_fallback_.Value();
+  if (fallback.IsEmpty()) [[unlikely]] {
+    throw Napi::Error::New(env, "function wrapper is no longer available");
+  }
+  return fallback.Call(call.This(), argc, args);
+}
+
+Napi::Value FFIFunction::MakeEntry(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  if (!simple_call_ || info.Length() < 1 || !info[0].IsFunction()) {
+    return env.Undefined();
+  }
+  const Napi::Function fallback = info[0].As<Napi::Function>();
+  const std::string name = info.Length() > 1 && info[1].IsString() ? info[1].As<Napi::String>().Utf8Value() : name_;
+  const size_t declared = arg_types_.size();
+  const napi_callback callback = declared <= 2   ? &FFIFunction::FastEntry<2>
+                                 : declared <= 4 ? &FFIFunction::FastEntry<4>
+                                                 : &FFIFunction::FastEntry<kFastCallArgs>;
+  Napi::Function entry = napi_fast::NewFunction(env, name.c_str(), callback, this);
+  // La funzione d'ingresso tiene vivi l'istanza nativa e il wrapper JS.
+  entry.DefineProperty(Napi::PropertyDescriptor::Value("_ffiFunction", Value(), napi_default));
+  entry.DefineProperty(Napi::PropertyDescriptor::Value("_fallback", fallback, napi_default));
+  entry_fallback_ = Napi::Weak(fallback);
+  return entry;
+}
+
+Napi::Value FFIFunction::SetEntryDefer(const Napi::CallbackInfo& info) {
+  entry_defer_ = info.Length() > 0 && info[0].ToBoolean().Value();
+  return info.Env().Undefined();
 }
 
 Napi::Value FFIFunction::CallFromInfo(const Napi::CallbackInfo& info) {
@@ -551,7 +717,11 @@ Napi::Value FFIFunction::MakeCheckedCall(const Napi::CallbackInfo& info) {
 // object, so the native instance outlives any detached reference to `call`.
 void FFIFunction::InstallFastCall(Napi::Env env) {
   Napi::Object self = Value();
-  Napi::Function fast_call = napi_fast::NewFunction(env, "call", &FFIFunction::FastCall, this);
+  const size_t declared = arg_types_.size();
+  const napi_callback callback = declared <= 2   ? &FFIFunction::FastCall<2>
+                                 : declared <= 4 ? &FFIFunction::FastCall<4>
+                                                 : &FFIFunction::FastCall<kFastCallArgs>;
+  Napi::Function fast_call = napi_fast::NewFunction(env, "call", callback, this);
   fast_call.DefineProperty(Napi::PropertyDescriptor::Value("_ffiFunction", self, napi_default));
   self.DefineProperty(Napi::PropertyDescriptor::Value(
     "call", fast_call, static_cast<napi_property_attributes>(napi_writable | napi_configurable)));
@@ -586,6 +756,9 @@ bool FFIFunction::PrepareCall(Napi::Env env) {
   }
 
   SetupFixedCall();
+  if (!fixed_invoker_ && UsesDefaultABI()) {
+    frame_plan_.Prepare(return_type_, arg_types_);
+  }
   if (!fixed_invoker_) {
     if (!PrepareFFI(env)) {
       return false;
@@ -604,10 +777,8 @@ bool FFIFunction::PrepareCall(Napi::Env env) {
       : return_type_ != CType::CTYPES_ARRAY && return_type_ != CType::CTYPES_UNION;
   simple_call_ = arg_types_.size() <= kMaxSimpleArgs && simple_return;
   for (size_t i = 0; simple_call_ && i < arg_types_.size(); i++) {
-    // Una struct per valore è semplice se i suoi byte stanno in uno slot.
-    simple_call_ =
-      IsSimpleArgumentType(arg_types_[i]) || (arg_types_[i] == CType::CTYPES_STRUCT && i < arg_struct_infos_.size() &&
-                                              arg_struct_infos_[i] && arg_struct_infos_[i]->GetSize() <= ARG_SLOT_SIZE);
+    simple_call_ = IsSimpleArgumentType(arg_types_[i]) ||
+                   (arg_types_[i] == CType::CTYPES_STRUCT && i < arg_struct_infos_.size() && arg_struct_infos_[i]);
   }
   return true;
 }
@@ -839,21 +1010,139 @@ Napi::Value FFIFunction::ConvertReturn(Napi::Env env,
   }
 }
 
+// Valore di un argomento nel suo slot (almeno 8 byte), sempre come parola
+// intera: gli interi stretti estesi, un float nei 32 bit bassi con zero sopra.
+// libffi ne legge solo i byte del tipo, la chiamata a registri (frame_call.h)
+// passa la parola così com'è.
+template <typename T>
+CTYPES_ALWAYS_INLINE void StoreArgument(uint8_t* slot, T value) noexcept {
+  if constexpr (std::is_integral_v<T> && sizeof(T) < sizeof(uint64_t) && std::endian::native == std::endian::little) {
+    const uint64_t word =
+      std::is_signed_v<T> ? static_cast<uint64_t>(static_cast<int64_t>(value)) : static_cast<uint64_t>(value);
+    memcpy(slot, &word, sizeof(word));
+  } else if constexpr (std::same_as<T, float> && std::endian::native == std::endian::little) {
+    // I bit del float nei 32 bassi, zero sopra: la parola intera è definita.
+    const uint64_t word = std::bit_cast<uint32_t>(value);
+    memcpy(slot, &word, sizeof(word));
+  } else {
+    memcpy(slot, &value, sizeof(value));
+  }
+}
+
+// Argomento numerico (interi, float, double) dal valore `d` del number `val`,
+// come MarshalPrimitive: la funzione d'ingresso (FastEntry) legge il number
+// una sola volta.
+[[nodiscard]] constexpr bool IsNumericArgument(CType type) noexcept {
+  switch (type) {
+    case CType::CTYPES_INT8:
+    case CType::CTYPES_UINT8:
+    case CType::CTYPES_INT16:
+    case CType::CTYPES_UINT16:
+    case CType::CTYPES_INT32:
+    case CType::CTYPES_UINT32:
+    case CType::CTYPES_INT64:
+    case CType::CTYPES_UINT64:
+    case CType::CTYPES_SIZE_T:
+    case CType::CTYPES_SSIZE_T:
+    case CType::CTYPES_LONG:
+    case CType::CTYPES_ULONG:
+    case CType::CTYPES_FLOAT:
+    case CType::CTYPES_DOUBLE:
+      return true;
+    default:
+      return false;
+  }
+}
+
+// Argomento intero dai bit di un BigInt (troncati al tipo).
+CTYPES_ALWAYS_INLINE void MarshalIntegerBits(uint64_t bits, CType type, uint8_t* slot) {
+  switch (type) {
+    case CType::CTYPES_INT8:
+      StoreArgument(slot, static_cast<int8_t>(bits));
+      break;
+    case CType::CTYPES_UINT8:
+      StoreArgument(slot, static_cast<uint8_t>(bits));
+      break;
+    case CType::CTYPES_INT16:
+      StoreArgument(slot, static_cast<int16_t>(bits));
+      break;
+    case CType::CTYPES_UINT16:
+      StoreArgument(slot, static_cast<uint16_t>(bits));
+      break;
+    case CType::CTYPES_INT32:
+      StoreArgument(slot, static_cast<int32_t>(static_cast<uint32_t>(bits)));
+      break;
+    case CType::CTYPES_UINT32:
+      StoreArgument(slot, static_cast<uint32_t>(bits));
+      break;
+    case CType::CTYPES_LONG:
+      StoreArgument(slot, static_cast<long>(bits));
+      break;
+    case CType::CTYPES_ULONG:
+      StoreArgument(slot, static_cast<unsigned long>(bits));
+      break;
+    default:
+      memcpy(slot, &bits, sizeof(bits));
+      break;
+  }
+}
+
+CTYPES_ALWAYS_INLINE void MarshalNumber(const Napi::Value& val, double d, CType type, uint8_t* slot) {
+  switch (type) {
+    case CType::CTYPES_INT8:
+      StoreArgument(slot, static_cast<int8_t>(Int32FromNumber(val, d)));
+      break;
+    case CType::CTYPES_UINT8:
+      StoreArgument(slot, static_cast<uint8_t>(Uint32FromNumber(val, d)));
+      break;
+    case CType::CTYPES_INT16:
+      StoreArgument(slot, static_cast<int16_t>(Int32FromNumber(val, d)));
+      break;
+    case CType::CTYPES_UINT16:
+      StoreArgument(slot, static_cast<uint16_t>(Uint32FromNumber(val, d)));
+      break;
+    case CType::CTYPES_INT32:
+      StoreArgument(slot, Int32FromNumber(val, d));
+      break;
+    case CType::CTYPES_UINT32:
+      StoreArgument(slot, Uint32FromNumber(val, d));
+      break;
+    case CType::CTYPES_LONG:
+      StoreArgument(slot, static_cast<long>(Int64FromNumber(val, d)));
+      break;
+    case CType::CTYPES_ULONG:
+      StoreArgument(slot, static_cast<unsigned long>(Int64FromNumber(val, d)));
+      break;
+    case CType::CTYPES_FLOAT:
+      StoreArgument(slot, static_cast<float>(d));
+      break;
+    case CType::CTYPES_DOUBLE:
+      StoreArgument(slot, d);
+      break;
+    default: {
+      const int64_t v = Int64FromNumber(val, d);
+      memcpy(slot, &v, sizeof(v));
+      break;
+    }
+  }
+}
+
 // ============================================================================
 // MarshalPrimitive - Shared by Call() and CallAsync()
 // Returns true if type was handled, false if not a primitive
 // ============================================================================
 
-CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalPrimitive(const Napi::Value& val, CType type, uint8_t* slot) {
+CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalPrimitive(const Napi::Value& val,
+                                                        CType type,
+                                                        uint8_t* slot,
+                                                        bool* memory) {
   switch (type) {
     case CType::CTYPES_INT32: {
-      int32_t v = Int32Arg(val);
-      memcpy(slot, &v, sizeof(v));
+      StoreArgument(slot, Int32Arg(val));
       return true;
     }
     case CType::CTYPES_UINT32: {
-      uint32_t v = Uint32Arg(val);
-      memcpy(slot, &v, sizeof(v));
+      StoreArgument(slot, Uint32Arg(val));
       return true;
     }
     case CType::CTYPES_INT64:
@@ -879,10 +1168,16 @@ CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalPrimitive(const Napi::Value& val, 
           // Estensione node-ctypes: Buffer/ArrayBuffer passano il loro indirizzo.
           if (val.IsBuffer()) {
             v = static_cast<int64_t>(reinterpret_cast<intptr_t>(val.As<Napi::Buffer<uint8_t>>().Data()));
+            if (memory != nullptr) {
+              *memory = true;
+            }
             break;
           }
           if (val.IsArrayBuffer()) {
             v = static_cast<int64_t>(reinterpret_cast<intptr_t>(val.As<Napi::ArrayBuffer>().Data()));
+            if (memory != nullptr) {
+              *memory = true;
+            }
             break;
           }
           ThrowNotNumeric(val, NumericKind::Integer);
@@ -898,8 +1193,7 @@ CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalPrimitive(const Napi::Value& val, 
       return true;
     }
     case CType::CTYPES_FLOAT: {
-      float v = static_cast<float>(DoubleArg(val));
-      memcpy(slot, &v, sizeof(v));
+      StoreArgument(slot, static_cast<float>(DoubleArg(val)));
       return true;
     }
     case CType::CTYPES_BOOL: {
@@ -907,48 +1201,39 @@ CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalPrimitive(const Napi::Value& val, 
       if (!napi_fast::TryBool(val, b)) {
         b = val.ToBoolean().Value();
       }
-      const uint8_t v = b ? 1 : 0;
-      memcpy(slot, &v, sizeof(v));
+      StoreArgument(slot, static_cast<uint8_t>(b ? 1 : 0));
       return true;
     }
     case CType::CTYPES_CHAR: {
-      uint8_t v = CharFromJS(val);
-      memcpy(slot, &v, sizeof(v));
+      StoreArgument(slot, static_cast<char>(CharFromJS(val)));
       return true;
     }
     case CType::CTYPES_WCHAR: {
-      const wchar_t v = WcharFromJS(val);
-      memcpy(slot, &v, sizeof(v));
+      StoreArgument(slot, WcharFromJS(val));
       return true;
     }
     case CType::CTYPES_INT8: {
-      int8_t v = static_cast<int8_t>(Int32Arg(val));
-      memcpy(slot, &v, sizeof(v));
+      StoreArgument(slot, static_cast<int8_t>(Int32Arg(val)));
       return true;
     }
     case CType::CTYPES_UINT8: {
-      uint8_t v = static_cast<uint8_t>(Uint32Arg(val));
-      memcpy(slot, &v, sizeof(v));
+      StoreArgument(slot, static_cast<uint8_t>(Uint32Arg(val)));
       return true;
     }
     case CType::CTYPES_INT16: {
-      int16_t v = static_cast<int16_t>(Int32Arg(val));
-      memcpy(slot, &v, sizeof(v));
+      StoreArgument(slot, static_cast<int16_t>(Int32Arg(val)));
       return true;
     }
     case CType::CTYPES_UINT16: {
-      uint16_t v = static_cast<uint16_t>(Uint32Arg(val));
-      memcpy(slot, &v, sizeof(v));
+      StoreArgument(slot, static_cast<uint16_t>(Uint32Arg(val)));
       return true;
     }
     case CType::CTYPES_LONG: {
-      long v = static_cast<long>(Int64Arg(val));
-      memcpy(slot, &v, sizeof(v));
+      StoreArgument(slot, static_cast<long>(Int64Arg(val)));
       return true;
     }
     case CType::CTYPES_ULONG: {
-      unsigned long v = static_cast<unsigned long>(Int64Arg(val));
-      memcpy(slot, &v, sizeof(v));
+      StoreArgument(slot, static_cast<unsigned long>(Int64Arg(val)));
       return true;
     }
     default:
@@ -1436,11 +1721,21 @@ ExtraCallCache* FFIFunction::AcquireExtraCall(size_t argc,
   entry.valid = false;
   entry.cif_prepared = false;
   entry.ResetPlan();
+  entry.frame = {};
   entry.ffi_types.clear();
   entry.total_args = argc;
   entry.extra_types.assign(extra_types.begin(), extra_types.end());
   entry.valid = true;
   return &entry;
+}
+
+template <ArgumentList Args>
+void FFIFunction::ThrowIfArgumentDetached(const Args& info, uint32_t memory) {
+  for (size_t i = 0; memory != 0; i++, memory >>= 1) {
+    if ((memory & 1) != 0 && IsDetachedView(info[i])) {
+      throw Napi::Error::New(info.Env(), std::format("argument {}: {}", i + 1, kDetachedArgumentMessage));
+    }
+  }
 }
 
 template <ArgumentList Args>
@@ -1456,8 +1751,15 @@ void FFIFunction::ThrowIfArgumentDetached(const Args& info) {
 // CallContext o scratch. Le stringhe corte vanno nel buffer
 // inline dell'istanza, come in Call(); una stringa che non ci sta e le chiamate
 // rientranti passano a Call() prima di qualunque effetto.
-template <ArgumentList Args, bool HasErrcheck>
-bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::Function* errcheck) {
+template <ArgumentList Args, bool HasErrcheck, bool Entry>
+bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::Function* errcheck, bool* needs_js) {
+  // Funzione d'ingresso: un argomento che solo il wrapper JS sa convertire.
+  const auto defer = [needs_js] {
+    if (needs_js != nullptr) {
+      *needs_js = true;
+    }
+    return false;
+  };
   // Chiamata rientrante: il buffer inline delle stringhe è della chiamata esterna.
   if (call_depth_ != 0) [[unlikely]] {
     return false;
@@ -1475,14 +1777,100 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
   std::array<CType, kMaxSimpleArgs> extra_types;
   const size_t num_extra = argc - expected_argc;
   size_t string_offset = 0;
+  // Stringhe che non stanno nel buffer inline: nello scratch riutilizzabile
+  // delle chiamate (scratch_.strings, come CallArguments), libero perché
+  // SimpleCall lavora solo fuori da una chiamata in corso e senza eseguire
+  // JavaScript prima dell'invocazione. Lo scratch può spostarsi crescendo: lo
+  // slot riceve intanto l'offset nello scratch (bit i di long_strings) e il
+  // puntatore dopo il ciclo. Nessun array: il frame di SimpleCall resta piccolo.
+  // Come in CallArguments, Reset applica il limite di ritenzione prima dell'uso
+  // dello scratch e mai dopo la chiamata C: il risultato (per esempio di strchr)
+  // può puntare dentro una stringa argomento, letta dalla conversione e
+  // dall'errcheck. La memoria resta valida fino al prossimo uso dello scratch.
+  uint32_t long_strings = 0;
+  size_t heap_offset = 0;
+  // Copia nello scratch dall'offset heap_offset; std::nullopt se il valore non
+  // è una stringa (TryCopyUtf8IfString non lo verifica con un buffer pieno).
+  const auto copy_long = [this, &heap_offset](const Napi::Value& val) -> std::optional<size_t> {
+    if (heap_offset == 0) {
+      scratch_.Reset();
+    }
+    std::vector<char>& buffer = scratch_.strings;
+    if (buffer.size() >= heap_offset + napi_fast::kMaxUtf8CharBytes + 2) {
+      bool is_string = false;
+      if (const auto copied = napi_fast::TryCopyUtf8IfString(val, std::span(buffer).subspan(heap_offset), is_string)) {
+        return copied;
+      }
+      if (!is_string) {
+        return std::nullopt;
+      }
+    }
+    const std::optional<size_t> length = napi_fast::Utf8LengthIfString(val);
+    if (!length) {
+      return std::nullopt;
+    }
+    const size_t needed = heap_offset + *length + napi_fast::kMaxUtf8CharBytes + 2;
+    if (buffer.size() < needed) {
+      // resize da solo può arrotondare la capacità oltre il limite di Reset.
+      buffer.reserve(needed);
+      buffer.resize(needed);
+    }
+    return napi_fast::TryCopyUtf8Into(val.As<Napi::String>(), std::span(buffer).subspan(heap_offset));
+  };
+  // Chiamata a registri: ogni argomento è convertito direttamente nella sua
+  // parola del frame (registro o slot di stack), senza slot intermedi.
+  const bool use_frame = frame_plan_.invoker != nullptr && num_extra == 0;
+  alignas(16) std::array<frame::Word, frame::kWords> frame_words;
+  if (use_frame) {
+    frame_plan_.Clear(frame_words.data());
+  }
+  // Argomenti che sono memoria JS (bit i): dopo un callback JS durante la
+  // chiamata solo questi possono essere stati staccati.
+  static_assert(kMaxSimpleArgs <= 32);
+  uint32_t memory_args = 0;
 
   for (size_t i = 0; i < argc; i++) {
-    uint8_t* slot = reinterpret_cast<uint8_t*>(slots.data()) + i * ARG_SLOT_SIZE;
+    uint8_t* slot =
+      use_frame ? frame_plan_.At(frame_words.data(), i) : reinterpret_cast<uint8_t*>(slots.data()) + i * ARG_SLOT_SIZE;
     values[i] = slot;
     Napi::Value val = info[i];
     CType type;
     if (i < expected_argc) [[likely]] {
       type = arg_types_[i];
+      // Funzione d'ingresso: solo i valori che il JavaScript passerebbe così
+      // come sono; un oggetto o una funzione va al wrapper JS (false).
+      if constexpr (Entry) {
+        if (IsNumericArgument(type)) {
+          if (double number; napi_fast::TryDouble(val, number)) [[likely]] {
+            try {
+              MarshalNumber(val, number, type, slot);
+            } catch (const Napi::Error& e) {
+              throw ArgumentErrorFor(env, i, e);
+            }
+            continue;
+          }
+          const napi_valuetype kind = val.Type();
+          if (kind == napi_object || kind == napi_function) {
+            return defer();
+          }
+          // BigInt per un intero: i bit troncati al tipo, come MarshalPrimitive.
+          if (kind == napi_bigint && type != CType::CTYPES_FLOAT && type != CType::CTYPES_DOUBLE) {
+            bool lossless;
+            MarshalIntegerBits(val.As<Napi::BigInt>().Uint64Value(&lossless), type, slot);
+            continue;
+          }
+        } else if (type == CType::CTYPES_BOOL) {
+          if (bool value; napi_fast::TryBool(val, value)) [[likely]] {
+            StoreArgument(slot, static_cast<uint8_t>(value ? 1 : 0));
+            continue;
+          }
+          if (IsObjectLike(val)) {
+            return defer();
+          }
+        } else if (type != CType::CTYPES_STRING && IsObjectLike(val)) {
+          return defer();
+        }
+      }
     } else {
       // Number variadico: tipo e valore da una sola lettura (il tipo dedotto
       // è esatto per il valore, quindi il cast non perde nulla).
@@ -1491,6 +1879,11 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
         extra_types[i - expected_argc] = type;
         StoreVariadicNumber(number, type, slot);
         continue;
+      }
+      if constexpr (Entry) {
+        if (IsObjectLike(val)) {
+          return defer();
+        }
       }
       const VariadicValue extra = InferVariadic(val);
       type = extra.type;
@@ -1501,19 +1894,26 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
       }
     }
     try {
-      if (MarshalPrimitive(val, type, slot)) [[likely]] {
+      if (bool memory = false; MarshalPrimitive(val, type, slot, &memory)) [[likely]] {
+        memory_args |= memory ? 1u << i : 0u;
         continue;
       }
-      // Struct per valore che sta in uno slot: solo i byte di una vista di
-      // memoria (il Buffer prodotto dal JS); il resto passa a Call().
+      // Struct per valore: solo i byte di una vista di memoria (il Buffer
+      // prodotto dal JS); il resto passa a Call(). Oltre uno slot libffi legge
+      // i byte dalla vista e li copia prima della chiamata, su ogni ABI.
       if (type == CType::CTYPES_STRUCT) {
         const size_t struct_size = arg_struct_infos_[i]->GetSize();
         size_t length = 0;
-        const void* data = napi_fast::TryViewData(val, &length);
+        void* data = napi_fast::TryViewData(val, &length);
         if (data == nullptr || length < struct_size) {
           return false;
         }
-        memcpy(slot, data, struct_size);
+        if (struct_size <= ARG_SLOT_SIZE) {
+          memcpy(slot, data, struct_size);
+        } else {
+          values[i] = data;
+        }
+        memory_args |= 1u << i;
         continue;
       }
       // Puntatori e stringhe con il minimo di chiamate a V8 (napi_typeof è
@@ -1525,12 +1925,41 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
       const size_t capacity = kInlineStringBufferSize - string_offset;
       bool is_string = false;
       std::optional<size_t> copied;
+      // Il tipo di valore visto l'ultima volta in questa posizione, letto per
+      // primo (pointer_hints_). La funzione d'ingresso accetta per c_char_p
+      // solo stringhe, null e undefined: lì vale solo il suggerimento null.
+      PointerHint& hint = pointer_hints_[i];
+      if (hint != PointerHint::kNone && (!Entry || hint == PointerHint::kNullish)) {
+        if (bool memory = false; HintedPointer(val, hint, ptr, memory)) {
+          memory_args |= memory ? 1u << i : 0u;
+          memcpy(slot, &ptr, sizeof(ptr));
+          continue;
+        }
+        hint = PointerHint::kNone;
+      }
       if (type == CType::CTYPES_STRING) {
         copied = napi_fast::TryCopyUtf8IfString(val, std::span(dest, capacity), is_string);
       }
+      if constexpr (Entry) {
+        // c_char_p: dal JavaScript passano solo stringhe, null e undefined.
+        if (type == CType::CTYPES_STRING && !is_string) {
+          const napi_valuetype kind = val.Type();
+          if (kind != napi_null && kind != napi_undefined) {
+            return defer();
+          }
+          hint = PointerHint::kNullish;
+          memcpy(slot, &ptr, sizeof(ptr));
+          continue;
+        }
+      }
       if (!is_string) {
         ptr = napi_fast::TryViewData(val);
-        if (ptr == nullptr) {
+        if (ptr != nullptr) {
+          memory_args |= 1u << i;
+          // c_void_p prova già per prima la vista: il suggerimento serve solo
+          // a c_char_p, che prova prima la copia della stringa.
+          hint = type == CType::CTYPES_STRING ? PointerHint::kView : PointerHint::kNone;
+        } else {
           const napi_valuetype kind = val.Type();
           if (kind == napi_string) {
             // Python: c_void_p accetta anche bytes/str.
@@ -1538,12 +1967,38 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
             copied = napi_fast::TryCopyUtf8Into(val.As<Napi::String>(), std::span(dest, capacity));
           } else {
             ptr = PointerArg(val, kind, type);
+            memory_args |= kind == napi_object ? 1u << i : 0u;
+            hint = kind == napi_bigint                           ? PointerHint::kBigInt
+                   : kind == napi_number                         ? PointerHint::kNumber
+                   : kind == napi_null || kind == napi_undefined ? PointerHint::kNullish
+                                                                 : PointerHint::kNone;
           }
         }
       }
       if (is_string) {
         if (!copied) {
-          return false;
+          const std::optional<size_t> heap = copy_long(val);
+          if (!heap) {
+            // Con il buffer inline pieno il tipo non era ancora verificato: per
+            // la funzione d'ingresso valgono le stesse regole di c_char_p sopra
+            // (un numero non è un indirizzo per il wrapper JS).
+            if constexpr (Entry) {
+              if (type == CType::CTYPES_STRING) {
+                const napi_valuetype kind = val.Type();
+                if (kind != napi_null && kind != napi_undefined) {
+                  return defer();
+                }
+                memcpy(slot, &ptr, sizeof(ptr));
+                continue;
+              }
+            }
+            return false;
+          }
+          static_assert(sizeof(heap_offset) == sizeof(void*));
+          memcpy(slot, &heap_offset, sizeof(heap_offset));
+          long_strings |= 1u << i;
+          heap_offset += *heap + 1;
+          continue;
         }
         string_offset += *copied + 1;
         ptr = dest;
@@ -1552,6 +2007,13 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
     } catch (const Napi::Error& e) {
       throw ArgumentErrorFor(env, i, e);
     }
+  }
+  for (uint32_t pending = long_strings; pending != 0; pending &= pending - 1) {
+    void* const slot = values[std::countr_zero(pending)];
+    size_t offset;
+    memcpy(&offset, slot, sizeof(offset));
+    const char* str = scratch_.strings.data() + offset;
+    memcpy(slot, &str, sizeof(str));
   }
 
   // Firma concreta dalla cache, con lo slot segnato in uso così
@@ -1572,17 +2034,28 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
   alignas(16) std::array<std::byte, kMaxSimpleStructReturn> return_storage{};
   void* const return_value = return_storage.data();
   const uint64_t epoch = CallbackEpoch();
+  const CTypesAddon::ScopelessCallbacks scopeless(addon_);
   const SavedErrorState saved_errors = SwapInErrorState();
   if (cache_entry == nullptr && fixed_invoker_) [[likely]] {
     fixed_invoker_(fn_ptr_, values.data(), return_value);
+  } else if (use_frame) {
+    frame_plan_.invoker(fn_ptr_, frame_words.data(), return_value);
+  } else if (cache_entry != nullptr && cache_entry->frame.invoker != nullptr) {
+    // Firma con argomenti dedotti: gli slot (parole intere, vedi
+    // StoreArgument) al loro posto nel frame.
+    cache_entry->frame.Clear(frame_words.data());
+    for (size_t i = 0; i < argc; i++) {
+      memcpy(cache_entry->frame.At(frame_words.data(), i), values[i], sizeof(frame::Word));
+    }
+    cache_entry->frame.invoker(fn_ptr_, frame_words.data(), return_value);
   } else if (cache_entry != nullptr) {
     InvokeLibffi(*cache_entry, fn_ptr_, return_value, values.data());
   } else {
     InvokeLibffi(*this, fn_ptr_, return_value, values.data());
   }
   CaptureErrorState(saved_errors);
-  if (CallbackEpoch() != epoch) [[unlikely]] {
-    ThrowIfArgumentDetached(info);
+  if (CallbackEpoch() != epoch && memory_args != 0) [[unlikely]] {
+    ThrowIfArgumentDetached(info, memory_args);
   }
 
   if (scalar_as_buffer_) {
@@ -1757,6 +2230,7 @@ Napi::Value FFIFunction::CallArguments(const FunctionArguments& info, const Napi
   // Altrimenti reusable call plan quando disponibile (fast path su x86-64;
   // fallback sicuro a ffi_call altrove e se l'allocazione del plan è fallita).
   const uint64_t epoch = CallbackEpoch();
+  const CTypesAddon::ScopelessCallbacks scopeless(addon_);
   if (cache_entry == nullptr && fixed_invoker_) [[likely]] {
     const SavedErrorState saved_errors = SwapInErrorState();
     fixed_invoker_(fn_ptr_, ctx.arg_values, ctx.return_ptr);

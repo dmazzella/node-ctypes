@@ -238,6 +238,35 @@ describe("native fixture", { skip: !existsSync(FIXTURE) && `${FIXTURE} not built
       assert.strictEqual(await rebound.callAsync(values), 8);
     });
 
+    // As CPython's Point.from_param(adapter): the _as_parameter_ getter of a
+    // plain object runs once per call, and its errors become ArgumentError.
+    it("reads an _as_parameter_ adapter once and normalizes its errors", async function () {
+      const Point = ctypes.struct({ x: c_int32, y: c_int32 });
+      const sum = lib.func("fixture_point_sum", c_int32, [Point]);
+      let reads = 0;
+      const adapter = {
+        get _as_parameter_() {
+          reads++;
+          return reads % 2 === 1 ? { x: 3, y: 4 } : { x: 30, y: 40 };
+        },
+      };
+      assert.strictEqual(sum(adapter), 7);
+      assert.strictEqual(reads, 1);
+      reads = 0;
+      assert.strictEqual(await sum.callAsync(adapter), 7);
+      assert.strictEqual(reads, 1);
+
+      const failure = new RangeError("adapter failed");
+      const failing = {
+        get _as_parameter_() {
+          throw failure;
+        },
+      };
+      const check = (error) => error instanceof ArgumentError && /argument 1: RangeError: adapter failed/.test(error.message) && error.cause === failure;
+      assert.throws(() => sum(failing), check);
+      await assert.rejects(async () => sum.callAsync(failing), check);
+    });
+
     it("keeps Structure subclass constructors in the conversion path", function () {
       let calls = 0;
       class Point extends Structure {

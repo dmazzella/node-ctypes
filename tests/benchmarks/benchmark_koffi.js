@@ -497,7 +497,7 @@ try {
     unsupported,
     notes: [
       "Both libraries call the same C fixture with matching native signatures.",
-      "Fixed sync/async bindings use direct invokers when enabled and eligible; all other signatures use libffi. Direct invokers are controlled at build time.",
+      "Sync bindings of scalars, pointers and strings use direct invokers or register-frame calls (AArch64, x86-64 System V, Win64) when enabled; aggregates and the other signatures use libffi. Both are controlled at build time. Fixed async bindings use direct invokers or libffi.",
       "CFUNCTYPE rows use independently bound functions to keep optimization feedback separate from direct-call rows.",
       "String lengths and the narrow/inferred-stack i64 results are normalized to Number; BigInt-to-Number conversion is included.",
       "Wide i64 values return BigInt in both APIs. Struct results are plain objects in both APIs.",

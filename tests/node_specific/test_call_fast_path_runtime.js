@@ -122,6 +122,57 @@ describe("CDLL.func conversion entry-point regressions", function () {
     });
   });
 
+  // The native call reads first the kind of value last seen at each pointer
+  // position; any other kind must still convert as the first time.
+  describe("pointer arguments whose kind of value changes between calls", { skip: !fixtureAvailable && "native fixture not built" }, function () {
+    it("c_void_p: Buffer, BigInt, Number, null, undefined, string, boolean", function () {
+      const address = fixture.func("fixture_address", ctypes.c_size_t, [ctypes.c_void_p]);
+      const buffer = Buffer.alloc(8);
+      const at = BigInt(ctypes.addressof(buffer));
+      const sequence = [
+        [buffer, at],
+        [buffer, at],
+        [0x1234n, 0x1234n],
+        [0x1234n, 0x1234n],
+        [4096, 4096n],
+        [4096, 4096n],
+        [null, 0n],
+        [null, 0n],
+        [undefined, 0n],
+        [buffer, at],
+        [0x5678n, 0x5678n],
+        [null, 0n],
+        [8192, 8192n],
+        [true, 1n],
+        [buffer, at],
+      ];
+      for (let round = 0; round < 2; round++) {
+        for (const [value, expected] of sequence) assert.strictEqual(address(value), expected, String(value));
+        const text = address("abc");
+        assert.ok(text !== 0n);
+      }
+      assert.throws(() => address(1.5), /cannot be interpreted as ctypes.c_void_p/);
+      assert.strictEqual(address(4096), 4096n);
+      assert.throws(() => address({}), /argument 1/);
+      assert.strictEqual(address(0x9abcn), 0x9abcn);
+    });
+
+    it("c_char_p: string, null, Buffer", function () {
+      const address = fixture.func("fixture_address", ctypes.c_size_t, [ctypes.c_char_p]);
+      const buffer = ctypes.create_string_buffer("xyz");
+      for (let round = 0; round < 3; round++) {
+        assert.ok(address("text") !== 0n);
+        assert.strictEqual(address(null), 0n);
+        assert.strictEqual(address(null), 0n);
+        assert.ok(address("text") !== 0n);
+        assert.strictEqual(address(buffer), BigInt(ctypes.addressof(buffer)));
+        assert.strictEqual(address(undefined), 0n);
+      }
+      assert.throws(() => address(5), /argument 1/);
+      assert.strictEqual(address(null), 0n);
+    });
+  });
+
   describe("strings that overflow the inline buffer", function () {
     it("single long string", function () {
       const strlen = libc.func("strlen", ctypes.c_size_t, [ctypes.c_char_p]);
@@ -187,6 +238,43 @@ describe("CDLL.func conversion entry-point regressions", function () {
       }
     });
 
+    // The string storage beyond the retention limit (10 MB) is released only
+    // before its next use: a result that points into an argument string is
+    // converted (and passed to errcheck) while that storage is still alive.
+    it("keeps string arguments alive for a result that points into them", function () {
+      const strchr = libc.func("strchr", ctypes.c_char_p, [ctypes.c_char_p, ctypes.c_int32]);
+      const y = "y".charCodeAt(0);
+      for (const size of [1024 * 1024, 11 * 1024 * 1024, 12 * 1024 * 1024, 700, 11 * 1024 * 1024]) {
+        const text = "a".repeat(size) + "yz";
+        assert.strictEqual(strchr(text, y), "yz", `${size} bytes`);
+      }
+      const checked = libc.func("strchr", ctypes.c_char_p, [ctypes.c_char_p, ctypes.c_int32]);
+      const seen = [];
+      checked.errcheck = (result) => {
+        seen.push(result);
+        return result;
+      };
+      for (const size of [11 * 1024 * 1024, 12 * 1024 * 1024]) {
+        assert.strictEqual(checked("b".repeat(size) + "yq", y), "yq");
+      }
+      assert.deepStrictEqual(seen, ["yq", "yq"]);
+
+      // errcheck calling the same function again with another long string.
+      let nested = 0;
+      checked.errcheck = (result) => {
+        if (nested++ === 0) assert.strictEqual(checked("c".repeat(12 * 1024 * 1024) + "yn", y), "yn");
+        return result;
+      };
+      assert.strictEqual(checked("d".repeat(11 * 1024 * 1024) + "yo", y), "yo");
+      assert.strictEqual(nested, 2);
+      checked.errcheck = null;
+
+      // An argument error after the long string was stored, then valid calls.
+      assert.throws(() => strchr("e".repeat(12 * 1024 * 1024), "y"), /argument 2/);
+      assert.strictEqual(strchr("ayb", y), "yb");
+      assert.strictEqual(strchr("f".repeat(11 * 1024 * 1024) + "yr", y), "yr");
+    });
+
     it("preserves wide-string alignment between heap-encoded UTF-8 arguments", { skip: !fixtureAvailable && "native fixture not built" }, async function () {
       const lengths = fixture.func("fixture_mixed_string_lengths", ctypes.c_size_t, [ctypes.c_char_p, ctypes.c_wchar_p, ctypes.c_char_p]);
       for (const count of [1000, 9000, 700]) {
@@ -204,6 +292,27 @@ describe("CDLL.func conversion entry-point regressions", function () {
       const abs = libc.func("abs", ctypes.c_int32, [ctypes.c_int32]);
       assert.throws(() => strcmp("q".repeat(1000), {}));
       assert.strictEqual(abs(-3), 3);
+    });
+
+    // 507 bytes leave the last 4 of the inline buffer: too few to read the next
+    // argument there, which may then be any value accepted by c_char_p.
+    it("converts any c_char_p value after a string that fills the inline buffer", { skip: !fixtureAvailable && "native fixture not built" }, async function () {
+      const lengths = fixture.func("fixture_string_lengths_nullable", ctypes.c_size_t, [ctypes.c_char_p, ctypes.c_char_p]);
+      const first = "f".repeat(507);
+      const buffer = ctypes.create_string_buffer("xyz");
+      for (let round = 0; round < 2; round++) {
+        assert.strictEqual(lengths(first, null), 507n);
+        assert.strictEqual(lengths(first, undefined), 507n);
+        assert.strictEqual(lengths(first, "ab"), 510n);
+        assert.strictEqual(lengths(first, "s".repeat(3000)), 3508n);
+        assert.strictEqual(lengths(first, buffer), 511n);
+        assert.strictEqual(lengths("t".repeat(5000), null), 5000n);
+        assert.strictEqual(lengths("t".repeat(5000), "u".repeat(700)), 5701n);
+        assert.strictEqual(await lengths.callAsync(first, null), 507n);
+        assert.strictEqual(await lengths.callAsync(first, "s".repeat(3000)), 3508n);
+      }
+      assert.throws(() => lengths(first, 5), /argument 2/);
+      assert.strictEqual(lengths("ab", null), 2n);
     });
   });
 

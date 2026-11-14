@@ -69,7 +69,7 @@ message(STATUS "Target architecture: ${FFI_ARCH}")
 message(STATUS "Building libffi from source...")
 add_subdirectory(${CMAKE_SOURCE_DIR}/third-party/libffi_cmake)
 
-option(CTYPES_ENABLE_DIRECT_CALLS "Enable the fixed-signature C++ direct invokers" ON)
+option(CTYPES_ENABLE_DIRECT_CALLS "Enable the fixed-signature C++ direct invokers and register-frame calls" ON)
 
 # ============================================================================
 # node-ctypes module

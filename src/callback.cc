@@ -2,6 +2,7 @@
 
 #include "addon.h"
 #include "call_abi.h"
+#include "napi_fast.h"
 #include "types.h"
 
 namespace ctypes {
@@ -25,7 +26,71 @@ uintptr_t NativeContextAddress(Napi::Env env, const Napi::Value& value) {
   return static_cast<uintptr_t>(address);
 }
 
+// Risultato numerico (interi, float, double) di un callback con una sola
+// lettura del number, come JSToC; false se non è un number o il tipo non è
+// numerico (allora JSToC).
+bool StoreNumberResult(const Napi::Value& result, CType type, void* destination) {
+  switch (type) {
+    case CType::CTYPES_INT8:
+    case CType::CTYPES_UINT8:
+    case CType::CTYPES_INT16:
+    case CType::CTYPES_UINT16:
+    case CType::CTYPES_INT32:
+    case CType::CTYPES_UINT32:
+    case CType::CTYPES_INT64:
+    case CType::CTYPES_UINT64:
+    case CType::CTYPES_FLOAT:
+    case CType::CTYPES_DOUBLE:
+      break;
+    default:
+      return false;
+  }
+  double d;
+  if (!napi_fast::TryDouble(result, d)) {
+    return false;
+  }
+  if (type == CType::CTYPES_DOUBLE) {
+    StoreReturnValue(destination, d);
+    return true;
+  }
+  if (type == CType::CTYPES_FLOAT) {
+    StoreReturnValue(destination, static_cast<float>(d));
+    return true;
+  }
+  const uint64_t bits = IntegerBitsFromNumber(result, d);
+  switch (type) {
+    case CType::CTYPES_INT8:
+      StoreReturnValue(destination, static_cast<int8_t>(bits));
+      break;
+    case CType::CTYPES_UINT8:
+      StoreReturnValue(destination, static_cast<uint8_t>(bits));
+      break;
+    case CType::CTYPES_INT16:
+      StoreReturnValue(destination, static_cast<int16_t>(bits));
+      break;
+    case CType::CTYPES_UINT16:
+      StoreReturnValue(destination, static_cast<uint16_t>(bits));
+      break;
+    case CType::CTYPES_INT32:
+      StoreReturnValue(destination, static_cast<int32_t>(static_cast<uint32_t>(bits)));
+      break;
+    case CType::CTYPES_UINT32:
+      StoreReturnValue(destination, static_cast<uint32_t>(bits));
+      break;
+    case CType::CTYPES_INT64:
+      StoreReturnValue(destination, static_cast<int64_t>(bits));
+      break;
+    default:
+      StoreReturnValue(destination, bits);
+      break;
+  }
+  return true;
+}
+
 bool StoreJSCallbackResult(const Napi::Value& result, CType type, void* destination) {
+  if (StoreNumberResult(result, type, destination)) [[likely]] {
+    return true;
+  }
   const size_t size = CTypeSize(type);
   if (ReturnStorageSize(type) == size) {
     return JSToC(result, type, std::span(static_cast<uint8_t*>(destination), size)) > 0;
@@ -34,7 +99,7 @@ bool StoreJSCallbackResult(const Napi::Value& result, CType type, void* destinat
   if (JSToC(result, type, std::span(bytes).first(size)) <= 0) {
     return false;
   }
-  StoreCallbackValue(type, bytes.data(), destination);
+  StoreNarrowIntegerValue(type, bytes.data(), destination);
   return true;
 }
 
@@ -177,7 +242,7 @@ void DispatchCallback(CallbackData* data, void* ret, void** args) {
   // Una Callback esegue JS solo sul thread che l'ha creata: chiamata da un
   // altro thread (es. una funzione C eseguita con callAsync che richiama il
   // puntatore) non può toccare V8. Per quei casi serve threadSafeCallback().
-  if (std::this_thread::get_id() != data->thread_id) [[unlikely]] {
+  if (CurrentThreadId() != data->thread_id) [[unlikely]] {
     {
       std::lock_guard<std::mutex> lock(data->error_mutex);
       data->last_error = "callback called from a thread other than the one that created it; use threadSafeCallback()";
@@ -192,7 +257,12 @@ void DispatchCallback(CallbackData* data, void* ret, void** args) {
 
   // Converti argomenti C -> JS
   Napi::Env env = data->js_function_ref.Env();
-  Napi::HandleScope scope(env);
+  // Dentro una chiamata nativa sincrona lo scope della chiamata esterna basta
+  // (ScopelessCallbacks); altrimenti, o finito il budget, uno scope proprio.
+  std::optional<Napi::HandleScope> scope;
+  if (!CTypesAddon::ScopelessCallbacks::Take(data->addon)) {
+    scope.emplace(env);
+  }
   const size_t nargs = data->arg_types.size();
 
   // SBO: usa stack buffer per callback comuni, heap solo se necessario
@@ -429,7 +499,10 @@ void InvokeThreadSafeCallback(Napi::Env env,
                               void* ret,
                               const char* default_error,
                               PendingCallbackCall* call = nullptr) {
-  Napi::HandleScope scope(env);
+  std::optional<Napi::HandleScope> scope;
+  if (!CTypesAddon::ScopelessCallbacks::Take(data->addon)) {
+    scope.emplace(env);
+  }
   if (data->addon != nullptr) {
     data->addon->callback_epoch++;
   }
@@ -583,7 +656,7 @@ void DispatchThreadSafeNative(ThreadSafeCallbackState* data, void* ret, void** a
     return;
   }
 
-  const bool host_thread = std::this_thread::get_id() == data->main_thread_id;
+  const bool host_thread = CurrentThreadId() == data->main_thread_id;
   if (host_thread && !data->native_context) {
     // Percorso veloce: chiamata diretta
     InvokeThreadSafeCallback(data->js_function_ref.Env(), data->js_function_ref.Value(), data, args, ret,

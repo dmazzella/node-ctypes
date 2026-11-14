@@ -77,6 +77,43 @@ describe("Library attribute lookup", function () {
     assert.equal(lib.fixture_scalar_i32, null);
   });
 
+  // As in Python, where __getattr__ stores the function on the instance.
+  it("lets assignment replace a looked-up function and delete forget it", function () {
+    const fn = lib.fixture_scalar_i32;
+    fn.argtypes = [c.c_int32];
+    fn.restype = c.c_int32;
+    assert.equal(lib.fixture_scalar_i32(5), 5);
+    lib.fixture_scalar_i32 = 42;
+    assert.equal(lib.fixture_scalar_i32, 42);
+    assert.ok("fixture_scalar_i32" in lib);
+    delete lib.fixture_scalar_i32;
+    const fresh = lib.fixture_scalar_i32;
+    assert.equal(typeof fresh, "function");
+    assert.notEqual(fresh, fn);
+    assert.deepEqual(fresh.argtypes, []);
+    assert.equal(lib.fixture_scalar_i32, fresh);
+    delete lib.fixture_scalar_i32;
+    assert.notEqual(lib.fixture_scalar_i32, fresh);
+  });
+
+  it("keeps attribute functions of a library with use_last_error", function () {
+    const tracked = new c.CDLL(FIXTURE, { use_last_error: true });
+    try {
+      const fn = tracked.fixture_scalar_i32;
+      fn.argtypes = [c.c_int32];
+      fn.restype = c.c_int32;
+      const direct = tracked.func("fixture_scalar_i32", c.c_int32, [c.c_int32]);
+      for (let i = 0; i < 3; i++) {
+        assert.equal(tracked.fixture_scalar_i32(i), i);
+        assert.equal(direct(-1 - i), -1 - i);
+      }
+      assert.equal(tracked.fixture_scalar_i32, fn);
+      assert.equal(typeof tracked.get_last_error(), "number");
+    } finally {
+      tracked.close();
+    }
+  });
+
   it("keeps missing symbols lazy and their wrappers cached after failure", function () {
     const missing = lib.__node_ctypes_missing_lookup_symbol__;
     assert.equal(typeof missing, "function");

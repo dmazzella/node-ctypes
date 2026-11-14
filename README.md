@@ -153,6 +153,16 @@ await executor.close(); // waits for the accepted calls, then stops the thread
 - Callbacks invoked during the call run on the executor thread: use
   `threadSafeCallback`, as with `callAsync`.
 
+An `Executor` also suits many short calls kept in flight. Each `callAsync()`
+queues its own libuv work item, which wakes a worker, and completes
+separately; the executor thread takes the next queued call without being
+woken and delivers the completed calls to JavaScript together. With several
+calls in flight this usually costs less than `callAsync()`: about a third on
+Windows, where waking a thread is expensive, less of a difference elsewhere.
+The calls then run one at a time: for short calls that is usually faster than
+spreading them over the libuv workers, but blocking calls that must overlap
+still need `callAsync()` or one executor each.
+
 ### Structs, unions, bit fields, arrays
 
 ```javascript
@@ -1048,7 +1058,7 @@ npm run bench:koffi                    # node-ctypes vs Koffi; Node 24+
 npm run bench:ffi                      # node-ctypes vs node:ffi; Node 26+
 ```
 
-The private test package explicitly approves the install script for Koffi 3.3.3.
+The private test package explicitly approves the install script for Koffi 3.3.8.
 When upgrading Koffi, review the new version before updating that approval with
 `npm --prefix tests install-scripts approve koffi`; future versions are not
 automatically authorized.
@@ -1139,14 +1149,27 @@ functional/parity test suite.
 
 ### Native backends and upstream libffi
 
-The maintained outgoing paths are the bounded C++ direct invokers and libffi.
-Callbacks use libffi closures and the shared Node-API bridge. The source tree
-stays flat, with backend-specific files prefixed where needed:
+The maintained outgoing paths are the bounded C++ direct invokers, register-frame
+calls and libffi. Register-frame calls cover any signature of scalars, pointers
+and strings up to 32 arguments on AArch64, x86-64 System V and Win64: each
+argument is converted straight into its register or stack word, and one C++
+signature per ABI passes the whole frame (on Apple ARM64 the stack arguments
+are packed by size and natural alignment, as the platform ABI requires).
+libffi remains for aggregates, other calling conventions
+and the remaining cases. `CDLL.func()` and prototype calls return the native
+function itself when the arguments need no JavaScript conversion (scalars,
+`c_char_p` strings), as Koffi does; objects, `errcheck` and the other
+signatures are forwarded to the JavaScript converters.
+Callbacks use libffi closures and the shared Node-API bridge; up to 64 callbacks
+running inside one synchronous call reuse its handle scope instead of opening
+their own. The source tree stays flat, with backend-specific files prefixed
+where needed:
 
 | Files                                                                                        | Responsibility                                                                              |
 | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | [call_abi.h](./src/call_abi.h), [types.h](./src/types.h)                                     | Shared calling conventions, ABI return words and scalar conversions, without libffi headers |
 | [direct_call.h](./src/direct_call.h)                                                         | Exact fixed-signature C++ invokers                                                          |
+| [frame_call.h](./src/frame_call.h)                                                           | Register-frame calls: argument placement per ABI and one C++ signature per return type      |
 | [libffi_types.cc](./src/libffi_types.cc), [libffi_types.h](./src/libffi_types.h)             | Primitive mapping and aggregate descriptor factories                                        |
 | [libffi_type_cache.h](./src/libffi_type_cache.h)                                             | Concrete owned aggregate cache used by layout metadata                                      |
 | [libffi_call.cc](./src/libffi_call.cc), [libffi_call.h](./src/libffi_call.h)                 | Calling conventions, CIFs, reusable plans and worker-owned extra-call interfaces            |
@@ -1195,8 +1218,9 @@ libffi, independently of the Node wrapper. Avoid this signature until an upstrea
 fix is available. Its regression is temporarily skipped only on Windows ARM64
 and still runs on other targets. Native calling behavior is unchanged.
 
-`CTYPES_ENABLE_DIRECT_CALLS` remains a build-time control, default ON. Fixed
-direct calls and workers need no CIF; unsupported fixed signatures use libffi,
+`CTYPES_ENABLE_DIRECT_CALLS` remains a build-time control, default ON, for both
+the direct invokers and the register-frame calls. Fixed direct calls and workers
+need no CIF; unsupported fixed signatures use libffi,
 and async inferred/variadic calls own CIFs prepared on the JavaScript thread.
 Workers retain the parent function, metadata and library through completion.
 To compare the direct-enabled and libffi-only builds, follow the

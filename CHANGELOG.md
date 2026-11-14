@@ -7,6 +7,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.13.0] - 2026-11-14
+
+### Changed
+
+- **Register-frame calls instead of libffi**: synchronous calls of any
+  signature of scalars, pointers and strings (up to 32 arguments) no longer go
+  through libffi on AArch64, x86-64 System V and Win64. Each argument is
+  converted straight into its register or stack word and one C++ signature per
+  ABI passes the frame; before, libffi handled every signature with a pointer
+  or a string and every one over four arguments. On x64 the call keeps the
+  variadic register setup of libffi (AL on System V, doubles mirrored in the
+  integer registers on Win64) for variadic functions declared with argtypes.
+  Functions without argtypes and, on x64, variadic arguments use it too. On
+  Apple ARM64 the stack arguments are packed by size and natural alignment,
+  as the platform ABI (and libffi) lay them out; variadic arguments there
+  stay with libffi.
+- **Native functions returned by `CDLL.func()` and prototypes**: when the
+  arguments need no JavaScript conversion (scalars, `c_char_p` strings) the
+  returned function is the native one, as in Koffi, instead of a JavaScript
+  wrapper; calls with objects (`CData` instances, buffers for `c_char_p`,
+  `_as_parameter_`), with `errcheck` and the other signatures go to the
+  JavaScript converters as before. The JavaScript wrappers shared V8 feedback
+  across all functions, which made calls slower in programs using many of them.
+  Visible differences for `CDLL.func()`: the function's `length` is 0 (it was
+  the number of `argtypes` up to six) and its `name` is the C function's;
+  `Function.prototype.toString` shows `[native code]` (prototypes too). Its
+  properties (`errcheck`, `callAsync`, `callOn`, `address`, ...) are unchanged.
+- **Fast path up to 32 arguments** (it was 8), reading the arguments with a
+  capacity close to the declared signature (2, 4 or 8); primitive arguments
+  pass through the JavaScript wrapper without conversion or copies.
+- **Faster struct arguments**: structs passed by value take the fast path at
+  any size (it was up to 16 bytes); libffi copies their bytes from the buffer
+  before the call, as the general path did. A plain object of field values
+  skips the generic parameter probes and the struct's Buffer is passed without
+  a second conversion; `create`/`set` overrides, getters and field validation
+  are unchanged. A `{x, y}` argument is about 20% faster, a four-double HFA
+  argument about 30%.
+- **Faster attribute calls** (`lib.name(...)`): a function already looked up
+  is found with one lookup, before the library's own properties, and its
+  arguments are forwarded without a rest array; a call through the attribute
+  is about 30% faster. As in Python, where `__getattr__` stores the function
+  on the library, a property defined later with the same name still replaces
+  it, and `delete lib.name` now forgets the function: the next access returns
+  a new one with no `argtypes`/`restype` (before, the same function).
+- **Faster long string arguments**: strings that do not fit the 512-byte inline
+  buffer are encoded straight into the reusable scratch of the function in the
+  fast path, instead of retrying the conversion in the general path (three
+  partial copies before the complete one). Strings of 600 bytes are about 30%
+  faster, of 4 KB about 10-15%.
+- **Faster pointer arguments**: each pointer position remembers the kind of
+  value it received last (BigInt, Number, `null`/`undefined`, or a buffer for
+  `c_char_p`) and reads that kind first, with one call to V8 instead of three;
+  another kind takes the full conversion as before. An address passed as a
+  BigInt or a Number is about 15-20% faster, `null` 5-10%.
+- **Faster callbacks**: up to 64 callbacks running inside one synchronous call
+  reuse its handle scope instead of opening one each (`napi_open_handle_scope`
+  allocates); numeric results are converted with one read; after a callback,
+  only the arguments that are JavaScript memory are checked for detachment.
+
+### Fixed
+
+- **gcc `-Wstringop-overread` warning** in the conversion of callback results:
+  the helper that widens a narrow integer result was also instantiated for the
+  types that fill the whole return word, and gcc 13 saw a read past the end of
+  the value. Narrow results now have their own helper
+  (`StoreNarrowIntegerValue`).
+- **Flaky Executor test**: the coalescing test counted deliveries while the
+  executor thread was still completing the burst, so a loaded machine produced
+  more deliveries without any defect. Each call of the burst now marks its own
+  byte and the JavaScript thread waits for every mark before yielding; the test
+  fails with one delivery per call when coalescing is disabled.
+- README: the Koffi version approved for the comparison benchmarks is 3.3.8.
+
+### Added
+
+- README: an `Executor` for many short calls kept in flight, with the reasons
+  and the limits (one call at a time).
+- Regression tests: many and nested callbacks in one call, out-of-range and
+  non-finite Number results of integer callbacks, pointer arguments whose kind
+  of value changes between calls, `_as_parameter_` adapters of structure
+  arguments read once with their errors normalized, assignment and `delete` of
+  library attributes, attribute functions with `use_last_error`, strings
+  that fill the inline buffer followed by any `c_char_p` value, and results
+  that point into long string arguments (with `errcheck` and reentrant
+  calls); test fixture function `fixture_string_lengths_nullable`.
+
 ## [2.12.2] - 2026-11-11
 
 ### Fixed
@@ -1310,7 +1396,8 @@ It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-
 
 Initial releases.
 
-[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.12.2...HEAD
+[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.13.0...HEAD
+[2.13.0]: https://github.com/dmazzella/node-ctypes/compare/v2.12.2...v2.13.0
 [2.12.2]: https://github.com/dmazzella/node-ctypes/compare/v2.12.1...v2.12.2
 [2.12.1]: https://github.com/dmazzella/node-ctypes/compare/v2.12.0...v2.12.1
 [2.12.0]: https://github.com/dmazzella/node-ctypes/compare/v2.11.1...v2.12.0

@@ -40,6 +40,14 @@ uint64_t IntegerBits(const Napi::Value& value) {
     throw Napi::TypeError::New(value.Env(),
                                std::format("'{}' object cannot be interpreted as an integer", JSTypeName(value)));
   }
+  return IntegerBitsFromNumber(value, d);
+}
+
+}  // namespace
+
+uint64_t IntegerBitsFromNumber(const Napi::Value& value, double d) {
+  // Il cast solo dopo il controllo del range: fuori range (NaN e infiniti
+  // compresi) la conversione sarebbe indefinita.
   if (d >= -9223372036854775808.0 && d < 9223372036854775808.0) {
     if (const auto v = static_cast<int64_t>(d); static_cast<double>(v) == d) {
       return static_cast<uint64_t>(v);
@@ -47,8 +55,6 @@ uint64_t IntegerBits(const Napi::Value& value) {
   }
   return IntegerBitsFromDouble(value, d);
 }
-
-}  // namespace
 
 uint64_t IntegerBitsFromDouble(const Napi::Value& value, double d) {
   if (!std::isfinite(d) || d != std::trunc(d)) {

@@ -362,9 +362,13 @@ describe("Executor spin", function () {
 });
 
 describe("Executor completion notifications", function () {
+  // Each call of the burst marks its own byte from the executor thread. The
+  // JavaScript thread waits for every mark without yielding, so all the
+  // completions are queued before any delivery can run: however slow the
+  // machine, coalescing must then deliver them together, not one by one.
   it("coalesces the notifications of a burst, completing each call once and in order", async function () {
     const { createHook } = await import("node:async_hooks");
-    const { threadId } = threadApi();
+    const memset = new CDLL(LIBC).func("memset", c_void_p, [c_void_p, c_int32, c_size_t]);
     const executor = new Executor({ spin: 0 });
     const resources = new Set();
     let deliveries = 0;
@@ -376,13 +380,21 @@ describe("Executor completion notifications", function () {
         if (resources.has(asyncId)) deliveries++;
       },
     }).enable();
+    const count = 2000;
+    const marks = Buffer.alloc(count);
+    const base = BigInt(ctypes.addressof(marks));
     try {
-      await threadId.callOn(executor);
+      await memset.callOn(executor, marks, 0, 1);
       deliveries = 0;
       const order = [];
-      const calls = Array.from({ length: 2000 }, (_, index) => threadId.callOn(executor).then(() => order.push(index)));
+      const calls = Array.from({ length: count }, (_, index) => memset.callOn(executor, base + BigInt(index), 1, 1).then(() => order.push(index)));
+      const deadline = Date.now() + 60_000;
+      for (let next = 0; next < count;) {
+        if (Atomics.load(marks, next) === 1) next++;
+        else assert.ok(Date.now() < deadline, `executor marked ${next} of ${count} calls`);
+      }
       await Promise.all(calls);
-      // Let notifications still queued (one per call before coalescing) arrive.
+      // Without coalescing, notifications posted per call would still arrive.
       await new Promise((resolve) => setTimeout(resolve, 100));
       assert.deepStrictEqual(
         order,
@@ -390,7 +402,7 @@ describe("Executor completion notifications", function () {
         "each call completed once, in order",
       );
       assert.strictEqual(executor.pending, 0);
-      assert.ok(deliveries < 200, `${deliveries} deliveries for 2000 calls`);
+      assert.ok(deliveries <= 2, `${deliveries} deliveries for ${count} calls`);
     } finally {
       hook.disable();
       await executor.close();

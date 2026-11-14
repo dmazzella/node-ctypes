@@ -36,7 +36,45 @@ class CTypesAddon : public Napi::Addon<CTypesAddon> {
   CTypesAddon(Napi::Env env, Napi::Object exports);
   ~CTypesAddon();
 
+  // Per la durata di una chiamata nativa sincrona dal thread JS (SimpleCall,
+  // Call): i callback JS eseguiti dentro la chiamata creano i loro handle nello
+  // scope V8 della chiamata esterna invece di aprirne uno (napi_open_handle_scope
+  // alloca a ogni apertura), fino a kBudget callback, così che un ciclo C lungo
+  // non accumuli handle. Una chiamata annidata (da un callback) ha il suo budget.
+  // Solo questa classe tocca il contatore (scopeless_callbacks_).
+  class ScopelessCallbacks {
+   public:
+    static constexpr uint32_t kBudget = 64;
+    explicit ScopelessCallbacks(CTypesAddon* addon) noexcept
+      : addon_(addon), saved_(addon != nullptr ? std::exchange(addon->scopeless_callbacks_, kBudget) : 0) {}
+    ~ScopelessCallbacks() {
+      if (addon_ != nullptr) {
+        addon_->scopeless_callbacks_ = saved_;
+      }
+    }
+    ScopelessCallbacks(const ScopelessCallbacks&) = delete;
+    ScopelessCallbacks& operator=(const ScopelessCallbacks&) = delete;
+
+    // Dal thread JS, nel callback: true se può usare lo scope della chiamata
+    // esterna (e ne consuma il budget), false se deve aprirne uno.
+    [[nodiscard]] static bool Take(CTypesAddon* addon) noexcept {
+      if (addon == nullptr || addon->scopeless_callbacks_ == 0) {
+        return false;
+      }
+      addon->scopeless_callbacks_--;
+      return true;
+    }
+
+   private:
+    CTypesAddon* addon_;
+    uint32_t saved_;
+  };
+
  private:
+  // Callback JS che possono ancora usare lo scope degli handle della chiamata
+  // nativa sincrona in corso (ScopelessCallbacks).
+  uint32_t scopeless_callbacks_ = 0;
+
   // Helper functions esportate (metodi membro per InstanceMethod)
   Napi::Value LoadLibrary(const Napi::CallbackInfo& info);
   Napi::Value Alloc(const Napi::CallbackInfo& info);
