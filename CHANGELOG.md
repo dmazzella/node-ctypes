@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.13.1] - 2026-11-14
+
 ### Fixed
 
 - **Argument conversion order through the JavaScript wrapper**: as in CPython,
@@ -36,7 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the test needs. Each attempt now uses a new executor with the longest wait,
   started with another function, and a fresh event loop turn; when the machine
   is so loaded that the executor thread never runs within 10 ms, the test is
-  skipped with that reason instead of failing.
+  skipped with that reason instead of failing. The attempts stop after 3 s, so
+  the skip comes within the 5 s test timeout; a second test checks that the
+  attempts without inline completions (`spin: 0`) stop at their time budget.
 
 ## [2.13.0] - 2026-11-14
 
@@ -1427,7 +1431,8 @@ It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-
 
 Initial releases.
 
-[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.13.0...HEAD
+[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.13.1...HEAD
+[2.13.1]: https://github.com/dmazzella/node-ctypes/compare/v2.13.0...v2.13.1
 [2.13.0]: https://github.com/dmazzella/node-ctypes/compare/v2.12.2...v2.13.0
 [2.12.2]: https://github.com/dmazzella/node-ctypes/compare/v2.12.1...v2.12.2
 [2.12.1]: https://github.com/dmazzella/node-ctypes/compare/v2.12.0...v2.12.1

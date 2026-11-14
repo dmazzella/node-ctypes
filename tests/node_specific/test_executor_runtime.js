@@ -494,17 +494,19 @@ describe("Executor call identity", function () {
   // The defect needs an inline completion. On a loaded machine an inline wait
   // can expire, and each expired wait makes the executor skip the next waits
   // of that function (per-executor backoff); the 1 ms of inline completions per
-  // event loop turn can also be spent. So each attempt uses a new executor with
-  // the longest wait (10 ms), started with another function so that the
-  // measured one has no history, and a fresh event loop turn. When every wait
-  // still expires (more busy threads than cores, as with many test files in
-  // parallel) the scenario cannot be produced: the test is skipped, not failed.
-  it("cancels only its own call, also after an inline completion whose errcheck queued others", async function (t) {
+  // event loop turn can also be spent. So each attempt uses a new executor,
+  // started with another function so that the measured one has no history, and
+  // a fresh event loop turn. Attempts stop at `budget` milliseconds: an attempt
+  // without inline completion waits for a 100 ms call, and the suite runs with
+  // a 5 s timeout.
+  async function cancelAfterInlineCompletion(options, budget) {
     const { sleep, ms, threadId } = threadApi();
-    let checked = false;
+    const deadline = Date.now() + budget;
+    let attempts = 0;
     try {
-      for (let attempt = 0; attempt < 50 && !checked; attempt++) {
-        const executor = new Executor({ spin: 10_000, spinLimit: 10_000 });
+      while (attempts < 50 && Date.now() < deadline) {
+        attempts++;
+        const executor = new Executor(options);
         try {
           await sleep.callOn(executor, 0);
           // The turn marker is delivered in the poll phase, before setImmediate runs.
@@ -532,16 +534,35 @@ describe("Executor call identity", function () {
           await outer;
           await assert.doesNotReject(blocking, "the blocking call queued by errcheck");
           await assert.doesNotReject(behind, "the call queued behind it");
-          checked = true;
+          return { checked: true, attempts };
         } finally {
           threadId.errcheck = null;
           await executor.close();
         }
       }
-      if (!checked) t.skip("no inline completion in 50 attempts: the executor thread never ran within 10 ms");
+      return { checked: false, attempts };
     } finally {
       threadId.errcheck = null;
     }
+  }
+
+  // When every wait still expires (more busy threads than cores, as with many
+  // test files in parallel) the scenario cannot be produced: the test is
+  // skipped, within the suite timeout, not failed.
+  it("cancels only its own call, also after an inline completion whose errcheck queued others", async function (t) {
+    const { checked, attempts } = await cancelAfterInlineCompletion({ spin: 10_000, spinLimit: 10_000 }, 3000);
+    if (!checked) t.skip(`no inline completion in ${attempts} attempts within 3 s: the executor thread never ran within 10 ms`);
+  });
+
+  // The branch without inline completions (spin: 0 never waits inline) stops
+  // at its time budget instead of running into the test timeout.
+  it("stops the inline cancellation attempts at their time budget", async function () {
+    const started = Date.now();
+    const { checked, attempts } = await cancelAfterInlineCompletion({ spin: 0 }, 300);
+    const elapsed = Date.now() - started;
+    assert.strictEqual(checked, false);
+    assert.ok(attempts >= 1, `${attempts} attempts`);
+    assert.ok(elapsed < 3000, `${elapsed} ms for a 300 ms budget`);
   });
 
   it("does not run a call whose signal is aborted while its arguments are prepared", async function () {
