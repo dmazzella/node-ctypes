@@ -158,6 +158,65 @@ describe("TestAsParameter", function () {
     }
   });
 
+  it("test_invalid_argument_stops_before_later_adapters", function () {
+    // Each argument is converted (from_param, then the C value) before the
+    // next one: an invalid argument fails before a later adapter runs.
+    const log = [];
+    const logged = () => ({
+      get _as_parameter_() {
+        log.push("getter");
+        return 7;
+      },
+    });
+    for (const [argtype, invalid] of [
+      [c.c_int32, 1.5],
+      [c.c_int32, null],
+      [c.c_int32, {}],
+      [c.c_double, null],
+      [c.c_char, null],
+    ]) {
+      for (const checked of [false, true]) {
+        const fn = c.CFUNCTYPE(c.c_int32, argtype, c.c_int32)(["fixture_benchmark_zero", lib]);
+        if (checked) fn.errcheck = (result) => result;
+        assert.throws(
+          () => fn(invalid, logged()),
+          (error) => error instanceof c.ArgumentError && /^argument 1: TypeError: /.test(error.message),
+        );
+      }
+    }
+    assert.deepEqual(log, []);
+    const fn = c.CFUNCTYPE(c.c_int32, c.c_int32, c.c_int32)(["fixture_benchmark_zero", lib]);
+    fn(1, logged());
+    assert.deepEqual(log, ["getter"]);
+  });
+
+  it("test_missing_arguments_reported_before_conversion", function () {
+    // Too few arguments: TypeError for the arity, not an ArgumentError for
+    // an invalid first value.
+    for (const argtype of [c.c_int32, c.c_double, c.c_char]) {
+      const fn = c.CFUNCTYPE(c.c_int32, argtype, c.c_int32)(["fixture_benchmark_zero", lib]);
+      assert.throws(
+        () => fn(1.5),
+        (error) => error instanceof TypeError && !(error instanceof c.ArgumentError),
+      );
+    }
+  });
+
+  it("test_char_from_mutable_memory_converted_before_later_adapters", function () {
+    // The c_char value is taken when its argument is converted: a later
+    // adapter changing the source does not change what C receives.
+    const source = Buffer.from("A");
+    const mutating = {
+      get _as_parameter_() {
+        source[0] = 66;
+        return 0;
+      },
+    };
+    const fn = c.CFUNCTYPE(c.c_int32, c.c_char, c.c_int32)(["fixture_promote_u8", lib]);
+    assert.equal(fn(source, mutating), 65);
+    assert.deepEqual(source, Buffer.from("B"));
+  });
+
   it("test_finite_adapter_chains", function () {
     for (const count of [128, 129, 256]) {
       let value = 7;
@@ -268,12 +327,7 @@ describe("TestAsParameter", function () {
   });
 
   it("test_argument_conversion_order_and_failure", function () {
-    const expected = [
-      "from_param 0", "parameter 0",
-      "from_param 1", "parameter 1",
-      "from_param 2", "parameter 2",
-      "from_param 3", "parameter 3",
-    ];
+    const expected = ["from_param 0", "parameter 0", "from_param 1", "parameter 1", "from_param 2", "parameter 2", "from_param 3", "parameter 3"];
     for (const stage of [null, "from_param", "parameter"]) {
       for (let failure = 0; failure < (stage === null ? 1 : 4); failure++) {
         const events = [];
@@ -369,7 +423,10 @@ describe("TestAsParameter", function () {
           () => fn(0, 1, 2, 3),
           (error) => error instanceof c.ArgumentError && error !== sentinel && error.message === `argument ${failure + 1}: ArgumentError: adapter sentinel`,
         );
-        assert.deepEqual(calls, Array.from({ length: failure + 1 }, (_, index) => index));
+        assert.deepEqual(
+          calls,
+          Array.from({ length: failure + 1 }, (_, index) => index),
+        );
       }
     }
   });

@@ -97,6 +97,8 @@ class CTypesAddon : public Napi::Addon<CTypesAddon> {
   Napi::Value GetCapturedErrno(const Napi::CallbackInfo& info);
   Napi::Value SetCapturedErrno(const Napi::CallbackInfo& info);
   Napi::Value SetArgumentError(const Napi::CallbackInfo& info);
+  // checkArgument(index, type, value): FFIFunction::CheckArgument.
+  Napi::Value CheckArgument(const Napi::CallbackInfo& info);
 };
 
 }  // namespace ctypes

@@ -153,6 +153,54 @@ class TestAsParameter(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(c.ArgumentError):
                 self.integer(Adapter(value))
 
+    def test_invalid_argument_stops_before_later_adapters(self):
+        # Each argument is converted (from_param, then the C value) before the
+        # next one: an invalid argument fails before a later adapter runs.
+        log = []
+
+        class Logged:
+            @property
+            def _as_parameter_(self):
+                log.append("getter")
+                return 7
+
+        for argtype, invalid in ((c.c_int32, 1.5), (c.c_int32, None), (c.c_int32, {}), (c.c_double, None), (c.c_char, None)):
+            for checked in (False, True):
+                fn = c.CFUNCTYPE(c.c_int32, argtype, c.c_int32)(("fixture_benchmark_zero", self.lib))
+                if checked:
+                    fn.errcheck = lambda result, func, args: result
+                with self.subTest(argtype=argtype, value=invalid, errcheck=checked), self.assertRaisesRegex(c.ArgumentError, "^argument 1: TypeError: "):
+                    fn(invalid, Logged())
+        self.assertEqual(log, [])
+        fn = c.CFUNCTYPE(c.c_int32, c.c_int32, c.c_int32)(("fixture_benchmark_zero", self.lib))
+        fn(1, Logged())
+        self.assertEqual(log, ["getter"])
+
+    def test_missing_arguments_reported_before_conversion(self):
+        # Too few arguments: TypeError for the arity, not an ArgumentError for
+        # an invalid first value.
+        for argtype in (c.c_int32, c.c_double, c.c_char):
+            fn = c.CFUNCTYPE(c.c_int32, argtype, c.c_int32)(("fixture_benchmark_zero", self.lib))
+            with self.subTest(argtype=argtype):
+                with self.assertRaises(TypeError) as raised:
+                    fn(1.5)
+                self.assertNotIsInstance(raised.exception, c.ArgumentError)
+
+    def test_char_from_mutable_memory_converted_before_later_adapters(self):
+        # The c_char value is taken when its argument is converted: a later
+        # adapter changing the source does not change what C receives.
+        source = bytearray(b"A")
+
+        class Mutating:
+            @property
+            def _as_parameter_(self):
+                source[0] = 66
+                return 0
+
+        fn = c.CFUNCTYPE(c.c_int32, c.c_char, c.c_int32)(("fixture_promote_u8", self.lib))
+        self.assertEqual(fn(source, Mutating()), 65)
+        self.assertEqual(source, bytearray(b"B"))
+
     def test_finite_adapter_chains(self):
         for count in [128, 129, 256]:
             value = 7

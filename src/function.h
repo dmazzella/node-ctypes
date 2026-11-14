@@ -204,6 +204,15 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
                                                     CType type,
                                                     uint8_t* slot,
                                                     bool* memory = nullptr);
+  // Converte l'argomento `index` di tipo scalare come la chiamata, senza
+  // eseguirla: ArgumentError se la chiamata lo rifiuterebbe. Non esegue
+  // JavaScript (nessun valueOf). Il wrapper JS converte così ogni argomento
+  // prima del successivo, come Python (from_param e conversione in C per
+  // argomento). Restituisce il valore C come primitivo JS, che la chiamata
+  // riconverte allo stesso valore: la conversione è completa anche se codice
+  // eseguito dopo modifica l'originale (un Buffer per c_char). La memoria
+  // passata per indirizzo (Buffer per un intero a 64 bit) resta il valore originale.
+  [[nodiscard]] static Napi::Value CheckArgument(Napi::Env env, size_t index, CType type, const Napi::Value& val);
   [[nodiscard]] static bool MarshalStructArg(Napi::Env env,
                                              const Napi::Value& val,
                                              size_t arg_index,

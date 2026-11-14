@@ -490,6 +490,76 @@ CTYPES_ALWAYS_INLINE Napi::Value FFIFunction::InvokeCall(const Args& args, const
   return CallArguments(FunctionArguments{args}, errcheck);
 }
 
+Napi::Value FFIFunction::CheckArgument(Napi::Env env, size_t index, CType type, const Napi::Value& val) {
+  alignas(16) std::array<uint8_t, ARG_SLOT_SIZE> slot{};
+  bool memory = false;
+  try {
+    if (!MarshalPrimitive(val, type, slot.data(), &memory) || memory) {
+      return val;
+    }
+  } catch (const Napi::Error& e) {
+    throw ArgumentErrorFor(env, index, e);
+  }
+  // Il valore è nei primi byte dello slot (StoreArgument: parola estesa in
+  // little-endian, il valore stesso altrimenti).
+  const auto load = [&slot]<typename T>(std::type_identity<T>) {
+    T value;
+    memcpy(&value, slot.data(), sizeof(T));
+    return value;
+  };
+  const auto integer = [&]<typename T>(std::type_identity<T> tag) -> Napi::Value {
+    const T value = load(tag);
+    if constexpr (sizeof(T) == sizeof(int64_t)) {
+      if constexpr (std::is_signed_v<T>) {
+        return Napi::BigInt::New(env, static_cast<int64_t>(value));
+      } else {
+        return Napi::BigInt::New(env, static_cast<uint64_t>(value));
+      }
+    } else {
+      return Napi::Number::New(env, static_cast<double>(value));
+    }
+  };
+  switch (type) {
+    case CType::CTYPES_INT8:
+      return integer(std::type_identity<int8_t>{});
+    case CType::CTYPES_UINT8:
+      return integer(std::type_identity<uint8_t>{});
+    case CType::CTYPES_INT16:
+      return integer(std::type_identity<int16_t>{});
+    case CType::CTYPES_UINT16:
+      return integer(std::type_identity<uint16_t>{});
+    case CType::CTYPES_INT32:
+      return integer(std::type_identity<int32_t>{});
+    case CType::CTYPES_UINT32:
+      return integer(std::type_identity<uint32_t>{});
+    case CType::CTYPES_INT64:
+      return integer(std::type_identity<int64_t>{});
+    case CType::CTYPES_UINT64:
+      return integer(std::type_identity<uint64_t>{});
+    case CType::CTYPES_SSIZE_T:
+      return integer(std::type_identity<ssize_t>{});
+    case CType::CTYPES_SIZE_T:
+      return integer(std::type_identity<size_t>{});
+    case CType::CTYPES_LONG:
+      return integer(std::type_identity<long>{});
+    case CType::CTYPES_ULONG:
+      return integer(std::type_identity<unsigned long>{});
+    case CType::CTYPES_FLOAT:
+      return Napi::Number::New(env, load(std::type_identity<float>{}));
+    case CType::CTYPES_DOUBLE:
+      return Napi::Number::New(env, load(std::type_identity<double>{}));
+    case CType::CTYPES_BOOL:
+      return Napi::Boolean::New(env, load(std::type_identity<uint8_t>{}) != 0);
+    case CType::CTYPES_CHAR:
+      // Il byte come intero in range(256), accettato da c_char.
+      return Napi::Number::New(env, load(std::type_identity<uint8_t>{}));
+    case CType::CTYPES_WCHAR:
+      return Napi::Number::New(env, static_cast<double>(load(std::type_identity<wchar_t>{})));
+    default:
+      return val;
+  }
+}
+
 // Firme semplici senza errcheck: argomenti letti con una sola napi_get_cb_info
 // e SimpleCall diretta. Il resto (più argomenti, errcheck, rientranza) passa
 // a CallFromInfo, che rilegge gli argomenti. Fuori da

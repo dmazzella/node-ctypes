@@ -104,6 +104,7 @@ CTypesAddon::CTypesAddon(Napi::Env env, Napi::Object exports) {
                          InstanceMethod("getCapturedErrno", &CTypesAddon::GetCapturedErrno),
                          InstanceMethod("setCapturedErrno", &CTypesAddon::SetCapturedErrno),
                          InstanceMethod("setArgumentError", &CTypesAddon::SetArgumentError),
+                         InstanceMethod("checkArgument", &CTypesAddon::CheckArgument),
 
                          // CType enum - single source of truth per i tipi
                          InstanceValue("CType", CreateCType(env), napi_enumerable),
@@ -688,6 +689,14 @@ Napi::Value CTypesAddon::SetArgumentError(const Napi::CallbackInfo& info) {
     argument_error_ctor = Napi::Persistent(info[0].As<Napi::Function>());
   }
   return info.Env().Undefined();
+}
+
+Napi::Value CTypesAddon::CheckArgument(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  if (info.Length() < 3 || !info[0].IsNumber()) {
+    throw Napi::TypeError::New(env, "checkArgument(index, type, value)");
+  }
+  return FFIFunction::CheckArgument(env, info[0].As<Napi::Number>().Uint32Value(), CTypeFromJS(info[1]), info[2]);
 }
 
 Napi::Value CTypesAddon::SetCapturedErrno(const Napi::CallbackInfo& info) {

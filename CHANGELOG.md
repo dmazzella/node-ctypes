@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Argument conversion order through the JavaScript wrapper**: as in CPython,
+  where each argument goes through `from_param` and its C conversion before
+  the next one, a scalar argument the native call rejects now fails before the
+  converters of the later arguments run. Before, with `errcheck`,
+  `use_last_error`/`use_errno`, `callAsync` or an object among the
+  arguments, the `_as_parameter_` getters and `from_param` of the later
+  arguments ran first and the error came afterwards. Values the call accepts
+  as they are (integral numbers, booleans and BigInts for integers, numbers for
+  floats, one-character strings for `c_char`/`c_wchar`) are checked in
+  JavaScript; the others, objects included, by the native conversion itself
+  (`checkArgument`), so the rules and the `ArgumentError` messages are those
+  of the call. The native check returns the converted C value, so the
+  conversion is complete before the next argument: a later adapter changing a
+  Buffer passed to `c_char` no longer changes what C receives (as a
+  `bytearray` in CPython); memory passed by address (a Buffer for a 64-bit
+  integer) stays the original value. Scalar `CType` numbers as argtypes follow
+  the same order. Too few arguments are still reported first, as
+  "Expected N arguments, got M". The extra cost is a few nanoseconds per scalar
+  argument converted by the JavaScript wrapper, and the native check for
+  unusual values; calls through the native entry function are unchanged.
+- **Flaky Executor test** (cancellation after an inline completion): on a
+  loaded machine the inline waits expired, the per-function backoff then
+  skipped the next ones and the 1 ms of inline completions per event loop turn
+  was spent by the warm-up calls, so no attempt produced the inline completion
+  the test needs. Each attempt now uses a new executor with the longest wait,
+  started with another function, and a fresh event loop turn; when the machine
+  is so loaded that the executor thread never runs within 10 ms, the test is
+  skipped with that reason instead of failing.
+
 ## [2.13.0] - 2026-11-14
 
 ### Changed

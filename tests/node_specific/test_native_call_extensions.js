@@ -238,6 +238,73 @@ describe("native fixture", { skip: !existsSync(FIXTURE) && `${FIXTURE} not built
       assert.strictEqual(await rebound.callAsync(values), 8);
     });
 
+    // CPython converts each argument before the next one; node-ctypes validates
+    // a scalar the native call would reject before the later converters run,
+    // in every binding form and with callAsync.
+    it("rejects an invalid scalar before later adapters in every binding form", async function () {
+      const log = [];
+      const logged = () => ({
+        get _as_parameter_() {
+          log.push("getter");
+          return 7;
+        },
+      });
+      const forms = {
+        func: (T) => lib.func("fixture_benchmark_zero", c_int32, [T, c_int32]),
+        errcheck: (T) => {
+          const fn = lib.func("fixture_benchmark_zero", c_int32, [T, c_int32], { abi: "default" });
+          fn.errcheck = (result) => result;
+          return fn;
+        },
+        lastError: (T) => new CDLL(FIXTURE, { use_last_error: true }).func("fixture_benchmark_zero", c_int32, [T, c_int32]),
+        attribute: (T) => {
+          const fn = new CDLL(FIXTURE).fixture_benchmark_zero;
+          fn.argtypes = [T, c_int32];
+          fn.restype = c_int32;
+          return fn;
+        },
+        prototype: (T) => CFUNCTYPE(c_int32, T, c_int32)(lib.fixture_benchmark_zero.address),
+        // The CType numbers as argtypes (node-ctypes extension).
+        ctypeNumbers: (T) => lib.func("fixture_benchmark_zero", c_int32, [T._type, ctypes.CType.INT32]),
+      };
+      const message = /^argument 1: TypeError: /;
+      for (const [name, make] of Object.entries(forms)) {
+        for (const [T, invalid] of [
+          [c_int32, "12"],
+          [c_int32, 1.5],
+          [c_int32, undefined],
+          [c_int32, [1]],
+          [ctypes.c_double, null],
+          [ctypes.c_char, "ab"],
+        ]) {
+          const fn = make(T);
+          assert.throws(
+            () => fn(invalid, logged()),
+            (error) => error instanceof ArgumentError && message.test(error.message),
+            name,
+          );
+          await assert.rejects(
+            async () => fn.callAsync(invalid, logged()),
+            (error) => error instanceof ArgumentError && message.test(error.message),
+            name,
+          );
+        }
+        assert.deepStrictEqual(log, [], name);
+        // Too few arguments: the arity error comes first, also with an invalid value.
+        for (const T of [c_int32, ctypes.c_double, ctypes.c_char]) {
+          const fn = make(T);
+          const arity = (error) => error instanceof TypeError && !(error instanceof ArgumentError) && /Expected 2 arguments, got 1/.test(error.message);
+          assert.throws(() => fn(1.5), arity, name);
+          await assert.rejects(async () => fn.callAsync(1.5), arity, name);
+        }
+        // Valid values reaching the native check (BigInt, a Buffer for 64 bits).
+        assert.strictEqual(make(c_int32)(5n, logged()), 7);
+        assert.strictEqual(make(ctypes.c_int64)(Buffer.alloc(8), logged()), 7);
+        assert.strictEqual(make(ctypes.c_char)(65, logged()), 7);
+        log.length = 0;
+      }
+    });
+
     // As CPython's Point.from_param(adapter): the _as_parameter_ getter of a
     // plain object runs once per call, and its errors become ArgumentError.
     it("reads an _as_parameter_ adapter once and normalizes its errors", async function () {

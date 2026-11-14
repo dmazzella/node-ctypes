@@ -491,42 +491,56 @@ describe("Executor call identity", function () {
     }
   });
 
-  it("cancels only its own call, also after an inline completion whose errcheck queued others", async function () {
+  // The defect needs an inline completion. On a loaded machine an inline wait
+  // can expire, and each expired wait makes the executor skip the next waits
+  // of that function (per-executor backoff); the 1 ms of inline completions per
+  // event loop turn can also be spent. So each attempt uses a new executor with
+  // the longest wait (10 ms), started with another function so that the
+  // measured one has no history, and a fresh event loop turn. When every wait
+  // still expires (more busy threads than cores, as with many test files in
+  // parallel) the scenario cannot be produced: the test is skipped, not failed.
+  it("cancels only its own call, also after an inline completion whose errcheck queued others", async function (t) {
     const { sleep, ms, threadId } = threadApi();
-    const executor = new Executor();
+    let checked = false;
     try {
-      let checked = false;
       for (let attempt = 0; attempt < 50 && !checked; attempt++) {
-        for (let index = 0; index < 5; index++) await threadId.callOn(executor);
-        const controller = new AbortController();
-        let blocking = null;
-        let behind = null;
-        threadId.errcheck = (result) => {
+        const executor = new Executor({ spin: 10_000, spinLimit: 10_000 });
+        try {
+          await sleep.callOn(executor, 0);
+          // The turn marker is delivered in the poll phase, before setImmediate runs.
+          await new Promise((resolve) => setImmediate(resolve));
+          const controller = new AbortController();
+          let blocking = null;
+          let behind = null;
+          threadId.errcheck = (result) => {
+            threadId.errcheck = null;
+            blocking = sleep.callOn(executor, ms(100));
+            behind = threadId.callOn(executor);
+            return result;
+          };
+          const inlineBefore = executor._inlineCompleted;
+          const outer = threadId.callOn({ executor, signal: controller.signal });
+          const inline = executor._inlineCompleted > inlineBefore;
           threadId.errcheck = null;
-          blocking = sleep.callOn(executor, ms(100));
-          behind = threadId.callOn(executor);
-          return result;
-        };
-        const inlineBefore = executor._inlineCompleted;
-        const outer = threadId.callOn({ executor, signal: controller.signal });
-        const inline = executor._inlineCompleted > inlineBefore;
-        threadId.errcheck = null;
-        if (!inline) {
+          if (!inline) {
+            await outer;
+            await Promise.all([blocking, behind]);
+            continue;
+          }
+          // The outer call completed inline: aborting its signal must not cancel the calls its errcheck queued.
+          controller.abort(new Error("abort OUTER only"));
           await outer;
-          await Promise.all([blocking, behind]);
-          continue;
+          await assert.doesNotReject(blocking, "the blocking call queued by errcheck");
+          await assert.doesNotReject(behind, "the call queued behind it");
+          checked = true;
+        } finally {
+          threadId.errcheck = null;
+          await executor.close();
         }
-        // The outer call completed inline: aborting its signal must not cancel the calls its errcheck queued.
-        controller.abort(new Error("abort OUTER only"));
-        await outer;
-        await assert.doesNotReject(blocking, "the blocking call queued by errcheck");
-        await assert.doesNotReject(behind, "the call queued behind it");
-        checked = true;
       }
-      assert.ok(checked, "no inline completion to test in 50 attempts");
+      if (!checked) t.skip("no inline completion in 50 attempts: the executor thread never ran within 10 ms");
     } finally {
       threadId.errcheck = null;
-      await executor.close();
     }
   });
 
