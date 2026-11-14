@@ -8,7 +8,7 @@
   "categorizeByGroup": true,
   "categoryOrder": ["Library Loading", "Structures", "Callbacks", "Async Calls", "Pointers", "Memory", "Types", "Error Handling", "Constants", "*"],
   "sort": ["source-order"],
-  "projectDocuments": ["examples/README.md"],
+  "projectDocuments": ["guides/README.md", "examples/README.md"],
   "navigationLinks": {
     "GitHub": "https://github.com/dmazzella/node-ctypes",
     "npm": "https://www.npmjs.com/package/node-ctypes"

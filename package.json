@@ -34,6 +34,7 @@
     "test:types": "tsc -p tests/types/tsconfig.json",
     "bench:koffi": "node tests/benchmarks/benchmark_koffi.js",
     "bench:ffi": "node --experimental-ffi tests/benchmarks/benchmark_node_ffi.js",
+    "bench:charts": "node tests/benchmarks/charts.js",
     "docs": "typedoc",
     "docs:serve": "typedoc && npx serve docs"
   },

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="763" height="180" viewBox="0 0 763 180" role="img" aria-label="Stack arguments: node-ctypes vs Koffi, ns per call">
+<title>Stack arguments: node-ctypes vs Koffi, ns per call</title>
+<style>
+.surface { fill: #fcfcfb; } .primary { fill: #0b0b0b; } .secondary { fill: #52514e; }
+.ctypes { fill: #2a78d6; } .other { fill: #eb6834; }
+.grid { stroke: #e4e3df; stroke-width: 1; } .baseline { stroke: #52514e; stroke-width: 1; }
+.whisker { stroke: #0b0b0b; stroke-width: 1.2; }
+text { font: 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+.title { font-size: 15px; font-weight: 600; } .small { font-size: 11px; } .group { font-weight: 600; }
+.value { font-variant-numeric: tabular-nums; }
+@media (prefers-color-scheme: dark) {
+  .surface { fill: #1a1a19; } .primary { fill: #f0efec; } .secondary { fill: #c3c2b7; }
+  .ctypes { fill: #3987e5; } .other { fill: #d95926; }
+  .grid { stroke: #383835; } .baseline { stroke: #c3c2b7; } .whisker { stroke: #f0efec; }
+}
+</style>
+<rect class="surface" width="763" height="180" rx="8"/>
+<text class="primary title" x="16" y="26">Stack arguments</text><text class="secondary small" x="16" y="44">Median ns per call, lower is better; whiskers: +/- MAD. win32/arm64, Node.js 26.13.1, node-ctypes 2.13.1, Koffi 3.3.8</text><rect class="ctypes" x="16" y="57" width="10" height="10" rx="2"/><text class="secondary" x="31" y="66">node-ctypes</text><rect class="other" x="123.6" y="57" width="10" height="10" rx="2"/><text class="secondary" x="138.6" y="66">Koffi</text><text class="secondary small" x="747" y="66" text-anchor="end">ratio</text><line class="grid" x1="255" y1="74" x2="255" y2="146"/><text class="secondary small value" x="255" y="162" text-anchor="middle">0</text><line class="grid" x1="360" y1="74" x2="360" y2="146"/><text class="secondary small value" x="360" y="162" text-anchor="middle">100</text><line class="grid" x1="465" y1="74" x2="465" y2="146"/><text class="secondary small value" x="465" y="162" text-anchor="middle">200</text><line class="grid" x1="570" y1="74" x2="570" y2="146"/><text class="secondary small value" x="570" y="162" text-anchor="middle">300</text><line class="grid" x1="675" y1="74" x2="675" y2="146"/><text class="secondary small value" x="675" y="162" text-anchor="middle">400</text><text class="primary" x="243" y="95" text-anchor="end">16 narrow arguments (i64 -&gt; number)</text><path class="ctypes" d="M255,82h239.0996258978838a4,4 0 0 1 4,4v2a4,4 0 0 1 -4,4h-239.0996258978838z"><title>16 narrow arguments (i64 -&gt; number), node-ctypes: 231.5 +/- 0.50 ns</title></path><path class="whisker" d="M497.57436588110704,87H498.62488591466047M497.57436588110704,84v6M498.62488591466047,84v6"/><path class="other" d="M255,94h176.4012076204864a4,4 0 0 1 4,4v2a4,4 0 0 1 -4,4h-176.4012076204864z"><title>16 narrow arguments (i64 -&gt; number), Koffi: 171.8 +/- 0.95 ns</title></path><path class="whisker" d="M434.4051494024448,99H436.397265838528M434.4051494024448,96v6M436.397265838528,96v6"/><text class="primary value" x="747" y="95" text-anchor="end">1.35x</text><text class="primary" x="243" y="129" text-anchor="end">26 mixed narrow/GP/FP arguments</text><path class="ctypes" d="M255,116h349.66748046875045a4,4 0 0 1 4,4v2a4,4 0 0 1 -4,4h-349.66748046875045z"><title>26 mixed narrow/GP/FP arguments, node-ctypes: 336.8 +/- 2.77 ns</title></path><path class="whisker" d="M605.7539627597059,121H611.580998177795M605.7539627597059,118v6M611.580998177795,118v6"/><path class="other" d="M255,128h322.69124919138426a4,4 0 0 1 4,4v2a4,4 0 0 1 -4,4h-322.69124919138426z"><title>26 mixed narrow/GP/FP arguments, Koffi: 311.1 +/- 2.45 ns</title></path><path class="whisker" d="M579.1143965189483,133H584.2681018638202M579.1143965189483,130v6M584.2681018638202,130v6"/><text class="primary value" x="747" y="129" text-anchor="end">1.08x</text><line class="baseline" x1="255" y1="74" x2="255" y2="146"/>
+</svg>

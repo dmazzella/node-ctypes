@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="657" height="146" viewBox="0 0 657 146" role="img" aria-label="Memory access: node-ctypes vs Koffi, ns per call">
+<title>Memory access: node-ctypes vs Koffi, ns per call</title>
+<style>
+.surface { fill: #fcfcfb; } .primary { fill: #0b0b0b; } .secondary { fill: #52514e; }
+.ctypes { fill: #2a78d6; } .other { fill: #eb6834; }
+.grid { stroke: #e4e3df; stroke-width: 1; } .baseline { stroke: #52514e; stroke-width: 1; }
+.whisker { stroke: #0b0b0b; stroke-width: 1.2; }
+text { font: 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+.title { font-size: 15px; font-weight: 600; } .small { font-size: 11px; } .group { font-weight: 600; }
+.value { font-variant-numeric: tabular-nums; }
+@media (prefers-color-scheme: dark) {
+  .surface { fill: #1a1a19; } .primary { fill: #f0efec; } .secondary { fill: #c3c2b7; }
+  .ctypes { fill: #3987e5; } .other { fill: #d95926; }
+  .grid { stroke: #383835; } .baseline { stroke: #c3c2b7; } .whisker { stroke: #f0efec; }
+}
+</style>
+<rect class="surface" width="657" height="146" rx="8"/>
+<text class="primary title" x="16" y="26">Memory access</text><text class="secondary small" x="16" y="44">Median ns per call, lower is better; whiskers: +/- MAD. win32/arm64, Node.js 26.13.1, node-ctypes 2.13.1, Koffi 3.3.8</text><rect class="ctypes" x="16" y="57" width="10" height="10" rx="2"/><text class="secondary" x="31" y="66">node-ctypes</text><rect class="other" x="123.6" y="57" width="10" height="10" rx="2"/><text class="secondary" x="138.6" y="66">Koffi</text><text class="secondary small" x="641" y="66" text-anchor="end">ratio</text><line class="grid" x1="149.39999999999998" y1="74" x2="149.39999999999998" y2="112"/><text class="secondary small value" x="149.39999999999998" y="128" text-anchor="middle">0</text><line class="grid" x1="254.39999999999998" y1="74" x2="254.39999999999998" y2="112"/><text class="secondary small value" x="254.39999999999998" y="128" text-anchor="middle">50</text><line class="grid" x1="359.4" y1="74" x2="359.4" y2="112"/><text class="secondary small value" x="359.4" y="128" text-anchor="middle">100</text><line class="grid" x1="464.4" y1="74" x2="464.4" y2="112"/><text class="secondary small value" x="464.4" y="128" text-anchor="middle">150</text><line class="grid" x1="569.4" y1="74" x2="569.4" y2="112"/><text class="secondary small value" x="569.4" y="128" text-anchor="middle">200</text><text class="primary" x="137.39999999999998" y="95" text-anchor="end">read two i32 fields</text><path class="ctypes" d="M149.39999999999998,82h16.15927257862623a4,4 0 0 1 4,4v2a4,4 0 0 1 -4,4h-16.15927257862623z"><title>read two i32 fields, node-ctypes: 9.60 +/- 0.04 ns</title></path><path class="whisker" d="M169.46509648599502,87H169.65344867125742M169.46509648599502,84v6M169.65344867125742,84v6"/><path class="other" d="M149.39999999999998,94h407.2777806579587a4,4 0 0 1 4,4v2a4,4 0 0 1 -4,4h-407.2777806579587z"><title>read two i32 fields, Koffi: 195.8 +/- 1.19 ns</title></path><path class="whisker" d="M558.1755137263422,99H563.1800475895753M558.1755137263422,96v6M563.1800475895753,96v6"/><text class="primary value" x="641" y="95" text-anchor="end">0.05x</text><line class="baseline" x1="149.39999999999998" y1="74" x2="149.39999999999998" y2="112"/>
+</svg>

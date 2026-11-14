@@ -43,4 +43,4 @@ From your own project, `npm install node-ctypes` and copy the example folder.
 The [Electron app](cross-platform/electron-app/README.md) has its own install/dev/build commands
 and uses the local checkout as a linked dependency.
 
-For the basics of the API (functions, structures, pointers, callbacks), see the [Quick start](../README.md#quick-start) and the guides of the main README.
+For the basics of the API (functions, structures, pointers, callbacks), see the [Quick start](../README.md#quick-start) and the [guides](../guides/README.md).

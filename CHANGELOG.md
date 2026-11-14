@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- **Guides**: the reference sections of the README moved, unchanged, to
+  `guides/` (libraries and functions, types, structures, memory, callbacks,
+  asynchronous calls, errors, Windows API, TypeScript, Python ctypes parity,
+  building and testing), also published on the documentation site. The README
+  keeps the quick start, the supported platforms and the list of guides. New
+  pages: Getting started (installation, supported platforms, building from
+  source), Coming from Koffi (the Koffi API mapped to node-ctypes) and
+  Performance (results of the Koffi comparison, with charts, and how to run
+  it). The paragraph on direct calls now describes the register-frame calls.
+- **Benchmark charts**: `npm run bench:charts -- report.json` writes static
+  SVG charts (ratio summary and one chart per workload group, light and dark)
+  from the JSON report of `bench:koffi` or `bench:ffi` (`--output`), into
+  `guides/images/` or the `--out` directory.
+
 ## [2.13.1] - 2026-11-14
 
 ### Fixed
@@ -1117,7 +1133,7 @@ number, not string`).
 
 2.0 aligns node-ctypes with Python ctypes as closely as the language allows,
 so that Python code can be ported with only the changes JavaScript requires.
-It contains breaking changes: see [Migrating from 1.x](README.md#migrating-from-1x).
+It contains breaking changes: see [Migrating from 1.x](guides/python.md#migrating-from-1x).
 
 ### Breaking changes
 

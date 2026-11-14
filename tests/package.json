@@ -17,6 +17,7 @@
     "test:python": "node check_parity.js --python",
     "bench:koffi": "node benchmarks/benchmark_koffi.js",
     "bench:ffi": "node --experimental-ffi benchmarks/benchmark_node_ffi.js",
+    "bench:charts": "node benchmarks/charts.js",
     "bench:python": "python benchmarks/benchmark_python.py"
   },
   "dependencies": {

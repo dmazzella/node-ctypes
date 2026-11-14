@@ -195,7 +195,7 @@ certify those targets; a local run is not a cross-platform result.
 
 ## Native backends and ABI regressions
 
-The [native source map](../README.md#native-backends-and-upstream-libffi)
+The [native source map](../guides/contributing.md#native-backends-and-upstream-libffi)
 separates direct invokers and `libffi_*` descriptors/CIFs/plans/closures from
 shared Node-API conversions, sync/async ownership and TSFN delivery. CMake
 discovers sources recursively with `GLOB_RECURSE`/`CONFIGURE_DEPENDS`.
