@@ -28,8 +28,8 @@ check_parity.js
 - [fixtures/](./fixtures/) contains the shared C library and layout vectors.
   Use its real C signatures in both bindings; do not substitute an unrelated
   system function with a coincidentally similar register layout.
-- [types/](./types/) checks declarations. [benchmarks/](./benchmarks/) measures
-  performance separately from correctness.
+- [types/](./types/) checks declarations. [benchmarks/](./benchmarks/README.md)
+  measures performance separately from correctness.
 
 ## Paired contracts
 

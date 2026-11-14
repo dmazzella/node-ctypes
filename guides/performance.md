@@ -262,4 +262,6 @@ npm run bench:charts -- comparison.json --out charts   # another directory
 
 `charts.js` writes `<competitor>-summary.svg` (the ratio of every case) and one
 `<competitor>-<group>.svg` per workload group (medians with +/- MAD whiskers),
-with light and dark colors; the tables are not regenerated.
+with light and dark colors; the tables are not regenerated. The steps to
+replace the published results are in the
+[benchmarks guide](../tests/benchmarks/README.md#updating-the-published-results).
