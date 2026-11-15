@@ -1,28 +1,12 @@
-/**
- * accessibility.js — macOS Accessibility API wrapper for node-ctypes
- *
- * Wraps the ApplicationServices and CoreFoundation frameworks to provide
- * a clean JS interface for UI automation via the macOS AX API.
- *
- * This is the macOS equivalent of Microsoft UI Automation (UIA).
- *
- * Usage:
- *   import { AXApplication, AXSystem, isAccessibilityEnabled, requestAccessibility } from "./accessibility.js";
- *
- *   if (!isAccessibilityEnabled()) requestAccessibility();
- *
- *   const app = new AXApplication(pid);
- *   const win = app.findWindowByTitle("My App");
- *   const field = win.findChild({ role: "AXTextField" });
- *   field.setValue("Hello World");
- *   const button = win.findChild({ role: "AXButton", title: "Submit" });
- *   button.press();
- *   app.dispose();
- *
- * Prerequisites:
- *   - macOS only (darwin)
- *   - Accessibility permissions must be granted to the terminal / application
- */
+// accessibility.js — macOS Accessibility API wrapper for node-ctypes
+//
+// Wraps the ApplicationServices (AXUIElement, AXValue) and CoreFoundation
+// frameworks for UI automation: find windows and elements, read and write
+// attributes, perform actions, navigate the element tree, reach the web
+// content of browsers. The macOS counterpart of Microsoft UI Automation.
+//
+// Requires the Accessibility permission for the terminal or the application
+// running Node.js (System Settings → Privacy & Security → Accessibility).
 
 import { CDLL, Structure, addressof, byref, c_void_p, c_char_p, c_int32, c_uint32, c_uint8, c_int64, c_long, c_ulong, c_float, c_double, create_string_buffer } from "node-ctypes";
 
@@ -129,6 +113,12 @@ function checkAX(code, context) {
 }
 
 // ─── Lazy Framework Loading ─────────────────────────────────────────
+// Function signatures in the Python-ctypes style: argtypes / restype.
+
+function prototype(fn, restype, argtypes) {
+  fn.restype = restype;
+  fn.argtypes = argtypes;
+}
 
 let _appServices = null;
 let _cf = null;
@@ -138,76 +128,48 @@ function appServices() {
     _appServices = new CDLL("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices");
 
     // AXUIElement creation
-    _appServices.AXUIElementCreateApplication.argtypes = [c_int32];
-    _appServices.AXUIElementCreateApplication.restype = c_void_p;
-
-    _appServices.AXUIElementCreateSystemWide.argtypes = [];
-    _appServices.AXUIElementCreateSystemWide.restype = c_void_p;
+    prototype(_appServices.AXUIElementCreateApplication, c_void_p, [c_int32]);
+    prototype(_appServices.AXUIElementCreateSystemWide, c_void_p, []);
 
     // Attribute access
-    _appServices.AXUIElementCopyAttributeValue.argtypes = [c_void_p, c_void_p, c_void_p];
-    _appServices.AXUIElementCopyAttributeValue.restype = c_int32;
-
-    _appServices.AXUIElementSetAttributeValue.argtypes = [c_void_p, c_void_p, c_void_p];
-    _appServices.AXUIElementSetAttributeValue.restype = c_int32;
+    prototype(_appServices.AXUIElementCopyAttributeValue, c_int32, [c_void_p, c_void_p, c_void_p]);
+    prototype(_appServices.AXUIElementSetAttributeValue, c_int32, [c_void_p, c_void_p, c_void_p]);
 
     // Actions
-    _appServices.AXUIElementPerformAction.argtypes = [c_void_p, c_void_p];
-    _appServices.AXUIElementPerformAction.restype = c_int32;
+    prototype(_appServices.AXUIElementPerformAction, c_int32, [c_void_p, c_void_p]);
 
     // Attribute settable check
-    _appServices.AXUIElementIsAttributeSettable.argtypes = [c_void_p, c_void_p, c_void_p];
-    _appServices.AXUIElementIsAttributeSettable.restype = c_int32;
+    prototype(_appServices.AXUIElementIsAttributeSettable, c_int32, [c_void_p, c_void_p, c_void_p]);
 
     // Process trust
-    _appServices.AXIsProcessTrusted.argtypes = [];
-    _appServices.AXIsProcessTrusted.restype = c_uint8;
-
-    _appServices.AXIsProcessTrustedWithOptions.argtypes = [c_void_p];
-    _appServices.AXIsProcessTrustedWithOptions.restype = c_uint8;
+    prototype(_appServices.AXIsProcessTrusted, c_uint8, []);
+    prototype(_appServices.AXIsProcessTrustedWithOptions, c_uint8, [c_void_p]);
 
     // AXValue (CGRect / CGPoint / CGSize / CFRange)
-    _appServices.AXValueGetTypeID.argtypes = [];
-    _appServices.AXValueGetTypeID.restype = c_ulong;
-
-    _appServices.AXValueGetType.argtypes = [c_void_p];
-    _appServices.AXValueGetType.restype = c_int32;
-
-    _appServices.AXValueGetValue.argtypes = [c_void_p, c_int32, c_void_p];
-    _appServices.AXValueGetValue.restype = c_uint8;
+    prototype(_appServices.AXValueGetTypeID, c_ulong, []);
+    prototype(_appServices.AXValueGetType, c_int32, [c_void_p]);
+    prototype(_appServices.AXValueGetValue, c_uint8, [c_void_p, c_int32, c_void_p]);
 
     // AXValueCreate — create an AXValueRef from a C struct (for writing positions/sizes)
-    _appServices.AXValueCreate.argtypes = [c_int32, c_void_p];
-    _appServices.AXValueCreate.restype = c_void_p;
+    prototype(_appServices.AXValueCreate, c_void_p, [c_int32, c_void_p]);
 
     // Attribute inspection
-    _appServices.AXUIElementCopyAttributeNames.argtypes = [c_void_p, c_void_p];
-    _appServices.AXUIElementCopyAttributeNames.restype = c_int32;
-
-    _appServices.AXUIElementCopyParameterizedAttributeNames.argtypes = [c_void_p, c_void_p];
-    _appServices.AXUIElementCopyParameterizedAttributeNames.restype = c_int32;
-
-    _appServices.AXUIElementCopyParameterizedAttributeValue.argtypes = [c_void_p, c_void_p, c_void_p, c_void_p];
-    _appServices.AXUIElementCopyParameterizedAttributeValue.restype = c_int32;
+    prototype(_appServices.AXUIElementCopyAttributeNames, c_int32, [c_void_p, c_void_p]);
+    prototype(_appServices.AXUIElementCopyParameterizedAttributeNames, c_int32, [c_void_p, c_void_p]);
+    prototype(_appServices.AXUIElementCopyParameterizedAttributeValue, c_int32, [c_void_p, c_void_p, c_void_p, c_void_p]);
 
     // Action inspection
-    _appServices.AXUIElementCopyActionNames.argtypes = [c_void_p, c_void_p];
-    _appServices.AXUIElementCopyActionNames.restype = c_int32;
-
-    _appServices.AXUIElementCopyActionDescription.argtypes = [c_void_p, c_void_p, c_void_p];
-    _appServices.AXUIElementCopyActionDescription.restype = c_int32;
+    prototype(_appServices.AXUIElementCopyActionNames, c_int32, [c_void_p, c_void_p]);
+    prototype(_appServices.AXUIElementCopyActionDescription, c_int32, [c_void_p, c_void_p, c_void_p]);
 
     // Hit testing — x and y are C float (32-bit), not double
-    _appServices.AXUIElementCopyElementAtPosition.argtypes = [c_void_p, c_float, c_float, c_void_p];
-    _appServices.AXUIElementCopyElementAtPosition.restype = c_int32;
+    prototype(_appServices.AXUIElementCopyElementAtPosition, c_int32, [c_void_p, c_float, c_float, c_void_p]);
 
     // PID — pid_t* is int* (4 bytes) on macOS
-    _appServices.AXUIElementGetPid.argtypes = [c_void_p, c_void_p];
-    _appServices.AXUIElementGetPid.restype = c_int32;
+    prototype(_appServices.AXUIElementGetPid, c_int32, [c_void_p, c_void_p]);
 
     // Messaging timeout — timeoutInSeconds is C float
-    _appServices.AXUIElementSetMessagingTimeout.argtypes = [c_void_p, c_float];
-    _appServices.AXUIElementSetMessagingTimeout.restype = c_int32;
+    prototype(_appServices.AXUIElementSetMessagingTimeout, c_int32, [c_void_p, c_float]);
   }
   return _appServices;
 }
@@ -217,65 +179,36 @@ function cf() {
     _cf = new CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation");
 
     // CFString
-    _cf.CFStringCreateWithCString.argtypes = [c_void_p, c_char_p, c_uint32];
-    _cf.CFStringCreateWithCString.restype = c_void_p;
-
-    _cf.CFStringGetCString.argtypes = [c_void_p, c_void_p, c_long, c_uint32];
-    _cf.CFStringGetCString.restype = c_uint8;
-
-    _cf.CFStringGetLength.argtypes = [c_void_p];
-    _cf.CFStringGetLength.restype = c_long;
-
-    _cf.CFStringGetMaximumSizeForEncoding.argtypes = [c_long, c_uint32];
-    _cf.CFStringGetMaximumSizeForEncoding.restype = c_long;
+    prototype(_cf.CFStringCreateWithCString, c_void_p, [c_void_p, c_char_p, c_uint32]);
+    prototype(_cf.CFStringGetCString, c_uint8, [c_void_p, c_void_p, c_long, c_uint32]);
+    prototype(_cf.CFStringGetLength, c_long, [c_void_p]);
+    prototype(_cf.CFStringGetMaximumSizeForEncoding, c_long, [c_long, c_uint32]);
 
     // CFArray
-    _cf.CFArrayGetCount.argtypes = [c_void_p];
-    _cf.CFArrayGetCount.restype = c_long;
-
-    _cf.CFArrayGetValueAtIndex.argtypes = [c_void_p, c_long];
-    _cf.CFArrayGetValueAtIndex.restype = c_void_p;
+    prototype(_cf.CFArrayGetCount, c_long, [c_void_p]);
+    prototype(_cf.CFArrayGetValueAtIndex, c_void_p, [c_void_p, c_long]);
 
     // CFRelease / CFRetain
-    _cf.CFRelease.argtypes = [c_void_p];
-    _cf.CFRelease.restype = c_void_p;
-
-    _cf.CFRetain.argtypes = [c_void_p];
-    _cf.CFRetain.restype = c_void_p;
+    prototype(_cf.CFRelease, c_void_p, [c_void_p]);
+    prototype(_cf.CFRetain, c_void_p, [c_void_p]);
 
     // CFTypeID
-    _cf.CFGetTypeID.argtypes = [c_void_p];
-    _cf.CFGetTypeID.restype = c_ulong;
-
-    _cf.CFStringGetTypeID.argtypes = [];
-    _cf.CFStringGetTypeID.restype = c_ulong;
-
-    _cf.CFArrayGetTypeID.argtypes = [];
-    _cf.CFArrayGetTypeID.restype = c_ulong;
-
-    _cf.CFBooleanGetTypeID.argtypes = [];
-    _cf.CFBooleanGetTypeID.restype = c_ulong;
-
-    _cf.CFNumberGetTypeID.argtypes = [];
-    _cf.CFNumberGetTypeID.restype = c_ulong;
+    prototype(_cf.CFGetTypeID, c_ulong, [c_void_p]);
+    prototype(_cf.CFStringGetTypeID, c_ulong, []);
+    prototype(_cf.CFArrayGetTypeID, c_ulong, []);
+    prototype(_cf.CFBooleanGetTypeID, c_ulong, []);
+    prototype(_cf.CFNumberGetTypeID, c_ulong, []);
 
     // CFBoolean
-    _cf.CFBooleanGetValue.argtypes = [c_void_p];
-    _cf.CFBooleanGetValue.restype = c_uint8;
+    prototype(_cf.CFBooleanGetValue, c_uint8, [c_void_p]);
 
     // CFNumber
-    _cf.CFNumberGetValue.argtypes = [c_void_p, c_long, c_void_p];
-    _cf.CFNumberGetValue.restype = c_uint8;
-
-    _cf.CFNumberCreate.argtypes = [c_void_p, c_long, c_void_p];
-    _cf.CFNumberCreate.restype = c_void_p;
+    prototype(_cf.CFNumberGetValue, c_uint8, [c_void_p, c_long, c_void_p]);
+    prototype(_cf.CFNumberCreate, c_void_p, [c_void_p, c_long, c_void_p]);
 
     // CFDictionary
-    _cf.CFDictionaryCreateMutable.argtypes = [c_void_p, c_long, c_void_p, c_void_p];
-    _cf.CFDictionaryCreateMutable.restype = c_void_p;
-
-    _cf.CFDictionarySetValue.argtypes = [c_void_p, c_void_p, c_void_p];
-    _cf.CFDictionarySetValue.restype = c_void_p;
+    prototype(_cf.CFDictionaryCreateMutable, c_void_p, [c_void_p, c_long, c_void_p, c_void_p]);
+    prototype(_cf.CFDictionarySetValue, c_void_p, [c_void_p, c_void_p, c_void_p]);
   }
   return _cf;
 }
@@ -1615,7 +1548,7 @@ export function requestAccessibility() {
 }
 
 /**
- * Release all shared framework handles and cached CFStrings.
+ * Release the cached CFStrings and close the frameworks.
  * Call this when done with the accessibility module.
  */
 export function close() {
@@ -1635,12 +1568,11 @@ export function close() {
   _cfNumberTypeID = null;
   _axValueTypeID = null;
 
-  if (_appServices) {
-    _appServices = null;
-  }
-  if (_cf) {
-    _cf = null;
-  }
+  // Opened again on demand by the next call.
+  _appServices?.close();
+  _appServices = null;
+  _cf?.close();
+  _cf = null;
 }
 
 // ─── Exports ────────────────────────────────────────────────────────
