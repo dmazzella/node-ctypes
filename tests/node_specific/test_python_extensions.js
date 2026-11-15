@@ -20,6 +20,12 @@ describe("JavaScript extensions to the Python-shaped API", function () {
     assert.strictEqual(ctypes.get_last_error(), old);
   });
 
+  it("Version reports node-ctypes and the libffi it is built with", function () {
+    const { Version } = ctypes;
+    assert.strictEqual(Version.toString(), `${Version.major}.${Version.minor}.${Version.patch}`);
+    assert.match(Version.libffi, /^\d+\.\d+\.\d+/);
+  });
+
   it("rejects values that are not one character", function () {
     for (const [v, message] of [
       ["", "one character bytes, bytearray, or an integer in range(256) expected, not a string of length 0"],

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`Version.libffi`**: the version of the libffi node-ctypes is built with
+  (`ffi_get_version()`), for example `"3.8.1"`.
+
 ### Changed
 
 - **Callbacks on hardened Linux**: libffi is built as its `configure` does on
@@ -35,6 +40,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   header now tests the platform itself (macOS ARM64), so every source sees the
   same layout. Callbacks were not affected: node-ctypes only allocates a closure
   (48 bytes were enough) and never reads its fields.
+- **`FFI_TYPE_LONGDOUBLE` where `long double` is a `double`**: the generated
+  `ffi.h` kept it distinct from `FFI_TYPE_DOUBLE` everywhere, while libffi's
+  `configure` makes them equal unless `long double` is larger (not on macOS
+  ARM64 nor with MSVC). On AArch64 libffi would then have treated an 8-byte
+  `long double` as the 128-bit type. The header now applies the same rule, from
+  the compiler's `__LDBL_MANT_DIG__` and `__DBL_MANT_DIG__`. node-ctypes does
+  not use `long double` yet, so nothing changes for existing code.
 
 ## [2.13.2] - 2026-11-15
 

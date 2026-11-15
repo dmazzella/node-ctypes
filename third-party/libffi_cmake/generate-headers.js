@@ -149,8 +149,11 @@ function generateFfiH(version) {
   // Replace @TARGET@ block with platform detection
   output = output.replace(/\/\* Specify which architecture libffi is configured for\. \*\/\s*#ifndef @TARGET@\s*#define @TARGET@\s*#endif/, platformDetection);
 
-  // Replace @HAVE_LONG_DOUBLE@ - always 1 for our platforms
-  output = output.replace(/@HAVE_LONG_DOUBLE@/g, "1");
+  // Replace @HAVE_LONG_DOUBLE@ with configure's rule, a long double larger than
+  // a double, from the compiler's predefined macros (ffi.h is also included by
+  // the assembly sources, so no <float.h>). Equal on macOS ARM64 and with MSVC
+  // (which defines neither macro): FFI_TYPE_LONGDOUBLE is then FFI_TYPE_DOUBLE.
+  output = output.replace(/#if @HAVE_LONG_DOUBLE@/g, "#if defined(__LDBL_MANT_DIG__) && defined(__DBL_MANT_DIG__) && __LDBL_MANT_DIG__ > __DBL_MANT_DIG__");
 
   // Replace @FFI_EXEC_TRAMPOLINE_TABLE@ with the condition fficonfig.h uses
   // (macOS ARM64), not with its macro: ffi.h does not include fficonfig.h, and

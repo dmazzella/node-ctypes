@@ -98,7 +98,7 @@ extern "C" {
 #define FFI_TYPE_INT        1
 #define FFI_TYPE_FLOAT      2
 #define FFI_TYPE_DOUBLE     3
-#if 1
+#if defined(__LDBL_MANT_DIG__) && defined(__DBL_MANT_DIG__) && __LDBL_MANT_DIG__ > __DBL_MANT_DIG__
 #define FFI_TYPE_LONGDOUBLE 4
 #else
 #define FFI_TYPE_LONGDOUBLE FFI_TYPE_DOUBLE

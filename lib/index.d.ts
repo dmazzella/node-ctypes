@@ -135,6 +135,7 @@ export type FFIType = AnyType | StructureClass | PointerTypeDef | ArrayTypeDef |
  * ```javascript
  * import { Version } from 'node-ctypes';
  * console.log(Version.toString());  // "2.8.0"
+ * console.log(Version.libffi);      // "3.8.1"
  * ```
  *
  * @category Library Loading
@@ -143,6 +144,8 @@ export class Version {
   static get major(): number;
   static get minor(): number;
   static get patch(): number;
+  /** Version of the libffi node-ctypes is built with. */
+  static get libffi(): string;
   static toString(): string;
 }
 

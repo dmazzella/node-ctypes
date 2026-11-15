@@ -1,5 +1,7 @@
 #include "addon.h"
 
+#include <ffi.h>
+
 #include "array.h"
 #include "callback.h"
 #include "executor.h"
@@ -16,6 +18,8 @@ Napi::Object CreateVersionObject(Napi::Env env) {
   version.Set("major", Napi::Number::New(env, CTYPES_MAJOR_VERSION));
   version.Set("minor", Napi::Number::New(env, CTYPES_MINOR_VERSION));
   version.Set("patch", Napi::Number::New(env, CTYPES_PATCH_VERSION));
+  // The libffi node-ctypes is built with (ffi_get_version, libffi 3.5+).
+  version.Set("libffi", Napi::String::New(env, ffi_get_version()));
   version.Set("toString", Napi::Function::New(env, [](const Napi::CallbackInfo& info) -> Napi::Value {
                 return Napi::String::New(info.Env(), std::format("{}.{}.{}", CTYPES_MAJOR_VERSION, CTYPES_MINOR_VERSION,
                                                                  CTYPES_PATCH_VERSION));

@@ -114,16 +114,19 @@
 /* Long double size varies by platform */
 #if defined(FFI_PLATFORM_WINDOWS)
 #  define SIZEOF_LONG_DOUBLE 8
-#  define HAVE_LONG_DOUBLE 1
 #elif defined(FFI_PLATFORM_MACOS)
 #  if defined(FFI_ARCH_AARCH64)
 #    define SIZEOF_LONG_DOUBLE 8
 #  else
 #    define SIZEOF_LONG_DOUBLE 16
 #  endif
-#  define HAVE_LONG_DOUBLE 1
 #else
 #  define SIZEOF_LONG_DOUBLE 16
+#endif
+
+/* A long double larger than a double, as configure defines it (and as ffi.h
+   tests it for FFI_TYPE_LONGDOUBLE): not on macOS ARM64 nor with MSVC. */
+#if defined(__LDBL_MANT_DIG__) && defined(__DBL_MANT_DIG__) && __LDBL_MANT_DIG__ > __DBL_MANT_DIG__
 #  define HAVE_LONG_DOUBLE 1
 #endif
 
