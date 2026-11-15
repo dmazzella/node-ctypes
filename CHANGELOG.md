@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **libffi headers generated on Windows**: with `core.autocrlf` the templates
+  are checked out with CRLF line endings, and `npm run generate-ffi-headers`
+  silently left out of `fficonfig.h` the `FFI_MMAP_EXEC_WRIT` block of macOS
+  x64, whose marker contains line feeds (`ffi.h` only got mixed line endings).
+  The generator now reads its templates with LF line endings, and stops with an
+  error when a marker it replaces is missing. The published binaries were not
+  affected: in CI only the Windows checkouts use CRLF, and the Windows builds
+  do not use that block.
+
 ## [2.14.0] - 2026-11-15
 
 ### Added

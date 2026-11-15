@@ -23,6 +23,18 @@ const LIBFFI_DIR = path.join(__dirname, "..", "libffi");
 const TEMPLATE_DIR = __dirname;
 const OUTPUT_DIR = path.join(__dirname, "fficonfig");
 
+/** A text file with LF line endings, whatever the checkout (core.autocrlf on Windows). */
+function readText(file) {
+  return fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n");
+}
+
+/** Replace `pattern` in `text`; throw when it is not there, instead of silently generating another header. */
+function replaceRequired(text, pattern, replacement, what) {
+  const found = typeof pattern === "string" ? text.includes(pattern) : new RegExp(pattern.source, pattern.flags.replace("g", "")).test(text);
+  if (!found) throw new Error(`generate-headers: ${what} not found in the template`);
+  return text.replace(pattern, replacement);
+}
+
 /**
  * Extract version info from configure.ac.
  *
@@ -33,7 +45,7 @@ const OUTPUT_DIR = path.join(__dirname, "fficonfig");
  * AC_INIT (e.g. libffi 3.6.0 still declares FFI_VERSION_STRING="3.5.2").
  */
 function extractVersion() {
-  const configureAc = fs.readFileSync(path.join(LIBFFI_DIR, "configure.ac"), "utf8");
+  const configureAc = readText(path.join(LIBFFI_DIR, "configure.ac"));
 
   // Primary source of truth: AC_INIT([libffi],[X.Y.Z],...)
   const acInitMatch = configureAc.match(/AC_INIT\(\s*\[libffi\]\s*,\s*\[([^\]]+)\]/);
@@ -68,13 +80,15 @@ function extractVersion() {
  * Generate fficonfig.h from template
  */
 function generateFficonfig(version) {
-  let output = fs.readFileSync(path.join(TEMPLATE_DIR, "fficonfig.h.in"), "utf8");
-  output = output.replace(/@VERSION@/g, version.string);
+  let output = readText(path.join(TEMPLATE_DIR, "fficonfig.h.in"));
+  output = replaceRequired(output, /@VERSION@/g, version.string, "@VERSION@");
 
   // Define FFI_MMAP_EXEC_WRIT for macOS x64
-  output = output.replace(
+  output = replaceRequired(
+    output,
     "/* No mmap exec workarounds needed */\n/* #undef FFI_MMAP_EXEC_WRIT */\n/* #undef FFI_MMAP_EXEC_EMUTRAMP_PAX */",
     "/* mmap exec workaround needed on macOS x64 */\n#if defined(FFI_PLATFORM_MACOS) && defined(FFI_ARCH_X86_64)\n#  define FFI_MMAP_EXEC_WRIT 1\n#endif\n\n/* No mmap exec workarounds needed */\n/* #undef FFI_MMAP_EXEC_WRIT */\n/* #undef FFI_MMAP_EXEC_EMUTRAMP_PAX */",
+    "the mmap exec workarounds block",
   );
 
   return output;
@@ -84,7 +98,7 @@ function generateFficonfig(version) {
  * Generate ffi.h from libffi's ffi.h.in template
  */
 function generateFfiH(version) {
-  let template = fs.readFileSync(path.join(LIBFFI_DIR, "include", "ffi.h.in"), "utf8");
+  let template = readText(path.join(LIBFFI_DIR, "include", "ffi.h.in"));
 
   // Platform detection to insert
   const platformDetection = `/* ============================================================================
@@ -147,26 +161,26 @@ function generateFfiH(version) {
   output = output.replace(/libffi @VERSION@/g, `libffi ${version.string}`);
 
   // Replace @TARGET@ block with platform detection
-  output = output.replace(/\/\* Specify which architecture libffi is configured for\. \*\/\s*#ifndef @TARGET@\s*#define @TARGET@\s*#endif/, platformDetection);
+  output = replaceRequired(output, /\/\* Specify which architecture libffi is configured for\. \*\/\s*#ifndef @TARGET@\s*#define @TARGET@\s*#endif/, platformDetection, "the @TARGET@ block");
 
   // Replace @HAVE_LONG_DOUBLE@ with configure's rule, a long double larger than
   // a double, from the compiler's predefined macros (ffi.h is also included by
   // the assembly sources, so no <float.h>). Equal on macOS ARM64 and with MSVC
   // (which defines neither macro): FFI_TYPE_LONGDOUBLE is then FFI_TYPE_DOUBLE.
-  output = output.replace(/#if @HAVE_LONG_DOUBLE@/g, "#if defined(__LDBL_MANT_DIG__) && defined(__DBL_MANT_DIG__) && __LDBL_MANT_DIG__ > __DBL_MANT_DIG__");
+  output = replaceRequired(output, /#if @HAVE_LONG_DOUBLE@/g, "#if defined(__LDBL_MANT_DIG__) && defined(__DBL_MANT_DIG__) && __LDBL_MANT_DIG__ > __DBL_MANT_DIG__", "#if @HAVE_LONG_DOUBLE@");
 
   // Replace @FFI_EXEC_TRAMPOLINE_TABLE@ with the condition fficonfig.h uses
   // (macOS ARM64), not with its macro: ffi.h does not include fficonfig.h, and
   // node-ctypes and some libffi sources (types.c, prep_cif.c) include ffi.h
   // first, so they would see another ffi_closure layout (48 bytes, not 40).
-  output = output.replace(/#if @FFI_EXEC_TRAMPOLINE_TABLE@/g, "#if defined(__APPLE__) && defined(__MACH__) && defined(AARCH64)");
+  output = replaceRequired(output, /#if @FFI_EXEC_TRAMPOLINE_TABLE@/g, "#if defined(__APPLE__) && defined(__MACH__) && defined(AARCH64)", "#if @FFI_EXEC_TRAMPOLINE_TABLE@");
 
   // Replace version placeholders
-  output = output.replace(/@FFI_VERSION_STRING@/g, version.string);
-  output = output.replace(/@FFI_VERSION_NUMBER@/g, version.number.toString());
+  output = replaceRequired(output, /@FFI_VERSION_STRING@/g, version.string, "@FFI_VERSION_STRING@");
+  output = replaceRequired(output, /@FFI_VERSION_NUMBER@/g, version.number.toString(), "@FFI_VERSION_NUMBER@");
 
   // Replace #include <ffitarget.h> with our conditional include
-  output = output.replace(/#include <ffitarget\.h>/, ffitargetInclude);
+  output = replaceRequired(output, /#include <ffitarget\.h>/, ffitargetInclude, "#include <ffitarget.h>");
 
   // Wrap __attribute__((deprecated)) for MSVC compatibility
   output = output.replace(/(\s+)__attribute__\(\(deprecated\)\);/g, "\n#if defined(__GNUC__)\n  __attribute__((deprecated))\n#endif\n  ;");
