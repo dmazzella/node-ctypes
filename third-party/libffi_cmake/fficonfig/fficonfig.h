@@ -249,6 +249,21 @@
 #  define FFI_EXEC_TRAMPOLINE_TABLE 1
 #endif
 
+/* Static trampolines on Linux x86-64 and AArch64, as libffi's configure enables
+   them: the closure trampolines come from a code table built into the library,
+   mapped from its file, so no page is ever writable and executable. When the
+   table cannot be mapped, libffi falls back to the dynamic trampolines. */
+#if defined(FFI_PLATFORM_LINUX) && !defined(FFI_PLATFORM_ANDROID) && (defined(FFI_ARCH_X86_64) || defined(FFI_ARCH_AARCH64))
+#  define FFI_EXEC_STATIC_TRAMP 1
+#endif
+
+/* memfd_create (glibc 2.27, musl 1.1.20): when the dynamic trampolines need a
+   file mapped twice (writable and executable mappings refused, e.g. SELinux),
+   use an anonymous memory file before temporary files in TMPDIR, /tmp, ... */
+#if defined(FFI_PLATFORM_LINUX) && !defined(FFI_PLATFORM_ANDROID)
+#  define HAVE_MEMFD_CREATE 1
+#endif
+
 /* mmap exec workaround needed on macOS x64 */
 #if defined(FFI_PLATFORM_MACOS) && defined(FFI_ARCH_X86_64)
 #  define FFI_MMAP_EXEC_WRIT 1

@@ -152,8 +152,11 @@ function generateFfiH(version) {
   // Replace @HAVE_LONG_DOUBLE@ - always 1 for our platforms
   output = output.replace(/@HAVE_LONG_DOUBLE@/g, "1");
 
-  // Replace @FFI_EXEC_TRAMPOLINE_TABLE@ - use the macro defined in fficonfig.h
-  output = output.replace(/#if @FFI_EXEC_TRAMPOLINE_TABLE@/g, "#if FFI_EXEC_TRAMPOLINE_TABLE");
+  // Replace @FFI_EXEC_TRAMPOLINE_TABLE@ with the condition fficonfig.h uses
+  // (macOS ARM64), not with its macro: ffi.h does not include fficonfig.h, and
+  // node-ctypes and some libffi sources (types.c, prep_cif.c) include ffi.h
+  // first, so they would see another ffi_closure layout (48 bytes, not 40).
+  output = output.replace(/#if @FFI_EXEC_TRAMPOLINE_TABLE@/g, "#if defined(__APPLE__) && defined(__MACH__) && defined(AARCH64)");
 
   // Replace version placeholders
   output = output.replace(/@FFI_VERSION_STRING@/g, version.string);
