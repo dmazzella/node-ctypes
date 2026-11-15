@@ -216,14 +216,10 @@ native storage widths: `c_long` and `c_ulong` always produce `BigInt`, including
 32-bit C longs on Windows. Their 32-bit boundary values are exercised on every
 host, with 64-bit extremes added only when the native type supports them.
 
-The libffi submodule is temporarily pinned to upstream
-`d02afc25e8ea3aac9e78e227748e1fd7c9f14c82`, including the Darwin GP stack-slot fix.
-Its remaining Darwin ARM64 indirect-pointer alignment limitation is documented
-in the source map above. Its safe C stack-tag probe for sync/async calls is
-temporarily skipped only on Darwin ARM64 until an upstream fix is available;
-the test remains active elsewhere. The large-aggregate dereferencing variants
-after a narrow stack scalar also run only on unaffected targets; all other
-aggregate positions remain covered.
+The libffi submodule is at the v3.8.1 tag. The stack-tag probe and the
+large-aggregate dereferencing variants after a narrow stack scalar run on every
+target, Darwin ARM64 included, and a 16-aligned aggregate is passed after an
+odd number of stack slots.
 
 Validate both build-time routes and both memory models, using the existing
 configured source build:

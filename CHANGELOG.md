@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **libffi 3.8.1**: the submodule moves from upstream commit `d02afc25` to the
+  v3.8.1 tag, with two fixes that node-ctypes could reach on ARM64:
+  - a struct larger than 16 bytes (other than an HFA) passed by value after the
+    integer registers, after a narrow stack argument on macOS (stack arguments
+    are packed there) or with `_align_ = 16` elsewhere, had the pointer to its
+    copy in a misaligned stack slot: the C function read another address and
+    could crash ([GHSA-h52h-3759-xqm4](https://github.com/libffi/libffi/security/advisories/GHSA-h52h-3759-xqm4)).
+    The tests skipped on Darwin ARM64 for this limitation run again;
+  - on macOS ARM64, with more than 1024 live callbacks, some orders of
+    `release()` wrote into a freed trampoline table
+    ([GHSA-23hx-9rxv-9qfp](https://github.com/libffi/libffi/security/advisories/GHSA-23hx-9rxv-9qfp)).
+
+  The other fixes of the release concern types node-ctypes does not expose
+  (`long double`, vectors) or platforms and APIs it does not use. The generated
+  headers report 3.8.1.
+
 ### Documentation
 
 - **Guides**: the reference sections of the README moved, unchanged, to

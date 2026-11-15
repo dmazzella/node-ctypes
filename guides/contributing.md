@@ -75,33 +75,29 @@ High-level callback snapshot pooling and cached struct/array readers remain:
 slices are never recycled, retained views have independent bytes and identity,
 and custom getters, mirrored synchronization and Node-API ownership are preserved.
 
-**Temporary dependency pin.** The unmodified
-[libffi submodule](https://github.com/libffi/libffi/tree/d02afc25e8ea3aac9e78e227748e1fd7c9f14c82) is pinned to upstream commit
-[`d02afc25e8ea3aac9e78e227748e1fd7c9f14c82`](https://github.com/libffi/libffi/commit/d02afc25e8ea3aac9e78e227748e1fd7c9f14c82),
-after the v3.8.0 release. Generated version fields still report 3.8.0; the
-gitlink, not that version string, identifies the exact dependency source.
-This includes the Darwin GP-composite stack-slot
+**libffi dependency.** The unmodified
+[libffi submodule](https://github.com/libffi/libffi/tree/v3.8.1) is at the
+[v3.8.1](https://github.com/libffi/libffi/releases/tag/v3.8.1) tag. It includes
+the Darwin GP-composite stack-slot
 [fix](https://github.com/libffi/libffi/commit/2472245a3430b9d24f085b7654e896e074bceb82)
 and its [compiler/ABI guard adjustment](https://github.com/libffi/libffi/commit/3365ad8b968a9b742922b6f1188462fe6ce142ec):
 small GP composites use aligned, whole-word stack slots in outgoing calls and
 closures, without widening ctypes buffers or changing scalar/HFA packing.
 This follows the compiler's C ABI rather than reproducing broken padding in
 older libffi builds, including those used by some Python installations.
+3.8.1 also places the pointer to an indirect aggregate (larger than 16 bytes)
+passed after the AArch64 GP registers in an 8-byte, 8-aligned stack slot,
+instead of one aligned like the aggregate
+([GHSA-h52h-3759-xqm4](https://github.com/libffi/libffi/security/advisories/GHSA-h52h-3759-xqm4),
+[libffi/libffi#1057](https://github.com/libffi/libffi/issues/1057)), and fixes
+a use-after-free of the Apple trampoline-table closure allocator past 1024 live
+closures ([GHSA-23hx-9rxv-9qfp](https://github.com/libffi/libffi/security/advisories/GHSA-23hx-9rxv-9qfp)).
+[test_function_abi.js](../tests/node_specific/test_function_abi.js) checks the
+stack slots on every target.
 
-Return to an official tag containing these fixes when released. After changing
-the submodule revision, run `npm run generate-ffi-headers`, rebuild and repeat
-the ABI/parity tests. Do not patch the vendored libffi internals.
-
-**Darwin ARM64 upstream limitation.** When all GP registers are
-occupied, a byte-aligned non-HFA struct larger than 16 bytes after a narrow
-stack scalar can still misalign its indirect pointer and subsequent arguments.
-A callee dereferencing that pointer can crash. The upstream update does not
-resolve this case and this project does not disguise it by altering layouts.
-[test_function_abi.js](../tests/node_specific/test_function_abi.js) retains a
-safe C stack-tag probe for sync/async calls, temporarily skipped only on Darwin
-ARM64 until an upstream fix is available. The test remains active on other
-targets. Other supported GP/HFA/large-aggregate cases and ordinary/thread-safe
-callback ABI tests run normally.
+After changing the submodule revision, run `npm run generate-ffi-headers`,
+rebuild and repeat the ABI/parity tests. Do not patch the vendored libffi
+internals.
 
 **Windows ARM64 variadic HFA limitation.** A named HFA argument containing four
 doubles (32 bytes) in a variadic call triggers an access violation in upstream

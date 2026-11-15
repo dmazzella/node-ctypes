@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import * as c from "node-ctypes";
 
 const fixture = path.resolve(import.meta.dirname, "../../build/fixture", `ctypes_test_fixture${process.platform === "win32" ? ".dll" : process.platform === "darwin" ? ".dylib" : ".so"}`);
-const indirectStackBug = process.platform === "darwin" && process.arch === "arm64";
 const largeSizes = [17, 19, 24, 31, 32, 33, 65, 257, 4097];
 
 describe("Native function ABI", { skip: !existsSync(fixture) && "native fixture not built" }, () => {
@@ -201,7 +200,7 @@ describe("Native function ABI", { skip: !existsSync(fixture) && "native fixture 
         ["stack", [...Array(7).fill(c.c_int64), Record, c.c_int8, c.c_uint16], [...Array(7).fill(0n), input, -128, 65535], 0n],
         ["stack_full", [...Array(8).fill(c.c_int64), Record, c.c_int8, c.c_uint16], [...Array(8).fill(0n), input, -128, 65535], 0n],
       ];
-      if (!indirectStackBug) layouts.push(["stack_leading", [...Array(8).fill(c.c_int64), c.c_int8, Record, c.c_int8, c.c_uint16], [...Array(8).fill(0n), -31, input, -128, 65535], -713n]);
+      layouts.push(["stack_leading", [...Array(8).fill(c.c_int64), c.c_int8, Record, c.c_int8, c.c_uint16], [...Array(8).fill(0n), -31, input, -128, 65535], -713n]);
       for (const [suffix, types, args, extra] of layouts) {
         const fn = lib.func(`fixture_bytes_${size}_${suffix}`, c.c_int64, types);
         const expected = BigInt(values.reduce((sum, value, i) => sum + value * (i + 1), 0) - 17 * 128 + 19 * 65535) + extra;
@@ -212,7 +211,7 @@ describe("Native function ABI", { skip: !existsSync(fixture) && "native fixture 
     });
   }
 
-  it("aligns indirect aggregate pointer slots after a narrow stack argument", { skip: indirectStackBug && "libffi upstream still uses the aggregate's alignment for its indirect pointer on Darwin ARM64" }, async () => {
+  it("aligns indirect aggregate pointer slots after a narrow stack argument", async () => {
     const Record = c.struct({ values: c.array(c.c_uint8, 17) });
     const fn = lib.func("fixture_indirect_stack_tags", c.c_uint32, [...Array(8).fill(c.c_int64), c.c_int8, Record, c.c_int8, c.c_uint16]);
     const input = Buffer.alloc(17, 0x41);
@@ -229,6 +228,24 @@ describe("Native function ABI", { skip: !existsSync(fixture) && "native fixture 
       expected.push([value, value]);
     }
     assert.deepEqual(results, expected);
+  });
+
+  it("aligns the indirect pointer of a 16-aligned aggregate after an odd number of stack slots", async () => {
+    class Aligned32 extends c.Structure {
+      static _align_ = 16;
+      static _fields_ = [
+        ["a", c.c_int64],
+        ["b", c.c_int64],
+        ["c", c.c_int64],
+        ["d", c.c_int64],
+      ];
+    }
+    assert.equal(c.alignment(Aligned32), 16);
+    const fn = lib.func("fixture_aligned_after_registers", c.c_int64, [...Array(9).fill(c.c_int64), Aligned32]);
+    const args = [1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n, 7n, new Aligned32(1n, 2n, 3n, 4n)];
+    const expected = 36n + 700000n + 4321n;
+    assert.equal(fn(...args), expected);
+    assert.equal(await fn.callAsync(...args), expected);
   });
 
   it("keeps large value arguments private when a C callee modifies or aliases its copies", async () => {

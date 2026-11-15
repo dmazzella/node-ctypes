@@ -1357,3 +1357,16 @@ FIXTURE_API struct FixtureTagged fixture_tagged_make(int32_t tag, int32_t i) {
   value.value.i = i;
   return value;
 }
+
+/* An indirect aggregate (larger than 16 bytes) after the integer registers and
+   one 8-byte stack slot: its pointer takes an 8-byte, 8-aligned slot, not one
+   aligned like the aggregate (libffi before 3.8.1 used 16 here on aarch64). */
+struct FixtureAligned32 {
+  FIXTURE_ALIGN16 int64_t a;
+  int64_t b, c, d;
+};
+
+FIXTURE_API int64_t fixture_aligned_after_registers(int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t stacked,
+                                                    struct FixtureAligned32 value) {
+  return a0 + a1 + a2 + a3 + a4 + a5 + a6 + a7 + stacked * 100000 + value.a + value.b * 10 + value.c * 100 + value.d * 1000;
+}
