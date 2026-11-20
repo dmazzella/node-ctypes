@@ -86,6 +86,36 @@ class TestPOINTERContentsProperty(unittest.TestCase):
         self.assertEqual(original.value, 42)
         self.assertEqual(addressof(p.contents), addressof(replacement))
 
+    def test_aggregate_views_do_not_reinitialize_the_pointee(self):
+        for base in (Structure, Union):
+            calls = 0
+
+            class Item(base):
+                _fields_ = [('value', c_int32)]
+
+                def __init__(self, *args):
+                    nonlocal calls
+                    super().__init__(*args)
+                    calls += 1
+                    self.value = -1
+
+            original = Item()
+            replacement = Item()
+            for p in (pointer(original), cast(addressof(original), POINTER(Item))):
+                original.value = 17
+                view = p.contents
+                indexed = p[0]
+                self.assertIsInstance(view, Item)
+                self.assertIsInstance(indexed, Item)
+                self.assertIsNot(view, indexed)
+                self.assertEqual(view.value, 17)
+                p.contents = replacement
+                indexed.value = 23
+                self.assertEqual(view.value, 23)
+                self.assertEqual(original.value, 23)
+                self.assertEqual(p.contents.value, -1)
+            self.assertEqual(calls, 2)
+
     def test_contents_throws_on_null_pointer(self):
         """.contents throws on NULL pointer"""
         IntPtr = POINTER(c_int32)

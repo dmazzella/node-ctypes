@@ -47,13 +47,13 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
 
   for (const kind of ["func", "attribute", "prototype"]) {
     for (const [mode, checked] of [["sync", false], ["sync", true], ["async", false], ["async", true]]) {
-      it(`${kind} ${mode} ${checked ? "checked" : "unchecked"}: a throwing result constructor releases owners and allows reuse`, async function (t) {
+      it(`${kind} ${mode} ${checked ? "checked" : "unchecked"}: a throwing structure _check_retval_ releases owners and allows reuse`, async function (t) {
         const library = new c.CDLL(fixture);
         t.after(() => library.close());
         let owner = Buffer.alloc(4096, 65);
         let reference = new WeakRef(owner);
         let fail = true;
-        const sentinel = new Error("result constructor sentinel");
+        const sentinel = new Error("structure result hook sentinel");
         let checks = 0;
         await new Promise(setImmediate);
         class Temporary extends c.c_void_p {
@@ -64,28 +64,37 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
           }
         }
         class Result extends c.Structure {
-          static _fields_ = [["x", c.c_int32], ["y", c.c_int32]];
-          constructor(bytes) {
-            super(bytes);
-            assert.deepEqual([this.x, this.y], [7, 8]);
+          static _fields_ = [
+            ["x", c.c_int32],
+            ["y", c.c_int32],
+          ];
+          static _check_retval_(value) {
+            assert.deepEqual([value.x, value.y], [7, 8]);
             for (let i = 0; i < 4; i++) gc();
-            assert.ok(reference.deref(), "the result constructor lost the argument owner");
+            assert.ok(reference.deref(), "the result hook lost the argument owner");
             if (fail) throw sentinel;
+            return value;
           }
         }
         const fn = bind(library, kind, Result, [c.c_int32, c.c_int32, Temporary], "fixture_point_make_tail");
-        fn.errcheck = checked ? (result, invoked, args) => {
-          checks++;
-          assert.equal(invoked, fn);
-          assert.deepEqual(args, [7, 8, 0]);
-          return result;
-        } : null;
+        fn.errcheck = checked
+          ? (result, invoked, args) => {
+              checks++;
+              assert.equal(invoked, fn);
+              assert.deepEqual(args, [7, 8, 0]);
+              return result;
+            }
+          : null;
         try {
           if (mode === "async") await assert.rejects(fn.callAsync(7, 8, 0), (error) => error === sentinel);
-          else assert.throws(() => fn(7, 8, 0), (error) => error === sentinel);
+          else
+            assert.throws(
+              () => fn(7, 8, 0),
+              (error) => error === sentinel,
+            );
           assert.equal(checks, 0);
           await collect();
-          assert.equal(reference.deref(), undefined, "a throwing constructor retained the argument owner");
+          assert.equal(reference.deref(), undefined, "a throwing result hook retained the argument owner");
           fail = false;
           owner = Buffer.alloc(4096, 65);
           reference = new WeakRef(owner);
@@ -575,6 +584,21 @@ describe("errcheck ownership and per-call snapshots", { skip: !existsSync(fixtur
     };
     await assert.rejects(fn.callAsync(17, 5), /output hook failed/);
     fn.errcheck = null;
+  });
+
+  it("a nested positional call does not inherit the outer paramflags hook", function () {
+    const fn = c.CFUNCTYPE(c.c_int32, c.c_int32).bind(lib, "fixture_scalar_i32", [[1, "x"]]);
+    let hooks = 0;
+    fn.errcheck = (value, called, args) => {
+      assert.equal(++hooks, 1);
+      assert.equal(called, fn);
+      fn.errcheck = null;
+      assert.equal(fn(9), 9);
+      return value + args[0];
+    };
+    assert.equal(fn(5), 10);
+    assert.equal(fn(7), 7);
+    assert.equal(hooks, 1);
   });
 
   for (const async of [false, true]) {

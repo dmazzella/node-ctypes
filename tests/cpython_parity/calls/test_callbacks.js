@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import * as c from "node-ctypes";
-import { LIBC } from "../_support.js";
+import { FIXTURE, LIBC } from "../_support.js";
 
 const { ARRAY } = c;
 
@@ -55,6 +55,62 @@ describe("TestCallbacks", function () {
     assert.equal(typeof callback, "function");
     assert.equal(callback(null, null), 0);
     assert.ok(c.cast(callback, c.c_void_p).value);
+  });
+
+  it("test_aggregate_callback_constructs_before_copying_c_fields", function () {
+    using lib = new c.CDLL(FIXTURE);
+    const Words = ARRAY(c.c_int32, 2);
+    for (const Base of [c.Structure, c.Union]) {
+      const initialized = [];
+      const received = [];
+      class Record extends Base {
+        static _fields_ =
+          Base === c.Structure
+            ? [
+                ["x", c.c_int32],
+                ["y", c.c_int32],
+              ]
+            : [
+                ["scalar", c.c_int64],
+                ["values", Words],
+              ];
+        constructor(...args) {
+          super(...args);
+          const view = Words.from_buffer(this);
+          initialized.push([this, args.length, [...view], view]);
+          view[0] = 90;
+        }
+      }
+      const prototype = c.CFUNCTYPE(c.c_int32, Record);
+      const callback = prototype((record) => {
+        received.push(record);
+        return Base === c.Structure ? record.x + record.y : record.values[0] + record.values[1];
+      });
+      try {
+        let result;
+        if (Base === c.Structure) {
+          const invoke = lib.fixture_point_callback;
+          invoke.argtypes = [prototype, c.c_int32, c.c_int32];
+          invoke.restype = c.c_int32;
+          result = invoke(callback, 3, 4);
+        } else {
+          const make = lib.fixture_return_union_make;
+          make.argtypes = [c.c_int32, c.c_int32];
+          make.restype = Record;
+          result = callback(make(3, 4));
+        }
+        assert.equal(result, 7);
+        assert.equal(initialized.length, 1);
+        const [obj, argc, before, view] = initialized[0];
+        assert.deepEqual([argc, before], [0, [0, 0]]);
+        assert.equal(received[0], obj);
+        assert.deepEqual([...view], [3, 4]);
+        view[1] = 12;
+        assert.equal(Base === c.Structure ? obj.y : obj.values[1], 12);
+      } finally {
+        callback.release();
+      }
+    }
   });
 
   it("test_callback_ignores_instance_call_attribute", function () {

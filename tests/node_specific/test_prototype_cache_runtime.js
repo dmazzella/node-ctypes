@@ -120,6 +120,34 @@ describe("interned prototype bindings", { skip: !existsSync(fixture) && `${fixtu
   });
   after(() => lib.close());
 
+  it("rejects a missing descriptor without rebinding and leaves native descriptor getters lazy", function () {
+    const fn = lib.fixture_scalar_i32;
+    fn.argtypes = [c.c_int32];
+    fn.restype = c.c_int32;
+    const bound = fn.callAsync;
+    const wrapper = Object.create(null);
+    assert.throws(() => (fn.restype = wrapper), TypeError);
+    assert.throws(() => (fn.argtypes = [wrapper]), TypeError);
+    assert.throws(() => c.CFUNCTYPE(c.c_int32, wrapper), TypeError);
+    assert.equal(fn.callAsync, bound);
+
+    const descriptor = new c.ArrayType(c.CType.INT32, 2);
+    let reads = 0;
+    Object.defineProperty(wrapper, "_native", {
+      get() {
+        reads++;
+        return descriptor;
+      },
+    });
+    const missing = lib.fixture_absent_signature_symbol;
+    missing.argtypes = [wrapper];
+    missing.restype = wrapper;
+    const prototype = c.CFUNCTYPE(c.c_int32, wrapper);
+    assert.equal(c.CFUNCTYPE(c.c_int32, wrapper), prototype);
+    assert.equal(reads, 0);
+    assert.equal(fn(7), 7);
+  });
+
   it("a prototype cast retains its source native function and library through async uses", async function () {
     function escape() {
       const library = new c.CDLL(fixture);

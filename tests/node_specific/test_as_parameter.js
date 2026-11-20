@@ -71,6 +71,37 @@ describe("Node-specific parameter adapters", function () {
     }
   });
 
+  it("async class parameters reject other aggregate classes but keep JS field and byte inputs", async function (t) {
+    class Point extends c.Structure {
+      static _fields_ = [
+        ["x", c.c_int32],
+        ["y", c.c_int32],
+      ];
+    }
+    class Other extends c.Structure {
+      static _fields_ = [
+        ["constructor", c.c_int32],
+        ["y", c.c_int32],
+      ];
+    }
+    class Child extends Point {}
+    const executor = new c.Executor();
+    t.after(() => executor.close());
+    const direct = lib.func("fixture_point_sum", c.c_int32, [Point]);
+    const address = c.CFUNCTYPE(c.c_int32, Point)(direct.address);
+    const layout = c.struct({ x: c.c_int32, y: c.c_int32 });
+    const fields = { x: 3, y: 4 };
+    const record = layout.create(fields);
+    const bad = new Other(3, 4);
+    for (const fn of [direct, address]) {
+      for (const run of [(a) => fn.callAsync(a), (a) => fn.callOn(executor, a)]) {
+        await assert.rejects(async () => run(bad), { constructor: c.ArgumentError, message: "argument 1: TypeError: expected Point instance instead of Other" });
+        for (const input of [new Child(3, 4), fields, record, record._buffer, new Uint8Array(record._buffer)]) assert.equal(await run(input), 7);
+      }
+    }
+    assert.equal(lib.func("fixture_point_sum", c.c_int32, [layout])(bad), 7);
+  });
+
   it("terminal adapters preserve primitive values and getter order for async calls", async function () {
     const integer = lib.func("fixture_scalar_i32", c.c_int32, [c.c_int32]);
     const length = lib.func("fixture_string_length", c.c_size_t, [c.c_char_p]);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { before, describe, it } from "node:test";
-import { POINTER, pointer, c_int32, c_uint32, c_double, c_float, c_char, c_void_p, c_size_t, Structure, cast, sizeof, addressof, byref, ARRAY, CDLL } from "node-ctypes";
+import { POINTER, pointer, c_int32, c_uint32, c_double, c_float, c_char, c_void_p, c_size_t, Structure, Union, cast, sizeof, addressof, byref, ARRAY, CDLL } from "node-ctypes";
 import { LIBC } from "../_support.js";
 
 describe("TestPOINTERTypeCreation", function () {
@@ -47,6 +47,35 @@ describe("TestPOINTERContentsProperty", function () {
     p.contents = replacement;
     assert.equal(original.value, 42);
     assert.equal(addressof(p.contents), addressof(replacement));
+  });
+  it("test_aggregate_views_do_not_reinitialize_the_pointee", function () {
+    for (const Base of [Structure, Union]) {
+      let calls = 0;
+      class Item extends Base {
+        static _fields_ = [["value", c_int32]];
+        constructor(...args) {
+          super(...args);
+          calls++;
+          this.value = -1;
+        }
+      }
+      const original = new Item();
+      const replacement = new Item();
+      for (const p of [pointer(original), cast(addressof(original), POINTER(Item))]) {
+        original.value = 17;
+        const view = p.contents;
+        const indexed = p[0];
+        assert.ok(view instanceof Item && indexed instanceof Item);
+        assert.notEqual(view, indexed);
+        assert.equal(view.value, 17);
+        p.contents = replacement;
+        indexed.value = 23;
+        assert.equal(view.value, 23);
+        assert.equal(original.value, 23);
+        assert.equal(p.contents.value, -1);
+      }
+      assert.equal(calls, 2);
+    }
   });
   it("test_contents_throws_on_null_pointer", function () {
     const p = POINTER(c_int32).create();

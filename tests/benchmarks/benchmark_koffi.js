@@ -422,6 +422,28 @@ try {
       34,
     );
   }
+  // Keep the original two-view case; these isolate field access on the same C fixture.
+  for (const [label, makeBody] of [
+    ["no field read", () => () => 34n],
+    [
+      "one field view",
+      () => (value) => {
+        const values = value.values;
+        return BigInt(values[0] + values[32]);
+      },
+    ],
+  ]) {
+    const bytes = c.callback(makeBody(), c.c_int64, [CallbackBytes]);
+    const otherBytes = registerCallback(bytes, BytesCallback, makeBody());
+    add(
+      `C -> JS callback (indirect bytes33, ${label})`,
+      "Callbacks",
+      "by-value struct/array -> normalized number",
+      () => Number(invokeBytes(bytes)),
+      () => Number(otherInvokeBytes(otherBytes)),
+      34,
+    );
+  }
   const safeCallback = c.threadSafeCallback((value) => value + 1, c.c_int32, [c.c_int32]);
   const otherSafeCallback = registerCallback(safeCallback, Callback, (value) => value + 1);
   add(
@@ -456,6 +478,15 @@ try {
     () => otherInferred(...inferredArgs),
     322,
   );
+  const declaredMixed = bind("fixture_inferred_mixed", c.c_double, [c.c_int32, c.c_double, c.c_int32]);
+  add(
+    "declared mixed (argtypes control)",
+    "Inferred calls",
+    "number",
+    () => declaredMixed(...inferredArgs),
+    () => otherInferred(...inferredArgs),
+    322,
+  );
   const stackArgs = Array.from({ length: 10 }, (_, i) => i + 1);
   const inferredStack = bindExtra("fixture_abi_i32_stack", c.c_int64, [], stackArgs, 385n);
   const otherInferredStack = other.func("fixture_abi_i32_stack", "int64_t", Array(10).fill("int32_t"));
@@ -464,6 +495,15 @@ try {
     "Inferred calls",
     "number (result normalized)",
     () => Number(inferredStack(...stackArgs)),
+    () => otherInferredStack(...stackArgs),
+    385,
+  );
+  const declaredStack = bind("fixture_abi_i32_stack", c.c_int64, Array(10).fill(c.c_int32));
+  add(
+    "declared stack (argtypes control)",
+    "Inferred calls",
+    "number (result normalized)",
+    () => Number(declaredStack(...stackArgs)),
     () => otherInferredStack(...stackArgs),
     385,
   );

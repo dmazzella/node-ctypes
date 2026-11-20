@@ -4,7 +4,7 @@
 //
 // node-addon-api è lo standard del progetto. Qui stanno le sole chiamate N-API C
 // ammesse, e solo quando:
-//   1. stanno nel percorso caldo di FFIFunction::Call;
+//   1. stanno nel percorso caldo di una chiamata FFI;
 //   2. node-addon-api non ha un equivalente;
 //   3. un benchmark mostra un guadagno misurabile.
 // Ogni helper riceve tipi Napi::*, controlla lo stato di ritorno e segnala gli
@@ -60,6 +60,22 @@ inline constexpr size_t kMaxUtf8CharBytes = 4;
   }
   NAPI_THROW_IF_FAILED(value.Env(), status, std::nullopt);
   return length;
+}
+
+// La chiamata asincrona possiede i byte fino al completamento. La lunghezza
+// esatta include eventuali NUL interni ma non il terminatore scritto da N-API.
+inline void AppendUtf8(const Napi::String& str, std::vector<char>& storage) {
+  size_t length = 0;
+  const auto env = str.Env();
+  const napi_status measured = napi_get_value_string_utf8(env, str, nullptr, 0, &length);
+  NAPI_THROW_IF_FAILED_VOID(env, measured);
+  if (length >= storage.max_size() - storage.size()) [[unlikely]] {
+    NAPI_THROW_VOID(Napi::RangeError::New(env, "string argument storage too large"));
+  }
+  storage.resize(storage.size() + length + 1);
+  const auto dst = std::span(storage).last(length + 1);
+  const napi_status copied = napi_get_value_string_utf8(env, str, dst.data(), dst.size(), nullptr);
+  NAPI_THROW_IF_FAILED_VOID(env, copied);
 }
 
 // Memoria di una vista (Buffer, ogni TypedArray, DataView) con una sola

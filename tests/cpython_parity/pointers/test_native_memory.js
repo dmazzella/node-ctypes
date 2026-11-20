@@ -10,6 +10,18 @@ class Point extends c.Structure {
   ];
 }
 
+function initializedWord(Base) {
+  return class Word extends Base {
+    static _fields_ = [["value", c.c_int32]];
+    static initializations = 0;
+    constructor(...args) {
+      super(...args);
+      Word.initializations++;
+      this.value = -1;
+    }
+  };
+}
+
 describe("TestNativeMemory", function () {
   let libc, fixture, malloc, free, cmemset, cmemcpy, blocks;
   before(() => {
@@ -54,6 +66,43 @@ describe("TestNativeMemory", function () {
     value.value = -7;
     assert.equal(c.c_int32.from_buffer_copy(Buffer.from(c.string_at(address, 4), "latin1")).value, -7);
     assert.equal(c.addressof(value), address);
+  });
+
+  it("test_aggregate_from_buffer_copy_skips_initializer", function () {
+    for (const Base of [c.Structure, c.Union]) {
+      const Word = initializedWord(Base);
+      const source = c.ARRAY(c.c_int32, 2)(101, 17);
+      const copy = Word.from_buffer_copy(source, c.sizeof(c.c_int32));
+      assert.ok(copy instanceof Word);
+      source[1] = 23;
+      assert.equal(copy.value, 17);
+      copy.value = 31;
+      assert.equal(source[1], 23);
+      assert.equal(Word.initializations, 0);
+    }
+  });
+
+  it("test_aggregate_in_dll_skips_initializer", function () {
+    const symbol = "fixture_global_value";
+    const scalar = c.c_int32.in_dll(fixture, symbol);
+    const saved = scalar.value;
+    try {
+      for (const Base of [c.Structure, c.Union]) {
+        const Word = initializedWord(Base);
+        scalar.value = 17;
+        const view = Word.in_dll(fixture, symbol);
+        assert.ok(view instanceof Word);
+        assert.equal(scalar.value, 17);
+        assert.equal(c.addressof(view), c.addressof(scalar));
+        scalar.value = 23;
+        assert.equal(view.value, 23);
+        view.value = 31;
+        assert.equal(scalar.value, 31);
+        assert.equal(Word.initializations, 0);
+      }
+    } finally {
+      scalar.value = saved;
+    }
   });
 
   it("test_nested_views", function () {

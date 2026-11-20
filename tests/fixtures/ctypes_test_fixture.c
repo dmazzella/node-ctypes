@@ -720,6 +720,17 @@ FIXTURE_API int32_t fixture_point_callback(int32_t (*callback)(struct FixturePoi
   return callback(value);
 }
 
+FIXTURE_API int64_t
+fixture_mixed_callback_loop(int32_t (*callback)(struct FixturePoint, const int32_t*, int32_t, int16_t), int32_t count) {
+  const struct FixturePoint point = {3, 4};
+  const int32_t value = 5;
+  int64_t sum = 0;
+  for (int32_t i = 0; i < count; ++i) {
+    sum += callback(point, i % 2 ? NULL : &value, 7, i % 2 ? 0 : -1);
+  }
+  return sum;
+}
+
 FIXTURE_API int32_t fixture_point_sum_extra(struct FixturePoint value, int32_t count, ...) {
   int32_t result = value.x + value.y;
   va_list arguments;
@@ -1250,7 +1261,134 @@ struct FixturePacked {
   double c;
   uint16_t d;
 };
+struct FixturePackedPair {
+  uint8_t tag;
+  uint32_t value;
+};
 #pragma pack(pop)
+
+struct FixturePackedRows {
+  struct FixturePackedPair rows[2];
+};
+union FixturePackedOverlay {
+  struct FixturePackedPair rows[2];
+  uint8_t bytes[sizeof(struct FixturePackedRows)];
+};
+
+static uint32_t packed_rows_sum(const struct FixturePackedPair rows[2]) {
+  return rows[0].value + rows[1].value + 2u * rows[0].tag + 3u * rows[1].tag;
+}
+FIXTURE_API uint32_t fixture_packed_rows(struct FixturePackedRows value) {
+  return packed_rows_sum(value.rows);
+}
+FIXTURE_API uint32_t fixture_packed_overlay(union FixturePackedOverlay value) {
+  return packed_rows_sum(value.rows);
+}
+FIXTURE_API uint32_t fixture_packed_rows_reference(const uint8_t* bytes, bool overlay) {
+  if (overlay) {
+    union FixturePackedOverlay value;
+    memcpy(&value, bytes, sizeof(value));
+    uint32_t (*volatile call)(union FixturePackedOverlay) = fixture_packed_overlay;
+    return call(value);
+  }
+  struct FixturePackedRows value;
+  memcpy(&value, bytes, sizeof(value));
+  uint32_t (*volatile call)(struct FixturePackedRows) = fixture_packed_rows;
+  return call(value);
+}
+
+struct FixtureFloatCell {
+  float value;
+};
+struct FixtureFloatMatrix {
+  struct FixtureFloatCell rows[2][2];
+};
+struct FixtureIntCell {
+  int32_t value;
+};
+struct FixtureIntMatrix {
+  struct FixtureIntCell rows[2][2];
+};
+struct FixturePackedMatrix {
+  struct FixturePackedPair rows[2][2];
+};
+
+FIXTURE_API double fixture_float_matrix_read(struct FixtureFloatMatrix m) {
+  return m.rows[0][0].value + 2 * m.rows[0][1].value + 3 * m.rows[1][0].value + 4 * m.rows[1][1].value;
+}
+FIXTURE_API struct FixtureFloatMatrix fixture_float_matrix_make(void) {
+  struct FixtureFloatMatrix m = {{{{1.25f}, {-2.5f}}, {{4.0f}, {8.5f}}}};
+  return m;
+}
+FIXTURE_API double fixture_int_matrix_read(struct FixtureIntMatrix m) {
+  return m.rows[0][0].value + 2.0 * m.rows[0][1].value + 3.0 * m.rows[1][0].value + 4.0 * m.rows[1][1].value;
+}
+FIXTURE_API struct FixtureIntMatrix fixture_int_matrix_make(void) {
+  struct FixtureIntMatrix m = {{{{13}, {-29}}, {{411}, {-876}}}};
+  return m;
+}
+FIXTURE_API double fixture_packed_matrix_read(struct FixturePackedMatrix m) {
+  double sum = 0;
+  for (size_t r = 0; r < 2; ++r) {
+    for (size_t c = 0; c < 2; ++c) {
+      sum += (1 + 2 * r + c) * (m.rows[r][c].value + 257.0 * m.rows[r][c].tag);
+    }
+  }
+  return sum;
+}
+FIXTURE_API struct FixturePackedMatrix fixture_packed_matrix_make(void) {
+  struct FixturePackedMatrix m = {{{{3, 0x123456}, {17, 0x456789}}, {{9, 0xabcdef}, {41, 0xfedcba}}}};
+  return m;
+}
+
+struct FixtureShortCell {
+  uint8_t tag;
+  uint16_t value;
+};
+#pragma pack(push, 1)
+struct FixturePackedShortCell {
+  uint8_t tag;
+  uint16_t value;
+};
+#pragma pack(pop)
+
+/* Both matrices fit in two SysV eightbytes. Only the packed one has
+   unaligned fields, so equal bytes are not enough to prove the ABI. */
+#define SHORT_MATRIX(name, cell, matrix)                                            \
+  struct matrix {                                                                   \
+    struct cell rows[2][2];                                                         \
+  };                                                                                \
+  FIXTURE_API double fixture_##name##_matrix_read(struct matrix m) {                \
+    double sum = 0;                                                                 \
+    for (size_t r = 0; r < 2; ++r)                                                  \
+      for (size_t c = 0; c < 2; ++c)                                                \
+        sum += (1 + 2 * r + c) * (m.rows[r][c].value + 257.0 * m.rows[r][c].tag);   \
+    return sum;                                                                     \
+  }                                                                                 \
+  FIXTURE_API struct matrix fixture_##name##_matrix_make(void) {                    \
+    struct matrix m = {{{{3, 0x1234}, {17, 0x4567}}, {{9, 0xabcd}, {41, 0xfedc}}}}; \
+    return m;                                                                       \
+  }
+SHORT_MATRIX(short, FixtureShortCell, FixtureShortMatrix)
+SHORT_MATRIX(packed_short, FixturePackedShortCell, FixturePackedShortMatrix)
+#undef SHORT_MATRIX
+
+/* A typed C caller supplies both the result bytes and the argument checksum
+   without requiring the FFI caller itself to pass or return an aggregate. */
+#define MATRIX_REFERENCE(name, type)                                     \
+  FIXTURE_API double fixture_##name##_matrix_reference(void* bytes) {    \
+    struct type (*volatile make)(void) = fixture_##name##_matrix_make;   \
+    double (*volatile read)(struct type) = fixture_##name##_matrix_read; \
+    struct type m = make();                                              \
+    memcpy(bytes, &m, sizeof(m));                                        \
+    return read(m);                                                      \
+  }
+MATRIX_REFERENCE(float, FixtureFloatMatrix)
+MATRIX_REFERENCE(int, FixtureIntMatrix)
+MATRIX_REFERENCE(packed, FixturePackedMatrix)
+MATRIX_REFERENCE(short, FixtureShortMatrix)
+MATRIX_REFERENCE(packed_short, FixturePackedShortMatrix)
+#undef MATRIX_REFERENCE
 
 FIXTURE_API double fixture_packed_sum(struct FixturePacked value) {
   return value.a + value.b + value.c + value.d;

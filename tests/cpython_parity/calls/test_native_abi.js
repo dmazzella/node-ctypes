@@ -32,6 +32,79 @@ describe("TestNativeABI", function () {
     assert.equal(fn(-7, 8, 9n), 10);
   });
 
+  it("test_record_matrix_by_value", function () {
+    class IntCell extends c.Structure {
+      static _fields_ = [["value", c.c_int32]];
+    }
+    class PackedCell extends c.Structure {
+      static _pack_ = 1;
+      static _fields_ = [
+        ["tag", c.c_uint8],
+        ["value", c.c_uint32],
+      ];
+    }
+    for (const [Cell, name, size, align] of [
+      [IntCell, "int", 16, 4],
+      [PackedCell, "packed", 20, 1],
+    ]) {
+      class Matrix extends c.Structure {
+        static _fields_ = [["rows", c.ARRAY(c.ARRAY(Cell, 2), 2)]];
+      }
+      assert.deepEqual([c.sizeof(Matrix), c.alignment(Matrix)], [size, align]);
+      const expected = new Matrix();
+      const ref = lib[`fixture_${name}_matrix_reference`];
+      ref.argtypes = [c.c_void_p];
+      ref.restype = c.c_double;
+      const score = ref(c.byref(expected));
+      const read = lib[`fixture_${name}_matrix_read`];
+      read.argtypes = [Matrix];
+      read.restype = c.c_double;
+      assert.equal(read(expected), score);
+      const input = new Matrix();
+      input.rows[1][0].value = 7;
+      assert.equal(read(input), 21);
+      const make = lib[`fixture_${name}_matrix_make`];
+      make.argtypes = [];
+      make.restype = Matrix;
+      const result = make();
+      for (let r = 0; r < 2; ++r) {
+        for (let col = 0; col < 2; ++col) {
+          assert.equal(result.rows[r][col].value, expected.rows[r][col].value);
+          if (Cell === PackedCell) assert.equal(result.rows[r][col].tag, expected.rows[r][col].tag);
+        }
+      }
+    }
+  });
+
+  it("test_by_value_snapshot_before_later_from_param", function () {
+    const word = c.sizeof(c.c_void_p);
+    for (const size of [word, word + 1, 33]) {
+      class Block extends c.Structure {
+        static _fields_ = [["values", c.ARRAY(c.c_uint8, size)]];
+      }
+      const block = new Block();
+      class Later extends c.c_int8 {
+        static from_param(value) {
+          block.values[0] = 99;
+          return new c.c_int8(value);
+        }
+      }
+      const name = `fixture_bytes_${size}_stack`;
+      const types = [...Array(7).fill(c.c_int64), Block, Later, c.c_uint16];
+      const fn = lib[name];
+      fn.argtypes = types;
+      fn.restype = c.c_int64;
+      const prototype = c.CFUNCTYPE(c.c_int64, ...types)([name, lib]);
+      for (const call of [fn, prototype]) {
+        for (const input of [block, Block.from_address(c.addressof(block))]) {
+          block.values[0] = 7;
+          assert.equal(call(...Array(7).fill(0n), input, 0, 0), size > word ? 7n : 99n);
+          assert.equal(block.values[0], 99);
+        }
+      }
+    }
+  });
+
   it("test_callback_scalar_results", function () {
     const cases = [
       ["i8", c.c_int8, [-128, -1, 0, 127]],

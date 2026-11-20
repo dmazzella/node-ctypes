@@ -91,16 +91,60 @@ class TestPythonParity(unittest.TestCase):
 
         r = RECT(POINT(1, 2), POINT(3, 4))
         a = r.a
+        alias = r.a
         self.assertIsInstance(a, POINT)
+        self.assertIsNot(a, alias)
+        a.label = "first"
+        self.assertFalse(hasattr(alias, "label"))
+        self.assertEqual(ctypes.addressof(a), ctypes.addressof(alias))
         a.x = 10
-        self.assertEqual(r.a.x, 10)
+        self.assertEqual(alias.x, 10)
         r.a = POINT(5, 6)
-        self.assertEqual([a.x, a.y], [5, 6])
+        self.assertEqual([a.x, alias.y], [5, 6])
         self.assertEqual(ctypes.addressof(r.b), ctypes.addressof(r) + sizeof(POINT))
         v = Value()
         v.p.y = 7
         self.assertIsInstance(v.p, POINT)
         self.assertEqual(v.n, 7 << 32)
+
+    def test_nested_field_reads_bypass_initializers(self):
+        class Point(Structure):
+            _fields_ = [("x", c_int)]
+
+            def __init__(self):
+                raise RuntimeError("Point initializer ran")
+
+        class Choice(Union):
+            _fields_ = [("p", Point), ("bits", c_int)]
+
+            def __init__(self):
+                raise RuntimeError("Choice initializer ran")
+
+        class Box(Structure):
+            _anonymous_ = ("choice",)
+            _fields_ = [("tag", c_int), ("choice", Choice)]
+
+        storage = Box()
+        box = Box.from_address(ctypes.addressof(storage))
+        storage.tag = 11
+        storage.bits = 7
+        choice = box.choice
+        explicit = choice.p
+        promoted = box.p
+        self.assertIsInstance(choice, Choice)
+        self.assertIsInstance(explicit, Point)
+        self.assertIsInstance(promoted, Point)
+        self.assertIsNot(choice, box.choice)
+        self.assertIsNot(explicit, choice.p)
+        self.assertIsNot(promoted, box.p)
+        self.assertEqual(
+            ctypes.addressof(promoted), ctypes.addressof(box) + sizeof(c_int)
+        )
+        self.assertEqual(explicit.x, 7)
+        promoted.x = 19
+        self.assertEqual(
+            [explicit.x, choice.bits, storage.bits, storage.tag], [19, 19, 19, 11]
+        )
 
     def test_nested_instances_copied_bytewise(self):
         class Data(Union):

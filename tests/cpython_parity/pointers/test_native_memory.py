@@ -9,6 +9,19 @@ class Point(c.Structure):
     _fields_ = [("x", c.c_int32), ("y", c.c_int32)]
 
 
+def initialized_word(base):
+    class Word(base):
+        _fields_ = [("value", c.c_int32)]
+        initializations = 0
+
+        def __init__(self, *args):
+            super().__init__(*args)
+            Word.initializations += 1
+            self.value = -1
+
+    return Word
+
+
 class TestNativeMemory(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -49,6 +62,38 @@ class TestNativeMemory(unittest.TestCase):
         value.value = -7
         self.assertEqual(c.c_int32.from_buffer_copy(c.string_at(address, 4)).value, -7)
         self.assertEqual(c.addressof(value), address)
+
+    def test_aggregate_from_buffer_copy_skips_initializer(self):
+        for base in (c.Structure, c.Union):
+            Word = initialized_word(base)
+            source = (c.c_int32 * 2)(101, 17)
+            copy = Word.from_buffer_copy(source, c.sizeof(c.c_int32))
+            self.assertIsInstance(copy, Word)
+            source[1] = 23
+            self.assertEqual(copy.value, 17)
+            copy.value = 31
+            self.assertEqual(source[1], 23)
+            self.assertEqual(Word.initializations, 0)
+
+    def test_aggregate_in_dll_skips_initializer(self):
+        symbol = "fixture_global_value"
+        scalar = c.c_int32.in_dll(self.fixture, symbol)
+        saved = scalar.value
+        try:
+            for base in (c.Structure, c.Union):
+                Word = initialized_word(base)
+                scalar.value = 17
+                view = Word.in_dll(self.fixture, symbol)
+                self.assertIsInstance(view, Word)
+                self.assertEqual(scalar.value, 17)
+                self.assertEqual(c.addressof(view), c.addressof(scalar))
+                scalar.value = 23
+                self.assertEqual(view.value, 23)
+                view.value = 31
+                self.assertEqual(scalar.value, 31)
+                self.assertEqual(Word.initializations, 0)
+        finally:
+            scalar.value = saved
 
     def test_nested_views(self):
         class Shape(c.Structure):

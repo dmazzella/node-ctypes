@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import * as ctypes from "node-ctypes";
 import v8 from "node:v8";
 import vm from "node:vm";
-import { keptObject } from "../../lib/structures/helpers/common.js";
+import { keptObject } from "../../lib/memory/ownership.js";
 import { LIBC } from "../cpython_parity/_support.js";
 const { Structure, Union, BigEndianStructure, CDLL, sizeof, alignment, c_int8, c_uint8, c_uint16, c_int32, c_uint32, c_int64, c_uint64, c_char_p } = ctypes;
 v8.setFlagsFromString("--expose-gc");

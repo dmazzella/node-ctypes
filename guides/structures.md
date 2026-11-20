@@ -71,10 +71,36 @@ are booleans. Boolean bitfields normalize before masking and read as booleans.
 Nested structs, anonymous fields (`static _anonymous_ = ["data"]`),
 explicit packing (`static _pack_ = 1`), minimum alignment
 (`static _align_ = 16`), self-referential pointers (`POINTER(() => Node)`)
-and subclasses that add fields to their base class all work identically to
-Python. The layout of bit fields follows Python's `_layout_`: `"gcc-sysv"`
+and `Structure` subclasses that add fields follow Python's layout rules.
+The layout of bit fields follows Python's `_layout_`: `"gcc-sysv"`
 by default, `"ms"` on Windows or with `_pack_`. Bit fields wider than 53
 bits read as BigInt.
+
+A `Union` subclass without its own `_fields_` keeps the base layout in both
+libraries. If it declares `_fields_`, even `[]`, node-ctypes still reserves
+space for every inherited field. CPython can instead report a smaller
+`sizeof` while retaining the inherited field descriptors. The difference
+also affects array stride and the offsets of subsequent structure fields.
+If both libraries must use the same layout when adding a smaller member,
+declare a new union with the base union and the new member as alternatives.
+
+Reading a nested `Structure` or `Union` field returns a fresh instance of the
+declared class without running its constructor. Two reads of `rect.origin`
+give different objects at the same address: an ordinary JS property attached
+to one is not visible on the other, but writes to C fields are. Assigning a
+new value to `rect.origin` overwrites those bytes, so existing views see the
+replacement too. Each view keeps its container alive, whether obtained from
+`rect.origin`, `rect.get("origin")` or `rect.getFields(["origin"]).origin`.
+The container does not retain discarded views. If a loop accesses the same
+field repeatedly, keep `const origin = rect.origin` outside the loop to reuse
+the view without copying any bytes.
+
+For arrays of `Structure` or `Union` classes, indexing and iteration also
+return fresh views over the element's bytes without running its constructor.
+Keeping one such view keeps the array alive; the array does not retain
+discarded views. If `items` is such an array inside a `Structure` or `Union`,
+keeping either `holder.items` or `holder.items[i]` also keeps `holder` alive.
+Character array fields read as strings, not views.
 
 `_pack_` follows Python's integer conversion and permits zero and non-powers
 of two (for example `3`) with the MS layout. An explicit `_pack_`, including
@@ -87,17 +113,32 @@ with `_pack_`: as with GCC and clang, a structure with misaligned fields is
 passed in memory on x86-64 System V (Linux, macOS Intel), where Python
 ctypes passes it in registers and the called function reads wrong values.
 
+A matrix field such as `ARRAY(ARRAY(Cell, 2), 2)` stays inline when its
+structure is passed or returned by value. On ARM64, if `Cell` contains just
+one `c_float`, the four floats form a homogeneous floating-point aggregate.
+Node follows the C calling convention here: in this case CPython `ctypes`
+disagreed with a typed C caller for both arguments and results on the tested
+Windows and Linux ARM64 builds.
+
 Each returned structure or union owns a snapshot of its value, including
 results declared with functional `struct()` / `union()` definitions. Array
 views, nested composites and union getters remain valid after later calls,
 reentrant conversion or `errcheck`, and concurrent `callAsync()` jobs.
 Mutating one result does not modify another result's value storage.
 
-This is not a deep copy through pointers: pointer fields can still refer to
-the same external memory. Explicit `definition.toObject(buffer)` keeps its
-existing buffer-view behavior. Synchronous low-level native `struct_buffer`
-results are borrowed, reusable storage; public callables snapshot their
-results before any JavaScript result conversion.
+When the return type is a `Structure` or `Union` class, the result has that
+class's prototype and the bytes returned by C. As in CPython, materializing
+the result does not call the user's constructor; JavaScript instance field
+initializers do not run either. Use `_check_retval_` to validate or transform
+the result. Its return value is passed to the function's `errcheck`, if set.
+Explicit `new` still runs the constructor normally.
+
+Synchronous low-level native `struct_buffer` results use borrowed, reusable
+storage, so the wrapper copies the bytes before either hook can reenter the
+function. With `callAsync()` or `callOn()`, each native completion already
+owns its buffer; a class result uses it without a second copy. This is not a
+deep copy through pointers: pointer fields can still refer to the same external
+memory. Explicit `definition.toObject(buffer)` keeps its buffer-view behavior.
 
 Low-level native `StructType` descriptors are builders only until consumed.
 Adding a descriptor as a field, constructing an `ArrayType` from it (even at

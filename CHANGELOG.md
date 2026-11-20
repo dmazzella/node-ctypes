@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Reading a nested `Structure` or `Union` field returns a fresh view each
+  time, as in CPython: `s.inner === s.inner` is now `false`. Both views
+  still refer to the same C bytes. Keep a reference to the view if your
+  code relies on JavaScript object identity or attaches properties to it.
+- `from_buffer()`, `from_address()`, nested fields and array elements now
+  expose existing `Structure` or `Union` storage without running the user's
+  constructor or JavaScript instance field initializers. Explicit `new T()`
+  still runs them. This does not change by-value callback arguments: their
+  constructor is still called with no arguments.
+
 ### Fixed
 
 - **libffi headers generated on Windows**: with `core.autocrlf` the templates

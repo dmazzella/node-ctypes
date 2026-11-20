@@ -14,6 +14,97 @@ describe("Native function ABI", { skip: !existsSync(fixture) && "native fixture 
   });
   afterEach(() => lib.close());
 
+  it("passes arrays of packed records by value like a C caller", async () => {
+    class Pair extends c.Structure {
+      static _pack_ = 1;
+      static _fields_ = [
+        ["tag", c.c_uint8],
+        ["value", c.c_uint32],
+      ];
+    }
+    class Rows extends c.Structure {
+      static _fields_ = [["rows", c.ARRAY(Pair, 2)]];
+    }
+    class Overlay extends c.Union {
+      static _fields_ = [
+        ["rows", c.ARRAY(Pair, 2)],
+        ["bytes", c.ARRAY(c.c_uint8, 10)],
+      ];
+    }
+    const pair = c.struct({ tag: c.c_uint8, value: c.c_uint32 }, { pack: 1 });
+    const rows = c.array(pair, 2);
+    const bytes = Buffer.from([3, 0x56, 0x34, 0x12, 0, 17, 0x89, 0x67, 0x45, 0]);
+    const reference = lib.func("fixture_packed_rows_reference", c.c_uint32, [c.c_void_p, c.c_bool]);
+    for (const [symbol, overlay, types] of [
+      ["fixture_packed_rows", false, [Rows, c.struct({ rows })]],
+      ["fixture_packed_overlay", true, [Overlay, c.union({ rows, bytes: c.array(c.c_uint8, 10) })]],
+    ]) {
+      const expected = reference(bytes, overlay);
+      assert.equal(expected, 0x123456 + 0x456789 + 2 * 3 + 3 * 17);
+      for (const type of types) {
+        assert.deepEqual([c.sizeof(type), c.alignment(type)], [10, 1]);
+        const value = typeof type === "function" ? new type() : type.create();
+        bytes.copy(value._buffer);
+        const fn = lib.func(symbol, c.c_uint32, [type]);
+        assert.equal(fn(value), expected);
+        assert.equal(await fn.callAsync(value), expected);
+      }
+    }
+  });
+
+  it("passes and returns inline record matrices using their leaf ABI class", async () => {
+    for (const [name, cell, size] of [
+      ["float", c.struct({ value: c.c_float }), 16],
+      ["packed", c.struct({ tag: c.c_uint8, value: c.c_uint32 }, { pack: 1 }), 20],
+    ]) {
+      const type = c.struct({ rows: c.array(c.array(cell, 2), 2) });
+      assert.equal(c.sizeof(type), size);
+      const expected = type.create();
+      const ref = lib.func(`fixture_${name}_matrix_reference`, c.c_double, [c.c_void_p]);
+      const score = ref(expected._buffer);
+      const read = lib.func(`fixture_${name}_matrix_read`, c.c_double, [type]);
+      assert.equal(read(expected), score);
+      assert.equal(await read.callAsync(expected), score);
+      const make = lib.func(`fixture_${name}_matrix_make`, type, []);
+      for (const result of [make(), await make.callAsync()]) assert.deepEqual(result.rows._buffer, expected._buffer);
+    }
+  });
+
+  it("distinguishes register-sized natural and unaligned packed matrices in both directions", async () => {
+    const fields = { tag: c.c_uint8, value: c.c_uint16 };
+    const cells = (m) =>
+      Array.from({ length: 4 }, (_, i) => {
+        const { tag, value } = m.rows[i >> 1][i % 2];
+        return [tag, value];
+      });
+    for (const [name, cell, size, align] of [
+      ["short", c.struct(fields), 16, 2],
+      ["packed_short", c.struct(fields, { pack: 1 }), 12, 1],
+    ]) {
+      const type = c.struct({ rows: c.array(c.array(cell, 2), 2) });
+      assert.deepEqual([c.sizeof(type), c.alignment(type)], [size, align]);
+      const expected = type.create();
+      const ref = lib.func(`fixture_${name}_matrix_reference`, c.c_double, [c.c_void_p]);
+      const score = ref(expected._buffer);
+      const values = [
+        [3, 0x1234],
+        [17, 0x4567],
+        [9, 0xabcd],
+        [41, 0xfedc],
+      ];
+      assert.deepEqual(cells(expected), values);
+      assert.equal(
+        score,
+        values.reduce((sum, [tag, value], i) => sum + (i + 1) * (value + 257 * tag), 0),
+      );
+      const read = lib.func(`fixture_${name}_matrix_read`, c.c_double, [type]);
+      assert.equal(read(expected), score);
+      assert.equal(await read.callAsync(expected), score);
+      const make = lib.func(`fixture_${name}_matrix_make`, type, []);
+      for (const result of [make(), await make.callAsync()]) assert.deepEqual(cells(result), values);
+    }
+  });
+
   it("spills signed and unsigned integer arguments without losing high bits", async () => {
     const signed = lib.func("fixture_abi_i32_stack", c.c_int64, Array(10).fill(c.c_int32));
     const values = Array.from({ length: 10 }, (_, i) => (i % 2 ? -2147483648 : 2147483647));
@@ -262,6 +353,48 @@ describe("Native function ABI", { skip: !existsSync(fixture) && "native fixture 
     assert.deepEqual([...alias(input, input, 0xa5).values], values);
     assert.deepEqual(input, Buffer.from(values));
     assert.deepEqual([...record.values], values);
+  });
+
+  it("snapshots aggregate views before the next adapter on libuv and Executor calls", async (t) => {
+    const Record = c.struct({ values: c.array(c.c_uint8, 33) });
+    const executor = new c.Executor();
+    t.after(() => executor.close());
+    const backing = new Uint8Array(48);
+    const view = new DataView(backing.buffer, 4, 40);
+    class Mask extends c.c_uint8 {
+      static from_param(value) {
+        backing[4] = 99;
+        return value;
+      }
+    }
+    const fn = lib.func("fixture_large_mutate", Record, [Record, Mask]);
+    const ptr = c.CFUNCTYPE(Record, Record, Mask)(fn.address);
+    for (const call of [fn, ptr]) {
+      for (const invoke of [() => call.callAsync(view, 0), () => call.callOn(executor, view, 0)]) {
+        backing[4] = 7;
+        assert.equal((await invoke()).values[0], 7);
+        assert.equal(backing[4], 99);
+      }
+    }
+  });
+
+  it("snapshots a functional struct buffer exposed by a custom setter", () => {
+    const Record = c.struct(Object.fromEntries(Array.from({ length: 16 }, (_, i) => [`b${i}`, c.c_uint8])));
+    const set = Record.set;
+    let exposed;
+    Record.set = function (bytes, name, value) {
+      exposed = bytes;
+      return set.call(this, bytes, name, value);
+    };
+    class Later extends c.c_int8 {
+      static from_param(value) {
+        exposed[0] = 99;
+        return value;
+      }
+    }
+    const call = lib.func("fixture_bytes_16_stack", c.c_int64, [...Array(7).fill(c.c_int64), Record, Later, c.c_uint16]);
+    assert.equal(call(...Array(7).fill(0n), { b0: 7 }, 0, 0), 7n);
+    assert.equal(exposed[0], 99);
   });
 
   it("keeps inferred signatures and each variadic named-prefix boundary distinct", async () => {

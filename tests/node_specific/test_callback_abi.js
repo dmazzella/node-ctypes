@@ -48,6 +48,41 @@ describe("Native callback ABI", { skip: !existsSync(fixture) && "native fixture 
         return callback;
       }
 
+      it("wraps a non-null pointer before constructing an earlier struct argument", async () => {
+        const trace = [];
+        class Point extends c.Structure {
+          static _fields_ = [
+            ["x", c.c_int32],
+            ["y", c.c_int32],
+          ];
+          constructor() {
+            super();
+            trace.push("point");
+          }
+        }
+        class Scalar extends c.c_int32 {}
+        const pointer = Object.create(c.POINTER(c.c_int32), {
+          fromAddress: {
+            value(address) {
+              trace.push("pointer");
+              return c.POINTER(c.c_int32).fromAddress(address);
+            },
+          },
+        });
+        const cb = make(
+          (p, ptr, n, flag) => {
+            trace.push([p.x, p.y, ptr === null ? null : ptr.contents.value, n instanceof Scalar, n.value, flag]);
+            return n.value;
+          },
+          c.c_int32,
+          [Point, pointer, Scalar, c.wintypes.VARIANT_BOOL],
+        );
+        const invoke = caller("fixture_mixed_callback_loop", c.c_int64, [c.c_int32]);
+        const result = safe ? await invoke.callAsync(cb, 2) : invoke(cb, 2);
+        assert.equal(result, 14n);
+        assert.deepEqual(trace, ["pointer", "point", [3, 4, 5, true, 7, true], "point", [3, 4, null, true, 7, false]]);
+      });
+
       // Inside a synchronous call the first callbacks reuse the caller's
       // handle scope; later ones, and callbacks of a nested call, open their own.
       it("runs many callbacks in one call and callbacks of nested calls", () => {

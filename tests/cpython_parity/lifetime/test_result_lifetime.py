@@ -54,11 +54,54 @@ class TestResultLifetime(unittest.TestCase):
             self.assertEqual([first.x, first.y], [-100, 2])
             self.assertEqual([make(100, 101).x, first.x], [100, -100])
 
+    def test_returned_aggregate_skips_initializers_before_result_hooks(self):
+        types = [c.c_int32, c.c_int32]
+        for base, symbol in [(Point, "fixture_point_make"), (Number, "fixture_return_union_make")]:
+            events = []
+
+            class Result(base):
+                def __new__(cls, *args):
+                    events.append("new")
+                    return super().__new__(cls)
+
+                def __init__(self, *args):
+                    events.append("init")
+                    c.c_int32.from_buffer(self).value = 90
+
+                @staticmethod
+                def _check_retval_(value):
+                    events.append("retval")
+                    return (value,)
+
+            self.assertEqual(c.c_int32.from_buffer(Result()).value, 90)
+            self.assertEqual(events, ["new", "init"])
+            attr = getattr(self.library, symbol)
+            attr.argtypes, attr.restype = types, Result
+            prototype = c.CFUNCTYPE(Result, *types)((symbol, self.library))
+            for make in (attr, prototype):
+                events.clear()
+
+                def check(wrapped, function, args):
+                    events.append("errcheck")
+                    self.assertIs(function, make)
+                    self.assertEqual(args, (3, 4))
+                    return wrapped[0]
+
+                make.errcheck = check
+                value = make(3, 4)
+                self.assertIs(type(value), Result)
+                self.assertEqual(
+                    (value.x, value.y) if base is Point else tuple(value.values), (3, 4)
+                )
+                self.assertEqual(events, ["retval", "errcheck"])
+
     def test_nested_arrays(self):
         attribute = self.library.fixture_polyline_make
         attribute.argtypes = [c.c_int32]
         attribute.restype = Polyline
-        independent = c.CFUNCTYPE(Polyline, c.c_int32)(("fixture_polyline_make", self.library))
+        independent = c.CFUNCTYPE(Polyline, c.c_int32)(
+            ("fixture_polyline_make", self.library)
+        )
         for make in [attribute, independent]:
             first = make(1)
             later = [make(seed) for seed in range(2, 34)]

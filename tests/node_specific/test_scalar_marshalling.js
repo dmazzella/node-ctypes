@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import v8 from "node:v8";
 import vm from "node:vm";
 import * as c from "node-ctypes";
-import { activeArgumentOwners, activeOwnerStack } from "../../lib/structures/helpers/common.js";
+import { activeArgumentOwners, activeOwnerStack } from "../../lib/core/parameters.js";
 import { FIXTURE } from "../cpython_parity/_support.js";
 
 v8.setFlagsFromString("--expose-gc");

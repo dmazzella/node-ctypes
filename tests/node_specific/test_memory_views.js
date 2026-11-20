@@ -115,3 +115,54 @@ describe("memory API address contracts", { skip: !existsSync(fixture) && `${fixt
     assert.equal(c.memset(bytes, 0, 0), 0n);
   });
 });
+
+describe("nested class field view ownership", function () {
+  class Leaf extends c.Structure {
+    static _fields_ = [["n", c.c_int]];
+  }
+  class Members extends c.Union {
+    static _fields_ = [["leaf", Leaf]];
+  }
+  class Parent extends c.Structure {
+    static _anonymous_ = ["members"];
+    static _fields_ = [["members", Members]];
+  }
+  async function collect() {
+    for (let i = 0; i < 4; i++) {
+      await new Promise((resolve) => setImmediate(resolve));
+      gc();
+    }
+  }
+
+  for (const [access, readMember, readFromParent] of [
+    ["property", (members) => members.leaf, (parent) => parent.leaf],
+    ["get()", (members) => members.get("leaf"), (parent) => parent.get("members.leaf")],
+    ["getFields()", (members) => members.getFields(["leaf"]).leaf, (parent) => parent.getFields(["leaf"]).leaf],
+  ]) {
+    it(`${access} retains the parent only while a view is live`, async function () {
+      function prepare(parent) {
+        const members = parent.members;
+        return { direct: readMember(members), leaf: readFromParent(parent), dropped: new WeakRef(readMember(members)), middle: new WeakRef(members), parent: new WeakRef(parent) };
+      }
+      const storage = new Parent();
+      const states = [prepare(new Parent()), prepare(Parent.from_address(c.addressof(storage)))];
+      await collect();
+      for (const state of states) {
+        assert.equal(state.dropped.deref(), undefined);
+        assert.ok(state.middle.deref(), "the view must retain its immediate parent");
+        state.direct.n = 17;
+        state.direct = null;
+      }
+      await collect();
+      for (const state of states) {
+        assert.equal(state.middle.deref(), undefined);
+        assert.ok(state.parent.deref(), "the view obtained from the outer parent must retain it");
+        assert.equal(state.leaf.n, 17);
+        state.leaf = null;
+      }
+      await collect();
+      for (const state of states) assert.equal(state.parent.deref(), undefined);
+      assert.equal(storage.leaf.n, 17);
+    });
+  }
+});

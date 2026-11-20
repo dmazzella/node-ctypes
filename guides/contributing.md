@@ -40,6 +40,73 @@ runtime differences and focused commands.
 
 ## Native backends and upstream libffi
 
+For both structures and unions, [fields.js](../lib/structures/helpers/fields.js)
+resolves field declarations and records natural alignment before packing.
+[layout.js](../lib/structures/helpers/layout.js) computes field positions,
+[types.js](../lib/core/types.js) normalizes argument and return declarations,
+and [native-aggregate.js](../lib/core/native-aggregate.js) turns the computed
+layout into a cached ABI descriptor. Extend the descriptor builder when a new
+field representation needs ABI support; do not recalculate offsets in the
+call wrappers. An array parameter decays to a pointer; a matrix field stays
+inline. Preserve the leaf type (four `float`s can use floating-point registers)
+and propagate unaligned members through every nonempty dimension, whether the
+element is a class or a `struct()` definition.
+
+To test that last rule on x86-64 System V, keep the natural and packed controls
+at or below 16 bytes. The ABI fixture uses `rows[2][2]` of `{uint8_t, uint16_t}`:
+the natural matrix uses registers, but the packed matrix must use memory. A
+larger integer matrix would use memory either way and could mask a descriptor
+bug. Compare arguments and results separately against a typed C caller.
+
+[funcptr.js](../lib/core/funcptr.js) owns prototype caching and binding by
+address, symbol or JavaScript callback. Only callbacks own a native trampoline:
+[callback.js](../lib/core/callback.js) prevents its release until the callable's
+active invocations finish, including result hooks and pending completions.
+Bindings with output or named parameters use [paramflags.js](../lib/core/paramflags.js).
+Keep shape and pointer checks before symbol lookup, and read names and defaults
+after it: getters and the first exception are observable. Plain address calls
+do not go through either the release guard or the `paramflags` wrapper.
+
+[conversions.js](../lib/core/conversions.js) selects a converter for each
+declared argument type, then captures its optional `from_param` hook. When
+a hook returns a value, `marshalAdapted` handles it if the type accepts a
+different representation from an unadapted input. Finish converting each
+argument before running the next hook. Share the byte decoding of pointer
+values, not their acceptance rules: a typed pointer accepts a direct `null`
+but rejects an `_as_parameter_` chain that resolves to `null`. Each converter
+may retain a temporary in the current call's owner list, but does not manage
+that list's lifetime.
+[invocation.js](../lib/core/invocation.js) keeps those temporaries alive
+through synchronous result handling or asynchronous completion, including
+when another call reenters an adapter. For the reverse direction, change
+[callback-conversions.js](../lib/core/callback-conversions.js): it presents
+C arguments to the JS callback and converts its return value back to C.
+
+For a new scalar representation, start in
+[scalar-protocol.js](../lib/types/scalar-protocol.js): reading an argument and
+constructing a view of C-owned bytes must not invoke application constructors.
+For `_as_parameter_` chains, change [parameters.js](../lib/core/parameters.js);
+it retains intermediate objects while a getter can reenter a call.
+Aggregate builders share their identity and conversion hooks with the call
+code through [protocol.js](../lib/structures/protocol.js), without adding
+properties to user declarations.
+
+Pointer ownership is a separate concern from field layout. In
+[ownership.js](../lib/memory/ownership.js), all views of a known memory domain
+share registrations keyed by byte position. A typed copy captures the owners
+of complete pointer slots **before** overwriting the destination, since the
+two views can overlap. A by-value argument keeps those owners even if a
+later argument adapter changes the original fields. Copying bytes with
+`memmove` does not acquire those owners.
+
+[results.js](../lib/core/results.js) defines how a declared `restype` represents
+the native value and applies its captured `_check_retval_`. It has no reference
+to the invoked function or its arguments. Those belong to a single invocation:
+the checked path in [invocation.js](../lib/core/invocation.js) passes the
+converted result, public callable and original arguments to the captured
+`errcheck` while any argument owners are still alive. Keep this distinction
+when adding a return type or changing how a call completes.
+
 The maintained outgoing paths are the bounded C++ direct invokers, register-frame
 calls and libffi. Register-frame calls cover any signature of scalars, pointers
 and strings up to 32 arguments on AArch64, x86-64 System V and Win64: each

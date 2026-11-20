@@ -95,16 +95,63 @@ describe("TestPythonParity", function () {
     }
     const r = new RECT(new POINT(1, 2), new POINT(3, 4));
     const a = r.a;
+    const alias = r.a;
     assert.ok(a instanceof POINT);
+    assert.notStrictEqual(a, alias);
+    a.label = "first";
+    assert.equal("label" in alias, false);
+    assert.strictEqual(ctypes.addressof(a), ctypes.addressof(alias));
     a.x = 10;
-    assert.strictEqual(r.a.x, 10);
+    assert.strictEqual(alias.x, 10);
     r.a = new POINT(5, 6);
-    assert.deepStrictEqual([a.x, a.y], [5, 6]);
+    assert.deepStrictEqual([a.x, alias.y], [5, 6]);
     assert.strictEqual(ctypes.addressof(r.b), ctypes.addressof(r) + BigInt(sizeof(POINT)));
     const v = new Value();
     v.p.y = 7;
     assert.ok(v.p instanceof POINT);
     assert.strictEqual(v.n, 7n << 32n);
+  });
+
+  it("test_nested_field_reads_bypass_initializers", function () {
+    class Point extends Structure {
+      static _fields_ = [["x", c_int]];
+      constructor() {
+        throw new Error("Point initializer ran");
+      }
+    }
+    class Choice extends Union {
+      static _fields_ = [
+        ["p", Point],
+        ["bits", c_int],
+      ];
+      constructor() {
+        throw new Error("Choice initializer ran");
+      }
+    }
+    class Box extends Structure {
+      static _anonymous_ = ["choice"];
+      static _fields_ = [
+        ["tag", c_int],
+        ["choice", Choice],
+      ];
+    }
+    const storage = new Box();
+    const box = Box.from_address(ctypes.addressof(storage));
+    storage.tag = 11;
+    storage.bits = 7;
+    const choice = box.choice;
+    const explicit = choice.p;
+    const promoted = box.p;
+    assert.ok(choice instanceof Choice);
+    assert.ok(explicit instanceof Point);
+    assert.ok(promoted instanceof Point);
+    assert.notStrictEqual(choice, box.choice);
+    assert.notStrictEqual(explicit, choice.p);
+    assert.notStrictEqual(promoted, box.p);
+    assert.strictEqual(ctypes.addressof(promoted), ctypes.addressof(box) + BigInt(sizeof(c_int)));
+    assert.strictEqual(explicit.x, 7);
+    promoted.x = 19;
+    assert.deepStrictEqual([explicit.x, choice.bits, storage.bits, storage.tag], [19, 19, 19, 11]);
   });
 
   it("test_nested_instances_copied_bytewise", function () {

@@ -114,6 +114,94 @@ describe("TestAsParameter", function () {
     }
   });
 
+  it("test_by_value_aggregate_requires_declared_class", function () {
+    for (const [Base, fields, symbol, result, seven, thirtyOne] of [
+      [
+        c.Structure,
+        [
+          ["x", c.c_int32],
+          ["y", c.c_int32],
+        ],
+        "fixture_point_sum",
+        c.c_int32,
+        7,
+        31,
+      ],
+      [
+        c.Union,
+        [
+          ["i", c.c_int64],
+          ["d", c.c_double],
+        ],
+        "fixture_number_bits",
+        c.c_int64,
+        7n,
+        31n,
+      ],
+    ]) {
+      class Record extends Base {
+        static _fields_ = fields;
+      }
+      class Foreign extends Base {
+        static _fields_ = fields;
+      }
+      const reads = [];
+      class Alias extends Foreign {
+        get _as_parameter_() {
+          reads.push("alias");
+          return { _as_parameter_: new Record(seven) };
+        }
+      }
+      const attr = lib[symbol];
+      attr.argtypes = [Record];
+      attr.restype = result;
+      const prototype = c.CFUNCTYPE(result, Record)([symbol, lib]);
+      for (const fn of [attr, prototype]) {
+        for (const bad of [new Foreign(thirtyOne), { _as_parameter_: new Foreign(thirtyOne) }]) {
+          assert.throws(() => fn(bad), { constructor: c.ArgumentError, message: "argument 1: TypeError: expected Record instance instead of Foreign" });
+        }
+        reads.length = 0;
+        assert.equal(fn({ _as_parameter_: new Alias(thirtyOne) }), seven);
+        assert.deepEqual(reads, ["alias"]);
+      }
+      class Explicit extends Base {
+        static _fields_ = fields;
+        static from_param(value) {
+          return { _as_parameter_: new Foreign(value) };
+        }
+      }
+      assert.equal(c.CFUNCTYPE(result, Explicit)([symbol, lib])(thirtyOne), thirtyOne);
+    }
+  });
+
+  it("test_aggregate_subtype_precedes_adapter_and_mismatch_stops_conversion", function () {
+    class Point extends c.Structure {
+      static _fields_ = [
+        ["x", c.c_int32],
+        ["y", c.c_int32],
+      ];
+    }
+    class Child extends Point {
+      get _as_parameter_() {
+        throw new Error("a matching subtype is already converted");
+      }
+    }
+    class Foreign extends c.Structure {
+      static _fields_ = Point._fields_;
+    }
+    const seen = [];
+    class Later extends c.c_int32 {
+      static from_param(value) {
+        seen.push(value);
+        throw new TypeError("reached later argument");
+      }
+    }
+    const fn = c.CFUNCTYPE(c.c_int32, Point, Later)(["fixture_point_sum_extra", lib]);
+    assert.throws(() => fn(new Foreign(3, 4), 1), { constructor: c.ArgumentError, message: "argument 1: TypeError: expected Point instance instead of Foreign" });
+    assert.throws(() => fn({ _as_parameter_: new Child(3, 4) }, 2), { constructor: c.ArgumentError, message: "argument 2: TypeError: reached later argument" });
+    assert.deepEqual(seen, [2]);
+  });
+
   it("test_integer_terminal_read_once", function () {
     let reads = 0;
     const adapter = {

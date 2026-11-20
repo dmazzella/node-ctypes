@@ -3,7 +3,7 @@
 import ctypes as c
 import unittest
 
-from .._support import LIBC
+from .._support import FIXTURE, LIBC
 
 
 class TestCallbacks(unittest.TestCase):
@@ -58,6 +58,52 @@ class TestCallbacks(unittest.TestCase):
         self.assertTrue(callable(callback))
         self.assertEqual(callback(None, None), 0)
         self.assertTrue(c.cast(callback, c.c_void_p).value)
+
+    def test_aggregate_callback_constructs_before_copying_c_fields(self):
+        lib = c.CDLL(str(FIXTURE))
+        words = c.c_int32 * 2
+        for base in (c.Structure, c.Union):
+            initialized, received = [], []
+
+            class Record(base):
+                _fields_ = (
+                    [("x", c.c_int32), ("y", c.c_int32)]
+                    if base is c.Structure
+                    else [("scalar", c.c_int64), ("values", words)]
+                )
+
+                def __init__(self, *args):
+                    view = words.from_buffer(self)
+                    initialized.append((self, len(args), tuple(view), view))
+                    view[0] = 90
+
+            def handle(record):
+                received.append(record)
+                return (
+                    record.x + record.y if base is c.Structure else sum(record.values)
+                )
+
+            prototype = c.CFUNCTYPE(c.c_int32, Record)
+            callback = prototype(handle)
+            if base is c.Structure:
+                invoke = lib.fixture_point_callback
+                invoke.argtypes = [prototype, c.c_int32, c.c_int32]
+                invoke.restype = c.c_int32
+                result = invoke(callback, 3, 4)
+            else:
+                make = lib.fixture_return_union_make
+                make.argtypes = [c.c_int32, c.c_int32]
+                make.restype = Record
+                result = callback(make(3, 4))
+
+            self.assertEqual(result, 7)
+            self.assertEqual(len(initialized), 1)
+            obj, argc, before, view = initialized[0]
+            self.assertEqual((argc, before), (0, (0, 0)))
+            self.assertIs(received[0], obj)
+            self.assertEqual(tuple(view), (3, 4))
+            view[1] = 12
+            self.assertEqual(obj.y if base is c.Structure else obj.values[1], 12)
 
     def test_callback_ignores_instance_call_attribute(self):
         # The callable is invoked through its type (tp_call), not an attribute.

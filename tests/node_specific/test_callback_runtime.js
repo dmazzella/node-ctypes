@@ -323,6 +323,43 @@ describe("Callbacks", function () {
   });
 
   describe("Owned callback argument snapshots", function () {
+    it("keeps C bytes intact if a class constructor detaches an earlier pool and reenters", async function () {
+      using fixture = new ctypes.CDLL(FIXTURE);
+      const invoke = fixture.func("fixture_point_callback", ctypes.c_int32, [ctypes.c_void_p, ctypes.c_int32, ctypes.c_int32]);
+      let pool;
+      using capture = ctypes.callback(
+        (value) => {
+          pool = value._buffer.buffer;
+          return 0;
+        },
+        ctypes.c_int32,
+        [ctypes.struct({ x: ctypes.c_int32, y: ctypes.c_int32 })],
+      );
+      for (const create of [ctypes.callback, ctypes.threadSafeCallback]) {
+        let nested;
+        class Point extends ctypes.Structure {
+          static _fields_ = [
+            ["x", ctypes.c_int32],
+            ["y", ctypes.c_int32],
+          ];
+          constructor() {
+            super();
+            if (pool !== undefined) {
+              pool.transfer();
+              pool = undefined;
+              nested = invoke(cb.pointer, 10, 20);
+            }
+            this.x = 90;
+          }
+        }
+        using cb = create((p) => p.x + p.y, ctypes.c_int32, [Point]);
+        invoke(capture.pointer, 1, 2);
+        const outer = create === ctypes.callback ? invoke(cb.pointer, 3, 4) : await invoke.callAsync(cb.pointer, 3, 4);
+        assert.equal(nested, 30);
+        assert.equal(outer, 7);
+      }
+    });
+
     it("retains independent snapshots across pool rotation, reentry and release", async function () {
       using fixture = new ctypes.CDLL(FIXTURE);
       const Point = ctypes.struct({ x: ctypes.c_int32, y: ctypes.c_int32 });

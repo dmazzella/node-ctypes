@@ -64,6 +64,87 @@ describe("weak-value cache cleanup", function () {
   });
 });
 
+describe("aggregate array element views", function () {
+  for (const Base of [c.Structure, c.Union]) {
+    for (const [access, read, index] of [
+      ["index", (array) => array[1], 1],
+      ["iterator", (array) => array[Symbol.iterator]().next().value, 0],
+    ]) {
+      it(`${Base.name} via ${access}: retains its array without running the constructor`, async function () {
+        let calls = 0;
+        class Item extends Base {
+          static _fields_ = [["value", c.c_int32]];
+          constructor(...args) {
+            super(...args);
+            calls++;
+          }
+        }
+        const Items = c.ARRAY(Item, 2);
+        function prepare(array) {
+          const view = read(array);
+          const other = read(array);
+          assert.ok(view instanceof Item);
+          assert.notEqual(view, other);
+          view.value = 31;
+          assert.equal(other.value, 31);
+          return { parent: new WeakRef(array), view, other: new WeakRef(other) };
+        }
+        const storage = Buffer.alloc(c.sizeof(Items));
+        const states = [prepare(Items()), prepare(Items.from_address(c.addressof(storage)))];
+        await collectGarbage();
+        for (const state of states) {
+          assert.ok(state.parent.deref(), "a live element must retain the array");
+          assert.equal(state.other.deref(), undefined, "the array must not retain discarded views");
+          state.view.value = 42;
+          state.view = null;
+        }
+        await collectGarbage();
+        for (const state of states) assert.equal(state.parent.deref(), undefined);
+        assert.equal(storage.readInt32LE(index * c.sizeof(Item)), 42);
+        assert.equal(calls, 0);
+      });
+    }
+  }
+});
+
+describe("array fields retain their enclosing aggregate", function () {
+  class Item extends c.Structure {
+    static _fields_ = [["value", c.c_int32]];
+  }
+  for (const Base of [c.Structure, c.Union]) {
+    class Holder extends Base {
+      static _fields_ = [["items", c.ARRAY(Item, 2)]];
+    }
+    for (const [access, retain] of [
+      ["array", (items) => items],
+      ["element", (items) => items[1]],
+    ]) {
+      it(`${Base.name} survives with only the ${access} view`, async function () {
+        function prepare(holder) {
+          const items = holder.items;
+          items[1].value = 37;
+          return { kept: retain(items), holder: new WeakRef(holder), items: new WeakRef(items), discarded: new WeakRef(holder.items) };
+        }
+        const storage = Buffer.alloc(c.sizeof(Holder));
+        const states = [prepare(new Holder()), prepare(Holder.from_address(c.addressof(storage)))];
+        await collectGarbage();
+        for (const s of states) {
+          assert.ok(s.items.deref(), "the array must still be live");
+          assert.ok(s.holder.deref(), "the array field must retain its holder");
+          assert.equal(s.discarded.deref(), undefined);
+          s.kept = null;
+        }
+        await collectGarbage();
+        for (const s of states) {
+          assert.equal(s.items.deref(), undefined);
+          assert.equal(s.holder.deref(), undefined);
+        }
+        assert.equal(storage.readInt32LE(c.sizeof(Item)), 37);
+      });
+    }
+  }
+});
+
 describe("array type cache lifetime", function () {
   it("reuses live types without conflating element types or lengths", async function () {
     class Int extends c.c_int32 {}

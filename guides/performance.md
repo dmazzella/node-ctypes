@@ -9,6 +9,20 @@ Node's experimental `node:ffi`, calling the same C functions with matching
 native signatures. The results depend on the machine: run the comparisons on
 yours with the commands in [Running the comparisons](#running-the-comparisons).
 
+For a hot synchronous `paramflags` binding with only scalar inputs, pass all
+arguments as positional numbers when that fits the call. With finite numbers
+and no argument adapter, result conversion, or `errcheck` hook, the wrapper can
+call the underlying binding directly. Named arguments, omitted defaults and
+output parameters keep their [usual behavior](errors.md#output-parameters-paramflags).
+
+In a callback that receives a struct by value, read a numeric array field once
+if you need several elements. For an `array(c_uint8, 33)` field, for example,
+`const bytes = value.bytes;` followed by `bytes[0] + bytes[32]` avoids
+creating a second view. Both elements still come from the same callback
+argument. Take the view from the current argument on each call.
+Run `npm run bench:koffi -- --filter "C -> JS callback (indirect bytes33"`
+to compare no field read, one view and two views on the same C fixture.
+
 ## Results
 
 node-ctypes vs Koffi 3.3.8, node-ctypes 2.13.1, Node.js 26.13.1,
@@ -65,6 +79,52 @@ Koffi, below 1 favors node-ctypes.
 | string length 16 B -> number   |           112.98 |      73.44 | 1.54x |
 | string length 4096 B -> number |             1551 |       1464 | 1.06x |
 | buffer argument (4 x i32)      |            73.57 |      68.27 | 1.08x |
+
+In a separate node-ctypes-only comparison, a synchronous `strlen` binding took
+either a JS string or `Buffer.from(text + "\0", "utf8")`. For 4096 bytes of
+four-byte UTF-8 characters, preparing one buffer and passing it to four calls
+reduced time per call by 60% on Windows, 83% on Ubuntu and 48% on Alpine in
+the repeat run, **including buffer creation**. On Alpine, preparing a fresh
+buffer for just one call was 88% slower. For 4096 bytes of ASCII or 16 bytes
+of four-byte characters, the string was faster on all three systems at every
+reuse count tested (1, 2, 4 and 8). Measure with the text and reuse count
+your application actually has; byte length alone does not predict the winner.
+
+Asynchronous `c_char_p` calls encode a JS string directly into memory owned by
+that call. This removes an intermediate copy; it does not skip encoding when
+you pass the same string again.
+
+With direct encoding enabled, the same read-only `strlen` fixture was measured
+with eight async calls in flight and 4096 bytes of four-byte UTF-8 characters.
+Each group of eight passed the same JS string eight times or created a fresh
+`Buffer.from(text + "\0", "utf8")` for every 1, 2, 4 or 8 calls. **Buffer
+creation is included.** The table shows the change in time per completed call
+in the repeat run (negative means the buffer was faster). This measures
+throughput, not the latency of an individual call. The Windows column in this
+table used x64 Node under emulation on ARM64; it is not a native Windows result.
+
+| Calls per buffer | Windows | Ubuntu | Alpine |
+| ---------------: | ------: | -----: | -----: |
+|                1 |   +2.2% | −32.1% | +12.2% |
+|                2 |  −26.3% | −40.2% | −16.3% |
+|                4 |  −50.1% | −45.3% | −40.3% |
+|                8 |  −53.2% | −45.5% | −40.3% |
+
+Two calls per buffer was the first tested count that beat the string on all
+three systems in both runs. With calls awaited **one at a time**, eight calls
+per buffer saved only 10–13% in the repeat run. Neither 4096 bytes of ASCII nor
+16 bytes of four-byte characters showed a consistent advantage across platforms
+with eight calls in flight.
+
+Even the same byte **and** character counts can give different results. A
+follow-up on native ARM64 alternated strings and buffers in the same process,
+again with eight calls in flight and buffer creation included. For 2048 copies
+of `λ` (4096 UTF-8 bytes), using each buffer twice reduced time per completed
+call in the repeat run by 19.9% on Windows, 34.3% on Ubuntu and 8.6% on Alpine.
+For 2048 copies of `é`, the same comparison was 4.6% faster, 2.9% slower and
+5.3% faster, respectively. Test representative text rather than converting
+automatically at a particular size. Share a buffer only with a read-only
+callee, and leave its contents unchanged until every call using it has settled.
 
 ### Aggregate values
 
@@ -208,6 +268,14 @@ emulated with a different native signature.
 Inferred rows omit node-ctypes `argtypes`, while both competitors use explicit
 fixed signatures for the same C functions: these rows include node-ctypes
 inference overhead, not equivalent automatic-inference APIs.
+To measure the cost of omitting `argtypes`, run
+`npm run bench:koffi -- --filter "without argtypes,inferred stack,argtypes control"`.
+Compare the **node-ctypes** times within each pair: both bindings call the same
+C function with the same values and return type. In a separate paired measurement
+on Windows, Ubuntu and Alpine, omitting the types for `(int32, double, int32)`
+took 14–18% longer in the repeat run. The ten-integer case did not show a
+consistent penalty across platforms.
+
 The node:ffi bool row passes numeric `1` and compares normalized Number results:
 node:ffi represents bool arguments/results as uint8 values, whereas node-ctypes
 returns a JavaScript Boolean. Koffi's bool row uses Boolean input/output.
@@ -229,7 +297,12 @@ String lengths, narrow/inferred-stack i64 results and C-loop sums are compared
 as Numbers, including conversion where the API returns BigInt; wide integers
 are BigInt in both APIs. Structures are plain
 objects. Async times include scheduling and are reported per completed call,
-with the concurrency shown in the case name.
+with the concurrency shown in the case name. With one call in flight, the
+runner awaits each Promise before submitting the next call. With eight, it
+submits a batch and waits for all eight before starting another. The latter
+number measures throughput, not the latency of an individual call. Run
+`npm run bench:koffi -- --filter "async i32 ("` to compare the two on the same
+declared scalar signature.
 
 Defaults are nine samples of at least 250 ms per library after warmup,
 alternating library order. Each native signature has a separate call-site to

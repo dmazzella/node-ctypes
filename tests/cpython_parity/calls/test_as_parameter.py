@@ -113,6 +113,92 @@ class TestAsParameter(unittest.TestCase):
                         else:
                             self.assertEqual(fn(argument), expected)
 
+    def test_by_value_aggregate_requires_declared_class(self):
+        for base, fields, symbol, result in [
+            (
+                c.Structure,
+                [("x", c.c_int32), ("y", c.c_int32)],
+                "fixture_point_sum",
+                c.c_int32,
+            ),
+            (
+                c.Union,
+                [("i", c.c_int64), ("d", c.c_double)],
+                "fixture_number_bits",
+                c.c_int64,
+            ),
+        ]:
+
+            class Record(base):
+                _fields_ = fields
+
+            class Foreign(base):
+                _fields_ = fields
+
+            reads = []
+
+            class Alias(Foreign):
+                @property
+                def _as_parameter_(self):
+                    reads.append("alias")
+                    return Adapter(Record(7))
+
+            attr = getattr(self.lib, symbol)
+            attr.argtypes, attr.restype = [Record], result
+            prototype = c.CFUNCTYPE(result, Record)((symbol, self.lib))
+            for fn in (attr, prototype):
+                for bad in (Foreign(31), Adapter(Foreign(31))):
+                    with self.assertRaisesRegex(
+                        c.ArgumentError,
+                        "^argument 1: TypeError: expected Record instance instead of Foreign$",
+                    ):
+                        fn(bad)
+                reads.clear()
+                self.assertEqual(fn(Adapter(Alias(31))), 7)
+                self.assertEqual(reads, ["alias"])
+
+            class Explicit(base):
+                _fields_ = fields
+
+                @classmethod
+                def from_param(cls, value):
+                    return Adapter(Foreign(value))
+
+            adapted = c.CFUNCTYPE(result, Explicit)((symbol, self.lib))
+            self.assertEqual(adapted(31), 31)
+
+    def test_aggregate_subtype_precedes_adapter_and_mismatch_stops_conversion(self):
+        class Point(c.Structure):
+            _fields_ = [("x", c.c_int32), ("y", c.c_int32)]
+
+        class Child(Point):
+            @property
+            def _as_parameter_(self):
+                raise AssertionError("a matching subtype is already converted")
+
+        class Foreign(c.Structure):
+            _fields_ = Point._fields_
+
+        seen = []
+
+        class Later(c.c_int32):
+            @classmethod
+            def from_param(cls, value):
+                seen.append(value)
+                raise TypeError("reached later argument")
+
+        fn = c.CFUNCTYPE(c.c_int32, Point, Later)(("fixture_point_sum_extra", self.lib))
+        with self.assertRaisesRegex(
+            c.ArgumentError,
+            "^argument 1: TypeError: expected Point instance instead of Foreign$",
+        ):
+            fn(Foreign(3, 4), 1)
+        with self.assertRaisesRegex(
+            c.ArgumentError, "^argument 2: TypeError: reached later argument$"
+        ):
+            fn(Adapter(Child(3, 4)), 2)
+        self.assertEqual(seen, [2])
+
     def test_integer_terminal_read_once(self):
         class Terminal:
             reads = 0

@@ -56,6 +56,12 @@ register-frame calls.
 - `cdll.<libname>`, `windll.<libname>` — lazy namespaces; `cdll.LoadLibrary(name)`, `new LibraryLoader(CDLL)`
 - Functions without `restype` return `c_int`; without `argtypes` the arguments are converted from their JS values (as Python)
 
+An untyped object such as `{}` is rejected with `TypeError` when assigning
+`fn.argtypes` or `fn.restype`, even before the first call. The previous
+declaration and `errcheck` remain usable. `CFUNCTYPE` also rejects such an
+object when creating the prototype. This check does not look up the symbol
+or move native ABI validation out of binding.
+
 ## Closing a library
 
 A bound function keeps its library loaded as long as it is referenced, also
@@ -101,6 +107,22 @@ overridden public `.value` getter. Each value is snapshotted before converting
 the next argument, even without `argtypes`. A scalar `from_param` converter may
 return a CData instance of another class when its native scalar kind matches
 the declared type.
+
+When a `Structure` or `Union` class is declared **by value**, its default
+conversion accepts instances of that class or its subclasses. Another aggregate
+with the same layout is not enough: it must supply an `_as_parameter_` that
+resolves to an accepted value, or the call raises `ArgumentError` before
+converting the next argument. A custom `from_param` can explicitly return a
+different aggregate with the correct C ABI. JavaScript field objects and byte
+views are still accepted; functional `struct()` / `union()` definitions do
+not impose a class check.
+
+For a declared structure or union passed by value, the snapshot boundary is
+`sizeof(c_void_p)`, as in CPython. Above that size, a later `from_param` can
+change the original but not the bytes the C function receives. At or below
+that size, the C function can see the later change. Only the aggregate itself
+is copied: pointer fields still address the same memory. Passing a pointer or
+an array by address does not take this snapshot.
 
 Objects passed through argument adapters and the objects produced by their
 conversions stay alive while later arguments are converted and until the

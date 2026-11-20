@@ -2504,10 +2504,8 @@ std::unique_ptr<FFIFunction::PreparedCall> FFIFunction::PrepareAsyncCall(const F
 
         case CType::CTYPES_STRING: {
           if (val.IsString()) {
-            std::string str = val.As<Napi::String>().Utf8Value();
-            size_t offset = async_string_buffer.size();
-            async_string_buffer.resize(offset + str.size() + 1);
-            memcpy(async_string_buffer.data() + offset, str.c_str(), str.size() + 1);
+            const size_t offset = async_string_buffer.size();
+            napi_fast::AppendUtf8(val.As<Napi::String>(), async_string_buffer);
 
             // Puntatore provvisorio (verrà fixato dal worker)
             const char* str_ptr = async_string_buffer.data() + offset;

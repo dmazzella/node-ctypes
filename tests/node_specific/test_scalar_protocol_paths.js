@@ -55,7 +55,7 @@ describe("Node scalar representation and protocol paths", function () {
         assert.equal(value.value, 108);
       });
 
-      it(`${kind} ${async ? "async" : "sync"} runs retval before errcheck and propagates its errors`, async function () {
+      it(`${kind} ${async ? "async" : "sync"} invokes the retval hook itself before errcheck and propagates its errors`, async function () {
         const order = [];
         class Result extends c.c_int32 {
           static _check_retval_(value) {
@@ -66,6 +66,7 @@ describe("Node scalar representation and protocol paths", function () {
             return value.value + 100;
           }
         }
+        Result._check_retval_.call = null;
         const fn = bind(kind, "fixture_scalar_i32", Result, [c.c_int32]);
         fn.errcheck = (value, func) => {
           assert.equal(value, 107);

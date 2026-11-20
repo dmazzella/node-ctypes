@@ -244,17 +244,17 @@ describe("returned structure and union ownership", { skip: !existsSync(fixture) 
     assert.deepEqual(fn(1, 2, "x".repeat(16384)), { x: 1, y: 2 });
   });
 
-  it("class constructors can reenter without corrupting the outer snapshot", function () {
+  it("a reentrant class _check_retval_ cannot overwrite the outer snapshot", function () {
     let fn;
     let nested;
     let reenter = true;
     class Result extends Point {
-      constructor(bytes) {
+      static _check_retval_(value) {
         if (reenter) {
           reenter = false;
           nested = fn(90, 91);
         }
-        super(bytes);
+        return value;
       }
     }
     fn = lib.func("fixture_point_make", Result, [c.c_int32, c.c_int32]);
@@ -263,6 +263,47 @@ describe("returned structure and union ownership", { skip: !existsSync(fixture) 
     assert.deepEqual([result.x, result.y], [1, 2]);
     assert.deepEqual([nested.x, nested.y], [90, 91]);
   });
+
+  for (const kind of ["func", "address"]) {
+    it(`${kind}: async structure results use independently transferable completion buffers`, async function (t) {
+      class CheckedPoint extends Point {
+        constructor() {
+          throw new Error("a native result must bypass the constructor");
+        }
+        static _check_retval_(value) {
+          assert.ok(value instanceof CheckedPoint);
+          return value;
+        }
+      }
+      const make = bind(kind, "fixture_point_make", CheckedPoint, [c.c_int32, c.c_int32]);
+      const executor = new c.Executor();
+      t.after(() => executor.close());
+
+      // Observe the actual addon completions independently of the public conversion.
+      const nativeResults = [];
+      for (const method of ["callAsync", "callOn"]) {
+        const nativeCall = make._ffi[method].bind(make._ffi);
+        Object.defineProperty(make._ffi, method, {
+          configurable: true,
+          value(...args) {
+            const pending = nativeCall(...args);
+            nativeResults.push(pending);
+            return pending;
+          },
+        });
+        t.after(() => delete make._ffi[method]);
+      }
+      const [first, second] = await Promise.all([make.callAsync(1, 2), make.callOn(executor, new c.c_int32(3), 4)]);
+      const [firstBytes, secondBytes] = await Promise.all(nativeResults);
+      assert.strictEqual(first._buffer, firstBytes, "callAsync copied an already owned buffer");
+      assert.strictEqual(second._buffer, secondBytes, "callOn copied an already owned buffer");
+      assert.notEqual(firstBytes.buffer, secondBytes.buffer);
+      const moved = Buffer.from(firstBytes.buffer.transfer());
+      assert.equal(first._buffer.length, 0);
+      assert.deepEqual([moved.readInt32LE(0), moved.readInt32LE(4)], [1, 2]);
+      assert.deepEqual([second.x, second.y], [3, 4]);
+    });
+  }
 
   it("paramflags errcheck receives independent results for sync and async calls", async function () {
     const type = c.struct({ count: c.c_int32, points: c.array(PointDef, 2) });

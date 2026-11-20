@@ -80,7 +80,9 @@ const ids = fn(hwnd); // inspect both the return value and the output parameter
 
 As in Python, the value returned by `errcheck` is the result of the call,
 unless it is `args` itself: then the out-params are returned. Here `args`
-is the expanded argument list, with out-params as instances.
+is the expanded argument list, with out-params as instances. When the hook
+returns `args`, output processing uses the original instances: changing
+`args[i].value` affects the result, but replacing `args[i]` does not.
 
 These bindings have their own hook, independent of any cached `lib.func()`
 binding, and support `callAsync()` with the same output processing and

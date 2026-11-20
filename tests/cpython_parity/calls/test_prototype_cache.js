@@ -211,6 +211,39 @@ describe("TestPrototypeCache", function () {
     assert.equal(function_(7), 9);
   });
 
+  it("test_rejected_declaration_preserves_attribute_signature", function () {
+    const type = c.c_int32;
+    for (const bound of [false, true]) {
+      delete lib.fixture_scalar_i32;
+      const fn = lib.fixture_scalar_i32;
+      fn.argtypes = [type];
+      fn.restype = type;
+      const previous = fn.argtypes;
+      const check = (result, called) => {
+        assert.equal(called, fn);
+        return result + 1;
+      };
+      fn.errcheck = check;
+      if (bound) assert.equal(fn(7), 8);
+      assert.throws(() => (fn.argtypes = [type, {}]), TypeError);
+      assert.throws(() => (fn.restype = {}), TypeError);
+      assert.equal(fn.argtypes, previous);
+      assert.deepEqual(previous, [type]);
+      assert.equal(fn.restype, type);
+      assert.equal(fn.errcheck, check);
+      assert.equal(fn(7), 8);
+    }
+  });
+
+  it("test_rejected_object_does_not_intern_prototype", function () {
+    const descriptor = {};
+    const type = c.c_int32;
+    const previous = c.CFUNCTYPE(type, type);
+    assert.throws(() => c.CFUNCTYPE(type, descriptor), TypeError);
+    assert.throws(() => c.CFUNCTYPE(descriptor, type), TypeError);
+    assert.equal(c.CFUNCTYPE(type, type), previous);
+  });
+
   it("test_attribute_retval_hook_capture", function () {
     class Result extends c.c_int32 {
       static _check_retval_(value) {

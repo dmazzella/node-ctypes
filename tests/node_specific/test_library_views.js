@@ -41,11 +41,13 @@ describe("Node library memory leases", { skip: !existsSync(fixture) && "native f
           else if (kind === "record") value = Record.in_dll(lib._lib, "fixture_global_record");
           else if (kind === "union") value = Value.in_dll(lib, "fixture_global_value");
           else if (kind === "pointer") value = Record.in_dll(lib, "fixture_global_record").pointer;
-          else if (kind === "C-updated pointer") {
+          else if (kind === "C-updated pointer" || kind === "C-updated typed copy") {
             const record = Record.in_dll(lib, "fixture_global_record");
-            record.pointer = c.pointer(new c.c_int32(5));
+            const target = new c.c_int32(5);
+            oldOwner = new WeakRef(target._buffer);
+            record.pointer = c.pointer(target);
             lib.func("fixture_reset_global_pointer", null, [])();
-            value = record.pointer;
+            value = kind === "C-updated pointer" ? record.pointer : Record.from_buffer_copy(record);
           }
           else if (kind === "C-cleared pointer") {
             const target = new c.c_int32(5);
@@ -103,19 +105,19 @@ describe("Node library memory leases", { skip: !existsSync(fixture) && "native f
           })();
           if (unloads) unlinkSync(marker);
           else console.log("The loader keeps the fixture resident; physical unloading cannot be observed.");
-          for (const kind of ["scalar", "record", "union", "pointer", "C-updated pointer", "C-cleared pointer", "contents", "function", "typed copy", "Buffer", "typed array", "ArrayBuffer", "multiple views", "cleared typed copy", "numeric copy"]) {
+          for (const kind of ["scalar", "record", "union", "pointer", "C-updated pointer", "C-updated typed copy", "C-cleared pointer", "contents", "function", "typed copy", "Buffer", "typed array", "ArrayBuffer", "multiple views", "cleared typed copy", "numeric copy"]) {
             let state = open(kind);
             const view = new WeakRef(state.value);
             await collect();
             const dependent = kind !== "cleared typed copy" && kind !== "numeric copy";
             assert.equal(existsSync(marker), unloads && !dependent, kind + ": incorrect module dependency");
             assert.equal(state.library.deref(), undefined, "the lease must not keep the Library wrapper alive");
-            if (state.oldOwner) assert.equal(state.oldOwner.deref(), undefined, "C cleared the pointer, but its previous owner is still retained");
+            if (state.oldOwner) assert.equal(state.oldOwner.deref(), undefined, kind + ": the previous pointee is still retained");
             if (kind === "scalar" || kind === "contents") assert.equal(state.value.value, 42);
             if (kind === "union") assert.equal(state.value.number, 42);
             if (kind === "pointer" || kind === "C-updated pointer") assert.equal(state.value[0], 42);
             if (kind === "function") assert.equal(state.value(39), 40);
-            if (kind === "record" || kind === "typed copy") {
+            if (kind === "record" || kind === "typed copy" || kind === "C-updated typed copy") {
               assert.equal(state.value.value, 7);
               assert.equal(state.value.pointer[0], 42);
             }

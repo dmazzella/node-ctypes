@@ -43,13 +43,21 @@ An installed `from_param` converter still resolves the method at call time,
 as before.
 
 Structure, union and scalar-instance arguments received by `callback()`,
-`CFUNCTYPE` and `threadSafeCallback()` are owned snapshots: each one is a
-distinct slice of an 8 KB off-heap pool reserved for callback snapshots.
-Native-call temporaries use a separate pool that is never exposed, so a
-snapshot cannot reveal or alter memory that native code is still using.
-Slices are never reused, so a retained argument keeps its own bytes and
-identity. Detaching a snapshot's `ArrayBuffer` (`transfer()`, a transfer list)
-only affects the snapshots in that pool; later callbacks use a fresh one.
+`CFUNCTYPE` and `threadSafeCallback()` are owned snapshots. For a `Structure`
+or `Union` class passed by value, ctypes calls the constructor **with no
+arguments**, then copies the C bytes into that same instance. The constructor
+can inspect its initially zeroed fields and save views of them. The handler
+and those views see the C values, not the constructor's field writes. This
+differs from a function returning a class by value, which skips the constructor.
+Pointer fields copy the address, not the pointed-to memory.
+
+Signatures with a class aggregate keep incoming bytes in dedicated buffers,
+so a reentrant constructor cannot alter them through a previously exposed
+snapshot pool. Otherwise, small functional aggregates and scalar-instance
+arguments use distinct slices of an 8 KB off-heap pool reserved for callback
+snapshots. Native-call temporaries use a separate pool that is never exposed.
+Slices are never reused. Detaching a pooled snapshot's `ArrayBuffer` only
+affects snapshots in that pool; later callbacks use a fresh one.
 
 - Retaining any slice keeps its whole 8 KB backing `ArrayBuffer` alive. When
   storing many small arguments for a long time, copy them, for example

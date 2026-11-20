@@ -39,6 +39,39 @@ class TestPrototypeCache(unittest.TestCase):
         )
         self.assertIsNot(c.CFUNCTYPE(First, First), c.CFUNCTYPE(Second, Second))
 
+    def test_rejected_declaration_preserves_attribute_signature(self):
+        for bound in (False, True):
+            fn = self.lib["fixture_scalar_i32"]
+            fn.argtypes = [c.c_int32]
+            fn.restype = c.c_int32
+            previous = fn.argtypes
+
+            def check(result, called, args):
+                self.assertIs(called, fn)
+                return result + 1
+
+            fn.errcheck = check
+            if bound:
+                self.assertEqual(fn(7), 8)
+            with self.assertRaises(TypeError):
+                fn.argtypes = [c.c_int32, object()]
+            with self.assertRaises(TypeError):
+                fn.restype = object()
+            self.assertIs(fn.argtypes, previous)
+            self.assertEqual(previous, [c.c_int32])
+            self.assertIs(fn.restype, c.c_int32)
+            self.assertIs(fn.errcheck, check)
+            self.assertEqual(fn(7), 8)
+
+    def test_rejected_object_does_not_intern_prototype(self):
+        descriptor = object()
+        previous = c.CFUNCTYPE(c.c_int32, c.c_int32)
+        with self.assertRaises(TypeError):
+            c.CFUNCTYPE(c.c_int32, descriptor)
+        with self.assertRaises(TypeError):
+            c.CFUNCTYPE(descriptor, c.c_int32)
+        self.assertIs(c.CFUNCTYPE(c.c_int32, c.c_int32), previous)
+
     @unittest.skipUnless(sys.platform == "win32", "WINFUNCTYPE requires Windows")
     def test_stdcall_identity(self):
         self.assertIsNot(c.WINFUNCTYPE(c.c_int32, c.c_int32), c.CFUNCTYPE(c.c_int32, c.c_int32))

@@ -32,6 +32,73 @@ class TestNativeABI(unittest.TestCase):
         fn.restype = c.c_int32
         self.assertEqual(fn(-7, 8, 9), 10)
 
+    def test_record_matrix_by_value(self):
+        class IntCell(c.Structure):
+            _fields_ = [("value", c.c_int32)]
+
+        class PackedCell(c.Structure):
+            _layout_ = "ms"
+            _pack_ = 1
+            _fields_ = [("tag", c.c_uint8), ("value", c.c_uint32)]
+
+        for cell, name, size, align in (
+            (IntCell, "int", 16, 4),
+            (PackedCell, "packed", 20, 1),
+        ):
+            with self.subTest(cell=name):
+
+                class Matrix(c.Structure):
+                    _fields_ = [("rows", (cell * 2) * 2)]
+
+                self.assertEqual((c.sizeof(Matrix), c.alignment(Matrix)), (size, align))
+                expected = Matrix()
+                ref = getattr(self.lib, f"fixture_{name}_matrix_reference")
+                ref.argtypes, ref.restype = [c.c_void_p], c.c_double
+                score = ref(c.byref(expected))
+                read = getattr(self.lib, f"fixture_{name}_matrix_read")
+                read.argtypes, read.restype = [Matrix], c.c_double
+                self.assertEqual(read(expected), score)
+                arg = Matrix()
+                arg.rows[1][0].value = 7
+                self.assertEqual(read(arg), 21)
+                make = getattr(self.lib, f"fixture_{name}_matrix_make")
+                make.argtypes, make.restype = [], Matrix
+                result = make()
+                for r in range(2):
+                    for col in range(2):
+                        actual, wanted = result.rows[r][col], expected.rows[r][col]
+                        self.assertEqual(actual.value, wanted.value)
+                        if cell is PackedCell:
+                            self.assertEqual(actual.tag, wanted.tag)
+
+    def test_by_value_snapshot_before_later_from_param(self):
+        word = c.sizeof(c.c_void_p)
+        for size in (word, word + 1, 33):
+
+            class Block(c.Structure):
+                _fields_ = [("values", c.c_uint8 * size)]
+
+            block = Block()
+
+            class Later(c.c_int8):
+                @classmethod
+                def from_param(cls, value):
+                    block.values[0] = 99
+                    return c.c_int8(value)
+
+            name = f"fixture_bytes_{size}_stack"
+            types = [c.c_int64] * 7 + [Block, Later, c.c_uint16]
+            fn = getattr(self.lib, name)
+            fn.argtypes, fn.restype = types, c.c_int64
+            prototype = c.CFUNCTYPE(c.c_int64, *types)((name, self.lib))
+            for call in (fn, prototype):
+                for arg in (block, Block.from_address(c.addressof(block))):
+                    block.values[0] = 7
+                    self.assertEqual(
+                        call(*([0] * 7), arg, 0, 0), 7 if size > word else 99
+                    )
+                    self.assertEqual(block.values[0], 99)
+
     def test_callback_scalar_results(self):
         cases = [
             ("i8", c.c_int8, [-128, -1, 0, 127]),

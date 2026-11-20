@@ -64,6 +64,46 @@ describe("TestResultLifetime", function () {
     }
   });
 
+  it("test_returned_aggregate_skips_initializers_before_result_hooks", function () {
+    const types = [c.c_int32, c.c_int32];
+    for (const [Base, symbol] of [
+      [Point, "fixture_point_make"],
+      [Number, "fixture_return_union_make"],
+    ]) {
+      const events = [];
+      class Result extends Base {
+        constructor(...args) {
+          super(...args);
+          events.push("constructor");
+          c.c_int32.from_buffer(this).value = 90;
+        }
+        static _check_retval_(value) {
+          events.push("retval");
+          return [value];
+        }
+      }
+      assert.equal(c.c_int32.from_buffer(new Result()).value, 90);
+      assert.deepEqual(events, ["constructor"]);
+      const attr = library[symbol];
+      attr.argtypes = types;
+      attr.restype = Result;
+      const prototype = c.CFUNCTYPE(Result, ...types)([symbol, library]);
+      for (const make of [attr, prototype]) {
+        events.length = 0;
+        make.errcheck = (wrapped, fn, args) => {
+          events.push("errcheck");
+          assert.equal(fn, make);
+          assert.deepEqual(args, [3, 4]);
+          return wrapped[0];
+        };
+        const value = make(3, 4);
+        assert.equal(Object.getPrototypeOf(value), Result.prototype);
+        assert.deepEqual(Base === Point ? [value.x, value.y] : [...value.values], [3, 4]);
+        assert.deepEqual(events, ["retval", "errcheck"]);
+      }
+    }
+  });
+
   it("test_nested_arrays", function () {
     const attribute = library.fixture_polyline_make;
     attribute.argtypes = [c.c_int32];

@@ -74,10 +74,19 @@ const bytes = array(c_uint8, 64).from_address(malloc_result);
 const view = new Float32Array(bytes._buffer.buffer, bytes._buffer.byteOffset, 16);
 ```
 
+For `Structure` and `Union` subclasses, `from_buffer()`, `from_address()` and
+`in_dll()` return live views. `from_buffer_copy()` instead creates an
+independent copy of the bytes. None of these factories run the subclass
+constructor or its instance field initializers: obtaining a view does not
+reinitialize the pointee or the exported C variable. Use `new T(...)` when
+you want the constructor to run.
+
 Typed pointers read from fields or array elements, and views derived from
 them, retain their known memory owners. Typed assignments and
 `from_buffer_copy()` preserve known pointer references, including overlapping
-and self-copies; replacing a pointer releases its previous reference.
+and self-copies. If C changes a pointer field before the copy, the copy uses
+the current address and does not keep the previous pointee alive through that
+field. The pointer slots are independent; the pointee itself is not copied.
 
 Raw copies (`memmove()`, Buffer methods) do not transfer ownership metadata.
 Likewise, `from_address()` given a raw address cannot discover its allocation

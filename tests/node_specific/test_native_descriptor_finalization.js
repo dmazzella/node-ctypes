@@ -22,6 +22,44 @@ function cannotGrow(type) {
 }
 
 describe("native descriptor finalization", function () {
+  it("propagates unaligned array elements to the enclosing ABI descriptor for both declaration styles", function () {
+    class Packed extends c.Structure {
+      static _pack_ = 1;
+      static _fields_ = [
+        ["tag", c.c_uint8],
+        ["value", c.c_uint32],
+      ];
+    }
+    const members = { tag: c.c_uint8, value: c.c_uint32 };
+    for (const enclosing of [c.struct, c.union]) {
+      for (const [element, dimensions, memoryClass] of [
+        [Packed, [2], true],
+        [c.struct(members, { pack: 1 }), [2], true],
+        [c.struct(members), [2], false],
+        [Packed, [0], false],
+        [c.struct(members, { pack: 1 }), [0], false],
+        [Packed, [2, 2], true],
+        [c.struct(members, { pack: 1 }), [2, 2], true],
+        [c.struct(members), [2, 2], false],
+        [Packed, [0, 2], false],
+        [Packed, [2, 0], false],
+      ]) {
+        const options = [];
+        class Builder extends c.StructType {
+          constructor(opts) {
+            super(opts);
+            options.push(opts);
+          }
+        }
+        const items = dimensions.reduce((type, count) => c.array(type, count), element);
+        const def = enclosing({ items, tail: c.c_uint8 });
+        const descriptor = _toNativeType(def, { StructType: Builder, ArrayType: c.ArrayType, CType: c.CType });
+        assert.equal(descriptor.getSize(), def.size);
+        assert.equal(options[0].memoryClass, memoryClass);
+      }
+    }
+  });
+
   it("size/alignment queries leave a standalone builder open", function () {
     const type = new c.StructType();
     assert.equal(type.getSize(), 0);
