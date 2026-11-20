@@ -13,7 +13,8 @@ For a hot synchronous `paramflags` binding with only scalar inputs, pass all
 arguments as positional numbers when that fits the call. With finite numbers
 and no argument adapter, result conversion, or `errcheck` hook, the wrapper can
 call the underlying binding directly. Named arguments, omitted defaults and
-output parameters keep their [usual behavior](errors.md#output-parameters-paramflags).
+output parameters keep the behavior described under _Output parameters_ in
+[Errors and results](errors.md).
 
 In a callback that receives a struct by value, read a numeric array field once
 if you need several elements. For an `array(c_uint8, 33)` field, for example,
