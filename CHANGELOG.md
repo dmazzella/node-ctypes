@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.15.0] - 2026-11-20
+
 ### Changed
 
 - Reading a nested `Structure` or `Union` field returns a fresh view each
@@ -1533,7 +1535,8 @@ It contains breaking changes: see [Migrating from 1.x](guides/python.md#migratin
 
 Initial releases.
 
-[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.14.0...HEAD
+[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.15.0...HEAD
+[2.15.0]: https://github.com/dmazzella/node-ctypes/compare/v2.14.0...v2.15.0
 [2.14.0]: https://github.com/dmazzella/node-ctypes/compare/v2.13.2...v2.14.0
 [2.13.2]: https://github.com/dmazzella/node-ctypes/compare/v2.13.1...v2.13.2
 [2.13.1]: https://github.com/dmazzella/node-ctypes/compare/v2.13.0...v2.13.1
