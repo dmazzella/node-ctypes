@@ -5,6 +5,9 @@
 // object, and a search box (Ambiguous Name Resolution, or an LDAP filter).
 // Navigate by expanding the tree, double-clicking objects, and double-clicking
 // distinguished names among the attributes (memberOf, member, manager, ...).
+// Double-clicking a user opens a window of its own with the user's details
+// and photo (jpegPhoto, or else thumbnailPhoto: JPEG, PNG, GIF or BMP,
+// decoded with GDI+).
 // The base DN, above the search box, is one of the naming contexts listed by
 // the RootDSE: domain, configuration, schema, DNS zones.
 // The searches run in a worker (ads.js AdsWorker): the window never blocks,
@@ -19,7 +22,7 @@
 //   node examples/windows/com/demo_com_active_directory_explorer.js --base "LDAP://DC=corp,DC=example,DC=com"
 //   node examples/windows/com/demo_com_active_directory_explorer.js --host dc01.corp.example.com --user admin --pass secret --domain CORP
 
-import { WinDLL, Structure, POINTER, WINFUNCTYPE, WinError, get_last_error, array, byref, cast, c_int, c_ssize_t, c_void, create_unicode_buffer, memmove, sizeof, wstring_at } from "node-ctypes";
+import { WinDLL, Structure, POINTER, WINFUNCTYPE, WinError, get_last_error, array, byref, cast, c_int, c_ssize_t, c_void, c_void_p, create_unicode_buffer, memmove, readValue, sizeof, wstring_at } from "node-ctypes";
 import { wintypes } from "node-ctypes";
 import { AdsWorker, SCOPE, adsPath } from "./ads.js";
 const {
@@ -256,6 +259,24 @@ const IDM_BASE = 3004;
 const IDM_OPEN = 3010;
 const IDM_COPY_DN = 3011;
 const IDM_COPY_VALUE = 3012;
+const IDM_USER_DETAILS = 3013;
+const ID_USER_LIST = 2101;
+const LVM_SETCOLUMNWIDTH = 0x101e;
+
+// User window: painting, header labels, photo (GDI+)
+const WM_PAINT = 0x000f;
+const IDCANCEL = 2; // Esc in a window handled by IsDialogMessageW
+const GA_ROOT = 2;
+const SW_RESTORE = 9;
+const SS_NOPREFIX = 0x0080;
+const SS_ENDELLIPSIS = 0x4000;
+const COLOR_BTNSHADOW = 16;
+const DI_NORMAL = 0x0003;
+const FW_BOLD = 700;
+const InterpolationModeHighQualityBicubic = 7;
+// The classes whose double-click opens the user window (a computer is also a
+// "user" in its class chain, but its most specific class is "computer").
+const USER_CLASSES = new Set(["user", "inetOrgPerson"]);
 
 // ─── Structures ─────────────────────────────────────────────────────
 // POINT, RECT and MSG come from wintypes (Python: ctypes.wintypes).
@@ -493,6 +514,27 @@ class ACCEL extends Structure {
   ];
 }
 
+class PAINTSTRUCT extends Structure {
+  static _fields_ = [
+    ["hdc", HANDLE],
+    ["fErase", BOOL],
+    ["rcPaint", RECT],
+    ["fRestore", BOOL],
+    ["fIncUpdate", BOOL],
+    ["rgbReserved", array(BYTE, 32)],
+  ];
+}
+
+// gdiplusinit.h
+class GdiplusStartupInput extends Structure {
+  static _fields_ = [
+    ["GdiplusVersion", UINT],
+    ["DebugEventCallback", LPVOID],
+    ["SuppressBackgroundThread", BOOL],
+    ["SuppressExternalCodecs", BOOL],
+  ];
+}
+
 // ─── Function signatures (Python-ctypes style: argtypes / restype) ──
 
 const kernel32 = new WinDLL("kernel32.dll", { use_last_error: true });
@@ -583,6 +625,33 @@ prototype(uxtheme.SetWindowTheme, LONG, [HWND, LPCWSTR, LPCWSTR]);
 // HICON DsGetIcon(DWORD dwFlags, LPWSTR pObjectClass, INT cxImage, INT cyImage):
 // the icon of an Active Directory class, as the directory UI shows it.
 prototype(dsuiext.DsGetIcon, HICON, [DWORD, LPCWSTR, INT, INT]);
+
+// User window
+prototype(user32.GetAncestor, HWND, [HWND, UINT]);
+prototype(user32.DestroyWindow, BOOL, [HWND]);
+prototype(user32.SetForegroundWindow, BOOL, [HWND]);
+prototype(user32.BeginPaint, HANDLE, [HWND, POINTER(PAINTSTRUCT)]);
+prototype(user32.EndPaint, BOOL, [HWND, POINTER(PAINTSTRUCT)]);
+prototype(user32.FrameRect, INT, [HANDLE, POINTER(RECT), HBRUSH]);
+prototype(user32.DrawIconEx, BOOL, [HANDLE, INT, INT, HICON, INT, INT, UINT, HBRUSH, UINT]);
+
+// The photo: an in-memory IStream (shlwapi) decoded by GDI+ (flat API; every
+// function returns a GpStatus, 0 = Ok).
+const shlwapi = new WinDLL("shlwapi.dll");
+const gdiplus = new WinDLL("gdiplus.dll");
+prototype(shlwapi.SHCreateMemStream, LPVOID, [LPVOID, UINT]);
+prototype(gdiplus.GdiplusStartup, INT, [POINTER(ULONG_PTR), POINTER(GdiplusStartupInput), LPVOID]);
+prototype(gdiplus.GdiplusShutdown, c_void, [ULONG_PTR]);
+prototype(gdiplus.GdipCreateBitmapFromStream, INT, [LPVOID, POINTER(LPVOID)]);
+prototype(gdiplus.GdipGetImageWidth, INT, [LPVOID, POINTER(UINT)]);
+prototype(gdiplus.GdipGetImageHeight, INT, [LPVOID, POINTER(UINT)]);
+prototype(gdiplus.GdipDisposeImage, INT, [LPVOID]);
+prototype(gdiplus.GdipCreateFromHDC, INT, [HANDLE, POINTER(LPVOID)]);
+prototype(gdiplus.GdipSetInterpolationMode, INT, [LPVOID, INT]);
+prototype(gdiplus.GdipDrawImageRectI, INT, [LPVOID, LPVOID, INT, INT, INT, INT]);
+prototype(gdiplus.GdipDeleteGraphics, INT, [LPVOID]);
+// IUnknown::Release, the third entry of every COM vtable.
+const IUnknown_Release = WINFUNCTYPE(ULONG, LPVOID);
 
 // ─── Process setup: per-monitor DPI awareness and Common Controls 6 ─
 
@@ -1571,7 +1640,8 @@ function onContextMenu(control, x, y) {
     const row = rows[selectedIndex(hwndList)];
     if (!row) return;
     menuTarget = { dn: row.dn };
-    popupMenu([[IDM_OPEN, row.container ? "Open" : "Show in its container"], null, [IDM_COPY_DN, "Copy distinguished name"]], x, y);
+    const user = USER_CLASSES.has(row.cls) ? [[IDM_USER_DETAILS, "User details"]] : [];
+    popupMenu([...user, [IDM_OPEN, row.container ? "Open" : "Show in its container"], null, [IDM_COPY_DN, "Copy distinguished name"]], x, y);
   } else if (sameHandle(control, hwndDetails)) {
     const row = detailRows[selectedIndex(hwndDetails)];
     if (!row) return;
@@ -1710,12 +1780,375 @@ function applyFont() {
 }
 
 /** The title bar follows the light / dark setting of Windows. */
-function applyTitleBar() {
+function applyTitleBar(hwnd = hwndMain) {
   const light = new DWORD(1);
   const size = new DWORD(sizeof(DWORD));
   const status = advapi32.RegGetValueW(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", "AppsUseLightTheme", RRF_RT_REG_DWORD, null, byref(light), byref(size));
   const dark = new c_int(Number(status) === 0 && Number(light.value) === 0 ? 1 : 0);
-  dwmapi.DwmSetWindowAttribute(hwndMain, DWMWA_USE_IMMERSIVE_DARK_MODE, byref(dark), sizeof(c_int));
+  dwmapi.DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, byref(dark), sizeof(c_int));
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// User window: the details and the photo of one user, in a window of its own
+// ═══════════════════════════════════════════════════════════════════════
+
+const USER_CLASS = "NodeCtypesADExplorerUser";
+const USER_PHOTO = 128; // DIPs: the side of the photo box
+const USER_COLUMNS = [
+  { title: "Property", width: 180 },
+  { title: "Value", width: 400 },
+];
+// The properties shown first, with their names in "Active Directory Users
+// and Computers"; then every attribute, as in the details pane.
+const USER_FIELDS = [
+  ["Display name", "displayName"],
+  ["First name", "givenName"],
+  ["Last name", "sn"],
+  ["Logon name", "sAMAccountName"],
+  ["User principal name", "userPrincipalName"],
+  ["E-mail", "mail"],
+  ["Telephone", "telephoneNumber"],
+  ["Mobile", "mobile"],
+  ["Job title", "title"],
+  ["Department", "department"],
+  ["Company", "company"],
+  ["Office", "physicalDeliveryOfficeName"],
+  ["Manager", "manager"],
+  ["Description", "description"],
+  ["Member of", "memberOf"],
+  ["Last logon", "lastLogonTimestamp"],
+  ["Password last set", "pwdLastSet"],
+  ["Account expires", "accountExpires"],
+  ["Created", "whenCreated"],
+  ["Changed", "whenChanged"],
+];
+// The attributes holding a photo, the first one present is shown.
+const PHOTO_ATTRIBUTES = ["jpegPhoto", "thumbnailPhoto"];
+
+const userWindows = new Map(); // HWND (BigInt) → state of the window
+const userWindowByDn = new Map(); // DN (lower case) → HWND (BigInt)
+let gdiplusToken = null;
+
+/** GDI+ is started at the first photo, and shut down after the message loop. */
+function startGdiplus() {
+  if (gdiplusToken !== null) return true;
+  const input = new GdiplusStartupInput();
+  input.GdiplusVersion = 1;
+  const token = new ULONG_PTR(0);
+  if (gdiplus.GdiplusStartup(byref(token), byref(input), null) !== 0) return false;
+  gdiplusToken = token.value;
+  return true;
+}
+
+/** The format of an image, from its first bytes (jpegPhoto often holds a PNG). */
+function imageFormat(bytes) {
+  const hex = Buffer.from(bytes.buffer, bytes.byteOffset, Math.min(4, bytes.length)).toString("hex");
+  if (hex.startsWith("ffd8ff")) return "JPEG";
+  if (hex === "89504e47") return "PNG";
+  if (hex.startsWith("474946")) return "GIF";
+  if (hex.startsWith("424d")) return "BMP";
+  return null;
+}
+
+/** Decode an image with GDI+ (JPEG, PNG, GIF, BMP...): { image, width, height }, or null. */
+function loadPicture(bytes) {
+  if (!bytes?.length || !startGdiplus()) return null;
+  const data = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length);
+  const stream = shlwapi.SHCreateMemStream(data, data.length); // an IStream on a copy of the bytes
+  if (!stream) return null;
+  try {
+    const image = new c_void_p(null);
+    if (gdiplus.GdipCreateBitmapFromStream(stream, byref(image)) !== 0 || !image.value) return null;
+    const width = new UINT(0);
+    const height = new UINT(0);
+    gdiplus.GdipGetImageWidth(image.value, byref(width));
+    gdiplus.GdipGetImageHeight(image.value, byref(height));
+    return { image: image.value, width: Number(width.value), height: Number(height.value) };
+  } finally {
+    // The bitmap keeps its own reference to the stream: release ours.
+    const vtable = readValue(stream, c_void_p);
+    IUnknown_Release(readValue(vtable, c_void_p, 2 * sizeof(c_void_p)))(stream);
+  }
+}
+
+/** A value of a user property as shown in the window. */
+function userValue(value) {
+  if (value instanceof Uint8Array) {
+    const format = imageFormat(value);
+    return format ? `${value.length} bytes, ${format} image` : formatValue(Buffer.from(value.buffer, value.byteOffset, value.length));
+  }
+  // Dates from ads.js are ISO strings (UTC): shown in local time.
+  if (typeof value === "string" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z$/.test(value)) return new Date(value).toLocaleString();
+  if (isDirectoryDn(value)) return rdnValue(value);
+  return String(value);
+}
+
+/** The status of the account, from userAccountControl and lockoutTime. */
+function accountStatus(object) {
+  const flags = object.userAccountControl?.[0];
+  if (typeof flags !== "number") return null;
+  const parts = [flags & 0x2 ? "Disabled" : "Enabled"];
+  if (flags & 0x10000) parts.push("password never expires");
+  if (flags & 0x800000) parts.push("password expired");
+  const lockout = object.lockoutTime?.[0];
+  if (typeof lockout === "string" && /^\d{4}-/.test(lockout)) parts.push(`locked out since ${new Date(lockout).toLocaleString()}`);
+  return parts.join(", ");
+}
+
+/** The rows of the list: the main properties, then every attribute. */
+function userRows(object) {
+  const rows = [];
+  const status = accountStatus(object);
+  if (status) rows.push({ attribute: "Account", name: "Account", value: status, dn: null });
+  for (const [label, attribute] of USER_FIELDS) {
+    // One row per value: a DN (manager, groups) can be opened with a double-click.
+    (object[attribute] ?? []).forEach((value, i) => {
+      const dn = isDirectoryDn(value) ? value : null;
+      rows.push({ attribute: i === 0 ? label : "", name: label, value: userValue(value), dn, user: attribute === "manager" });
+    });
+  }
+  rows.push({ attribute: "", name: "", value: "", dn: null });
+  rows.push({ attribute: "All attributes", name: "", value: "", dn: null });
+  const names = Object.keys(object).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  for (const attribute of names) {
+    object[attribute].forEach((value, i) => {
+      const shown = value instanceof Uint8Array && PHOTO_ATTRIBUTES.includes(attribute) ? userValue(value) : formatValue(value);
+      rows.push({ attribute: i === 0 ? attribute : "", name: attribute, value: shown, dn: isDirectoryDn(value) ? value : null });
+    });
+  }
+  return rows;
+}
+
+/** The message font of the window, bold and larger: the name of the user. */
+function createHeaderFont(windowDpi) {
+  const ncm = new NONCLIENTMETRICSW();
+  ncm.cbSize = sizeof(NONCLIENTMETRICSW);
+  if (!user32.SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, sizeof(NONCLIENTMETRICSW), byref(ncm), 0, windowDpi)) throw WinError(get_last_error());
+  const font = ncm.lfMessageFont;
+  font.lfWeight = FW_BOLD;
+  font.lfHeight = Math.round(Number(font.lfHeight) * 1.6);
+  return gdi32.CreateFontIndirectW(byref(font));
+}
+
+/** Open the window of a user, or bring it to the front if it is already open. */
+function openUserWindow(dn) {
+  const open = userWindowByDn.get(key(dn));
+  if (open !== undefined) {
+    user32.ShowWindow(open, SW_RESTORE);
+    user32.SetForegroundWindow(open);
+    return;
+  }
+  // Owned by the main window: above it, and closed with it.
+  const hwnd = user32.CreateWindowExW(WS_EX_CONTROLPARENT, USER_CLASS, `${rdnValue(dn)} — User`, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT, px(700), px(660), hwndMain, null, hInstance, null);
+  if (!hwnd) throw WinError(get_last_error());
+  const state = { hwnd, dn, key: BigInt(hwnd), dpi: user32.GetDpiForWindow(hwnd), rows: [], picture: null, headerFont: null };
+  state.name = createChild(0, "STATIC", rdnValue(dn), SS_NOPREFIX | SS_ENDELLIPSIS, null, hwnd);
+  state.lines = [0, 1, 2].map(() => createChild(0, "STATIC", "", SS_NOPREFIX | SS_ENDELLIPSIS, null, hwnd));
+  state.list = createListView(ID_USER_LIST, USER_COLUMNS, 0, hwnd);
+  state.children = [state.name, ...state.lines, state.list];
+  // The name has its own font: not among the controls that follow the main window's.
+  fontTargets.splice(fontTargets.indexOf(state.name), 1);
+  state.headerFont = createHeaderFont(state.dpi);
+  user32.SendMessageW(state.name, WM_SETFONT, state.headerFont, 0);
+  for (const control of [...state.lines, state.list]) user32.SendMessageW(control, WM_SETFONT, hFont, 0);
+  user32.SetWindowTextW(state.lines[0], "Loading…");
+  userWindows.set(state.key, state);
+  userWindowByDn.set(key(dn), state.key);
+  applyTitleBar(hwnd);
+  layoutUser(state);
+  user32.ShowWindow(hwnd, SW_SHOW);
+  user32.SetFocus(state.list);
+  loadUser(state);
+}
+
+function loadUser(state) {
+  request(`Reading ${rdnValue(state.dn)}`, "(objectClass=*)", state.dn, SCOPE.BASE, [], {}, (found) => {
+    if (!userWindows.has(state.key)) return; // closed meanwhile
+    const object = found?.[0];
+    if (!object) {
+      user32.SetWindowTextW(state.lines[0], "The user could not be read: see the status bar of the main window.");
+      return;
+    }
+    const name = object.displayName?.[0] ?? object.name?.[0] ?? rdnValue(state.dn);
+    user32.SetWindowTextW(state.hwnd, `${name} — User`);
+    user32.SetWindowTextW(state.name, name);
+    const job = [object.title?.[0], object.department?.[0], object.company?.[0]].filter(Boolean).join(" · ");
+    const account = [object.userPrincipalName?.[0] ?? object.sAMAccountName?.[0], accountStatus(object)].filter(Boolean).join(" — ");
+    // The lines under the name, without gaps for what is missing.
+    const lines = [job, object.mail?.[0], account].filter(Boolean);
+    state.lines.forEach((line, i) => user32.SetWindowTextW(line, lines[i] ?? ""));
+    const photo = PHOTO_ATTRIBUTES.map((attribute) => object[attribute]?.[0]).find((value) => value instanceof Uint8Array && value.length);
+    state.picture = photo ? loadPicture(photo) : null;
+    state.rows = userRows(object);
+    user32.SendMessageW(state.list, LVM_SETITEMCOUNT, state.rows.length, 0);
+    fitValueColumn(state); // the rows may have brought the vertical scroll bar
+    user32.InvalidateRect(state.list, null, 0);
+    user32.InvalidateRect(state.hwnd, null, 1);
+  });
+}
+
+function userPx(state, dips) {
+  return Math.round((dips * state.dpi) / USER_DEFAULT_SCREEN_DPI);
+}
+
+/** The photo box, in client coordinates. */
+function photoRect(state) {
+  const margin = userPx(state, MARGIN + 4);
+  const size = userPx(state, USER_PHOTO);
+  return { left: margin, top: margin, right: margin + size, bottom: margin + size };
+}
+
+function layoutUser(state) {
+  const { width, height } = clientRect(state.hwnd);
+  const margin = userPx(state, MARGIN + 4);
+  const photo = photoRect(state);
+  const textLeft = photo.right + margin;
+  const textWidth = Math.max(0, width - textLeft - margin);
+  const nameHeight = userPx(state, 34);
+  const lineHeight = userPx(state, 22);
+  const listTop = photo.bottom + margin;
+  const rects = [
+    [state.name, textLeft, photo.top + userPx(state, 6), textWidth, nameHeight],
+    ...state.lines.map((line, i) => [line, textLeft, photo.top + userPx(state, 6) + nameHeight + i * lineHeight, textWidth, lineHeight]),
+    [state.list, margin, listTop, width - 2 * margin, height - listTop - margin],
+  ];
+  let hdwp = user32.BeginDeferWindowPos(rects.length);
+  for (const [hwnd, x, y, w, h] of rects) hdwp = user32.DeferWindowPos(hdwp, hwnd, null, x, y, Math.max(0, w), Math.max(0, h), SWP_NOZORDER | SWP_NOACTIVATE);
+  user32.EndDeferWindowPos(hdwp);
+  fitValueColumn(state);
+}
+
+/** The values take the rest of the width: the client area of the list, without its vertical scroll bar. */
+function fitValueColumn(state) {
+  const first = Number(user32.SendMessageW(state.list, LVM_GETCOLUMNWIDTH, 0, 0));
+  user32.SendMessageW(state.list, LVM_SETCOLUMNWIDTH, 1, Math.max(userPx(state, 120), clientRect(state.list).width - first));
+}
+
+/** The photo, scaled to fit its box (keeping its proportions); without one, the user icon. */
+function paintUser(state) {
+  const ps = new PAINTSTRUCT();
+  const hdc = user32.BeginPaint(state.hwnd, byref(ps));
+  try {
+    const box = photoRect(state);
+    const frame = new RECT();
+    frame.left = box.left;
+    frame.top = box.top;
+    frame.right = box.right;
+    frame.bottom = box.bottom;
+    user32.FrameRect(hdc, byref(frame), user32.GetSysColorBrush(COLOR_BTNSHADOW));
+    const inner = { left: box.left + 1, top: box.top + 1, width: box.right - box.left - 2, height: box.bottom - box.top - 2 };
+    const picture = state.picture;
+    if (picture && picture.width > 0 && picture.height > 0) {
+      const scale = Math.min(inner.width / picture.width, inner.height / picture.height);
+      const w = Math.max(1, Math.round(picture.width * scale));
+      const h = Math.max(1, Math.round(picture.height * scale));
+      const graphics = new c_void_p(null);
+      if (gdiplus.GdipCreateFromHDC(hdc, byref(graphics)) === 0) {
+        gdiplus.GdipSetInterpolationMode(graphics.value, InterpolationModeHighQualityBicubic);
+        gdiplus.GdipDrawImageRectI(graphics.value, picture.image, inner.left + Math.floor((inner.width - w) / 2), inner.top + Math.floor((inner.height - h) / 2), w, h);
+        gdiplus.GdipDeleteGraphics(graphics.value);
+      }
+    } else {
+      const size = userPx(state, 64);
+      const icon = dsuiext.DsGetIcon(DSGIF_ISNORMAL, "user", size, size);
+      if (icon) {
+        user32.DrawIconEx(hdc, inner.left + Math.floor((inner.width - size) / 2), inner.top + Math.floor((inner.height - size) / 2), icon, size, size, 0, null, DI_NORMAL);
+        user32.DestroyIcon(icon);
+      }
+    }
+  } finally {
+    user32.EndPaint(state.hwnd, byref(ps));
+  }
+}
+
+function onUserNotify(state, lParam) {
+  const hdr = cast(lParam, POINTER(NMHDR)).contents;
+  if (!sameHandle(hdr.hwndFrom, state.list)) return 0;
+  const code = notifyCode(hdr);
+  if (code === LVN_GETDISPINFOW) onGetDispInfo(lParam, state.rows, detailCell, null);
+  else if (code === LVN_ITEMACTIVATE) {
+    const row = state.rows[cast(lParam, POINTER(NMLISTVIEW)).contents.iItem];
+    if (!row?.dn) return 0;
+    if (row.user) {
+      openUserWindow(row.dn); // the manager: a user too
+    } else {
+      openObject(row.dn);
+      user32.SetForegroundWindow(hwndMain);
+    }
+  }
+  return 0;
+}
+
+function closeUserWindow(state) {
+  userWindows.delete(state.key);
+  userWindowByDn.delete(key(state.dn));
+  for (const control of state.children) {
+    const at = fontTargets.indexOf(control);
+    if (at >= 0) fontTargets.splice(at, 1);
+  }
+  if (state.picture) gdiplus.GdipDisposeImage(state.picture.image);
+  state.picture = null;
+  if (state.headerFont) gdi32.DeleteObject(state.headerFont);
+  state.headerFont = null;
+}
+
+function UserWindowProc(hwnd, msg, wParam, lParam) {
+  if (msg === WM_GETMINMAXINFO) {
+    const info = cast(lParam, POINTER(MINMAXINFO)).contents;
+    const scale = user32.GetDpiForWindow(hwnd) / USER_DEFAULT_SCREEN_DPI;
+    info.ptMinTrackSize.x = Math.round(420 * scale);
+    info.ptMinTrackSize.y = Math.round(360 * scale);
+    return 0;
+  }
+  const state = hwnd === null ? undefined : userWindows.get(BigInt(hwnd));
+  if (state) {
+    switch (msg) {
+      case WM_SIZE:
+        layoutUser(state);
+        return 0;
+      case WM_PAINT:
+        paintUser(state);
+        return 0;
+      case WM_DPICHANGED: {
+        state.dpi = HIWORD(wParam);
+        const old = state.headerFont;
+        state.headerFont = createHeaderFont(state.dpi);
+        user32.SendMessageW(state.name, WM_SETFONT, state.headerFont, 1);
+        if (old) gdi32.DeleteObject(old);
+        const suggested = cast(lParam, POINTER(RECT)).contents;
+        const left = Number(suggested.left);
+        const top = Number(suggested.top);
+        user32.SetWindowPos(hwnd, null, left, top, Number(suggested.right) - left, Number(suggested.bottom) - top, SWP_NOZORDER | SWP_NOACTIVATE);
+        layoutUser(state);
+        user32.InvalidateRect(hwnd, null, 1);
+        return 0;
+      }
+      case WM_SETTINGCHANGE:
+        if (lParam && wstring_at(lParam) === "ImmersiveColorSet") applyTitleBar(hwnd);
+        break;
+      case WM_NOTIFY:
+        return onUserNotify(state, lParam);
+      case WM_CONTEXTMENU: {
+        // The commands of the details pane (they reach the main window).
+        if (!sameHandle(wParam, state.list)) break;
+        const row = state.rows[selectedIndex(state.list)];
+        if (!row?.name) return 0;
+        menuTarget = { dn: row.dn, value: row.value, name: row.name };
+        popupMenu([[IDM_OPEN, "Open", Boolean(row.dn)], null, [IDM_COPY_VALUE, `Copy ${row.name} value`], [IDM_COPY_DN, "Copy distinguished name", Boolean(row.dn)]], SIGNED(LOWORD(lParam)), SIGNED(HIWORD(lParam)));
+        return 0;
+      }
+      case WM_COMMAND:
+        if (LOWORD(wParam) === IDCANCEL) {
+          user32.DestroyWindow(hwnd); // Esc closes the window
+          return 0;
+        }
+        break;
+      case WM_DESTROY:
+        closeUserWindow(state);
+        return 0;
+    }
+  }
+  return user32.DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1756,8 +2189,12 @@ function onNotify(lParam) {
         break;
       }
       case LVN_ITEMACTIVATE: {
+        // A user opens its own window; any other object is opened in place.
         const row = rows[cast(lParam, POINTER(NMLISTVIEW)).contents.iItem];
-        if (row && !row.skeleton) openObject(row.dn);
+        if (row && !row.skeleton) {
+          if (USER_CLASSES.has(row.cls)) openUserWindow(row.dn);
+          else openObject(row.dn);
+        }
         break;
       }
     }
@@ -1795,7 +2232,13 @@ function onCommand(id, notification) {
       if (selectedNode !== null && nodes.get(selectedNode).parent) revealContainer(parentDn(nodes.get(selectedNode).dn));
       return;
     case IDM_OPEN:
-      if (menuTarget?.dn) openObject(menuTarget.dn);
+      if (menuTarget?.dn) {
+        openObject(menuTarget.dn);
+        user32.SetForegroundWindow(hwndMain); // also from the menu of a user window
+      }
+      return;
+    case IDM_USER_DETAILS:
+      if (menuTarget?.dn) openUserWindow(menuTarget.dn);
       return;
     case IDM_COPY_DN:
       if (menuTarget?.dn) copyText(menuTarget.dn);
@@ -1889,15 +2332,15 @@ function WindowProc(hwnd, msg, wParam, lParam) {
 // Creation
 // ═══════════════════════════════════════════════════════════════════════
 
-function createChild(exStyle, className, text, style, id) {
-  const hwnd = user32.CreateWindowExW(exStyle, className, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 0, 0, hwndMain, id, hInstance, null);
+function createChild(exStyle, className, text, style, id, parent = hwndMain) {
+  const hwnd = user32.CreateWindowExW(exStyle, className, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 0, 0, parent, id, hInstance, null);
   if (!hwnd) throw WinError(get_last_error());
   fontTargets.push(hwnd);
   return hwnd;
 }
 
-function createListView(id, columns, style = 0) {
-  const hwnd = createChild(WS_EX_CLIENTEDGE, "SysListView32", null, LVS_REPORT | LVS_SHOWSELALWAYS | LVS_SINGLESEL | LVS_OWNERDATA | WS_TABSTOP | style, id);
+function createListView(id, columns, style = 0, parent = hwndMain) {
+  const hwnd = createChild(WS_EX_CLIENTEDGE, "SysListView32", null, LVS_REPORT | LVS_SHOWSELALWAYS | LVS_SINGLESEL | LVS_OWNERDATA | WS_TABSTOP | style, id, parent);
   uxtheme.SetWindowTheme(hwnd, "Explorer", null); // the selection and hover look of File Explorer
   const extended = LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_HEADERDRAGDROP | LVS_EX_LABELTIP;
   user32.SendMessageW(hwnd, LVM_SETEXTENDEDLISTVIEWSTYLE, extended, extended);
@@ -1911,15 +2354,15 @@ function createListView(id, columns, style = 0) {
   return hwnd;
 }
 
-function registerClass(name, proc) {
+function registerClass(name, proc, iconClass = "domainDNS") {
   const windowClass = new WNDCLASSEX();
   windowClass.cbSize = sizeof(WNDCLASSEX);
   windowClass.hInstance = hInstance;
   windowClass.hCursor = user32.LoadCursorW(null, IDC_ARROW);
   windowClass.hbrBackground = COLOR_BTNFACE + 1; // a system color as brush: (HBRUSH)(COLOR_BTNFACE + 1)
   windowClass.lpszClassName = name;
-  windowClass.hIcon = dsuiext.DsGetIcon(DSGIF_ISNORMAL, "domainDNS", 32, 32);
-  windowClass.hIconSm = dsuiext.DsGetIcon(DSGIF_ISNORMAL, "domainDNS", 16, 16);
+  windowClass.hIcon = dsuiext.DsGetIcon(DSGIF_ISNORMAL, iconClass, 32, 32);
+  windowClass.hIconSm = dsuiext.DsGetIcon(DSGIF_ISNORMAL, iconClass, 16, 16);
   // Python idiom: WNDPROC(fn) wraps JS function as a stdcall callback
   const callback = WNDPROC(proc);
   callbacks.push(callback);
@@ -1984,6 +2427,7 @@ function main() {
 
   hInstance = kernel32.GetModuleHandleW(null);
   registerClass("NodeCtypesADExplorer", WindowProc);
+  registerClass(USER_CLASS, UserWindowProc, "user");
   dpi = user32.GetDpiForSystem();
   hwndMain = user32.CreateWindowExW(
     WS_EX_CONTROLPARENT,
@@ -2042,21 +2486,29 @@ function main() {
   loadRoot();
   user32.SetFocus(hwndTree);
 
-  // Message loop: accelerators (Ctrl+O, F5, Ctrl+F, Alt+Up), then Tab / Enter navigation.
+  // Message loop: in the main window, accelerators (Ctrl+O, F5, Ctrl+F,
+  // Alt+Up), then Tab / Enter navigation; in a user window, Tab and Esc.
   const msg = new MSG();
   for (;;) {
     const result = Number(user32.GetMessageW(byref(msg), null, 0, 0));
     if (result === 0) break;
     if (result === -1) throw WinError(get_last_error());
-    if (user32.TranslateAcceleratorW(hwndMain, hAccel, byref(msg))) continue;
-    if (user32.IsDialogMessageW(hwndMain, byref(msg))) continue;
+    const root = msg.hWnd ? user32.GetAncestor(msg.hWnd, GA_ROOT) : null;
+    if (root !== null && userWindows.has(BigInt(root))) {
+      if (user32.IsDialogMessageW(root, byref(msg))) continue;
+    } else {
+      if (user32.TranslateAcceleratorW(hwndMain, hAccel, byref(msg))) continue;
+      if (user32.IsDialogMessageW(hwndMain, byref(msg))) continue;
+    }
     user32.TranslateMessage(byref(msg));
     user32.DispatchMessageW(byref(msg));
   }
 
-  // Post-loop cleanup (safe: no more dispatch into the callbacks).
+  // Post-loop cleanup (safe: no more dispatch into the callbacks). The user
+  // windows, owned by the main window, were destroyed with it.
   user32.DestroyAcceleratorTable(hAccel);
   comctl32.ImageList_Destroy(imageList);
+  if (gdiplusToken !== null) gdiplus.GdiplusShutdown(gdiplusToken);
   for (const callback of callbacks) callback.release();
   ads.close();
 }
