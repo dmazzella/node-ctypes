@@ -50,44 +50,7 @@ void Invoke(void* fn, void** args, void* ret) {
 
 template <typename Factory>
 constexpr Invoker VisitScalar(CType type, Factory make) {
-  switch (type) {
-    case CType::CTYPES_INT8:
-      return make.template operator()<int8_t>();
-    case CType::CTYPES_UINT8:
-      return make.template operator()<uint8_t>();
-    case CType::CTYPES_INT16:
-      return make.template operator()<int16_t>();
-    case CType::CTYPES_UINT16:
-      return make.template operator()<uint16_t>();
-    case CType::CTYPES_INT32:
-      return make.template operator()<int32_t>();
-    case CType::CTYPES_UINT32:
-      return make.template operator()<uint32_t>();
-    case CType::CTYPES_INT64:
-      return make.template operator()<int64_t>();
-    case CType::CTYPES_UINT64:
-      return make.template operator()<uint64_t>();
-    case CType::CTYPES_FLOAT:
-      return make.template operator()<float>();
-    case CType::CTYPES_DOUBLE:
-      return make.template operator()<double>();
-    case CType::CTYPES_CHAR:
-      return make.template operator()<char>();
-    case CType::CTYPES_WCHAR:
-      return make.template operator()<wchar_t>();
-    case CType::CTYPES_BOOL:
-      return make.template operator()<bool>();
-    case CType::CTYPES_SIZE_T:
-      return make.template operator()<size_t>();
-    case CType::CTYPES_SSIZE_T:
-      return make.template operator()<ssize_t>();
-    case CType::CTYPES_LONG:
-      return make.template operator()<long>();
-    case CType::CTYPES_ULONG:
-      return make.template operator()<unsigned long>();
-    default:
-      return nullptr;
-  }
+  return VisitScalarCType(type, make, []() -> Invoker { return nullptr; });
 }
 
 template <typename T>

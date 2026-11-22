@@ -5,7 +5,59 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.15.2] - 2026-11-22
+
+### Changed
+
+- **Synchronous call fast paths**:
+  - Extended exact-prototype `() -> T` and `(T) -> T` native entry
+    specializations to `c_bool`, added `UnaryStringEntry` for one-argument
+    `c_char_p` calls with per-position `long_string_hints_` to skip truncated
+    inline copies on repeated long strings, added `CoreDirectEntry` for 2–4
+    argument `{int32, float, double}` fixed direct calls, and added
+    `AllInt32Entry` for homogeneous `c_int32` signatures up to 32 arguments.
+  - Generalized `UnaryPointerCall` to cover any one-argument `c_void_p`
+    signature returning a scalar or pointer, added a 17–32 argument capacity
+    tier to `FastEntry`/`FastCall`, and limited argument re-reads to the exact
+    `argc`.
+  - Added single-probe plain `ArrayBufferView` pass-through and direct
+    `callbackPointer` owner tracking on `c_void_p` JS wrappers, direct
+    `Reflect.apply` forwarding for primitive variadic calls, and
+    arity-specialized `callAsync` wrappers (0–2 arguments) for functions with
+    result converters.
+- **Callback aggregate snapshots and views**:
+  - Functional `struct()`/`union()` callback arguments now slice their owned
+    8 KB snapshot pool directly in C++ (`Uint8Array` via Node-API, with
+    `napi_is_detached_arraybuffer` recovery), avoiding a C++ → JS
+    `allocSnapshot` call per invocation. Over-aligned layouts, >2 KB values,
+    class `Structure`/`Union` signatures, mirror mode, custom allocators and
+    raw native callbacks keep their existing allocators.
+  - Replaced per-call `Proxy` wrapping for functional callback struct arguments
+    and small native-endian numeric array fields (`count <= 64`) with cached
+    prototype-backed views (`StructCallbackView` and `FastArrayView`) that
+    materialize `_buffer` lazily and preserve full CPython write validation,
+    and specialized callback adapters for 1–3 struct arguments.
+- **Apple ARM64 variadic calls and extra-call cache**:
+  - Enabled register-frame dispatch for variadic calls on Apple ARM64
+    (placing anonymous arguments in 8-byte aligned stack slots after closing
+    register banks), stored `frame::Plan::offsets` and `ExtraCallCache` extra
+    types inline (up to 32), and added an MRU slot check in `AcquireExtraCall`.
+- **Internal architecture and async allocation reductions**:
+  - Added inline Small Buffer Optimization in `FFIFunction::PreparedCall`
+    (up to 8 arguments and 64-byte struct/array returns), removing per-call
+    heap `std::vector` allocations for common `callAsync()` and `callOn()`
+    invocations.
+  - Centralized `CType` predicates and scalar visitor (`IsNumericCType`,
+    `IsDirectScalarReturn`, `VisitScalarCType`) in `src/types.h`, unified
+    `Callback` and `ThreadSafeCallback` JS-thread execution on shared
+    `CallbackBaseData` / `InvokeCallbackOnJsThread`, and split `src/function.cc`,
+    `src/callback.cc`, and `lib/memory/pointer.js` into focused modules
+    (`function_marshal.h/.cc`, `function_fast.cc`, `function_async.cc`,
+    `callback_threadsafe.cc`, `pointer-ops.js`).
+  - Unified function-wrapper construction (`buildFunctionBinding` in
+    `lib/core/invocation.js`) across `CDLL` and `CFUNCTYPE`/`WINFUNCTYPE`, and
+    shared field-accessor compilation (`compileFieldAccessors`) across
+    `struct()` and `union()`.
 
 ## [2.15.1] - 2026-11-22
 

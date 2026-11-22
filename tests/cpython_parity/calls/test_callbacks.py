@@ -124,3 +124,24 @@ class TestCallbacks(unittest.TestCase):
         memmove.restype = c.c_void_p
         self.assertEqual(memmove(callback, None, 0), address)
         self.assertEqual(callback(3, 4), 7)
+
+    def test_callback_two_by_value_aggregates(self):
+        lib = c.CDLL(str(FIXTURE))
+
+        class Bytes33(c.Structure):
+            _fields_ = [("values", c.c_uint8 * 33)]
+
+        cb_type = c.CFUNCTYPE(c.c_int32, Bytes33, Bytes33, c.c_void_p)
+        seen = []
+
+        def handle(first, second, raw_ptr):
+            first.values[0] = 99
+            seen.append((first.values[0], second.values[0], second.values[32], raw_ptr != 0))
+            return first.values[0] + second.values[0] + second.values[32]
+
+        cb = cb_type(handle)
+        invoke = lib.fixture_callback_large_alias
+        invoke.argtypes = [cb_type, c.c_uint8]
+        invoke.restype = c.c_int32
+        self.assertEqual(invoke(cb, 10), 99 + 10 + 42)
+        self.assertEqual(seen, [(99, 10, 42, True)])

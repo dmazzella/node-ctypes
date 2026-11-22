@@ -26,10 +26,10 @@ to compare no field read, one view and two views on the same C fixture.
 
 ## Results
 
-Measured on 2026-11-22 with node-ctypes 2.15.0 (`8eded64` with local changes),
-Koffi 3.3.8 and Node.js 26.13.1. Both addons ran natively on a physical
-MacBook Pro (Mac14,7) with an Apple M2 (4 performance and 4 efficiency cores,
-16 GB) running macOS 27.2.1. The node-ctypes run used external buffers.
+Measured on 2026-11-22 with node-ctypes 2.15.2, Koffi 3.3.8 and Node.js
+26.13.1. Both addons ran natively on a physical MacBook Pro (Mac14,7) with an
+Apple M2 (4 performance and 4 efficiency cores, 16 GB) running macOS 27.2.1.
+The node-ctypes run used external buffers.
 
 Median times in nanoseconds per call (asynchronous rows: per completed call,
 scheduling included); the ratio is node-ctypes divided by Koffi, below 1 favors
@@ -43,18 +43,18 @@ node-ctypes.
 
 | Case                              | node-ctypes (ns) | Koffi (ns) | Ratio |
 | --------------------------------- | ---------------: | ---------: | ----: |
-| zero arguments                    |            18.22 |      17.17 | 1.06x |
-| echo i8 (number)                  |            19.65 |      21.63 | 0.91x |
-| echo u8 (number)                  |            20.68 |      22.83 | 0.91x |
-| echo i16 (number)                 |            19.26 |      20.94 | 0.92x |
-| echo u16 (number)                 |            20.08 |      21.99 | 0.91x |
-| echo bool (boolean)               |            25.14 |      20.43 | 1.23x |
-| echo i32 (number)                 |            19.42 |      21.27 | 0.91x |
-| echo u32 (number)                 |            26.58 |      30.16 | 0.88x |
-| echo i64 (bigint)                 |            33.49 |      35.78 | 0.94x |
-| echo float (number)               |            27.56 |      29.71 | 0.93x |
-| echo double (number)              |            27.00 |      29.19 | 0.92x |
-| mixed arguments (i32,f64,f32,i32) |            46.93 |      35.59 | 1.32x |
+| zero arguments                    |            18.16 |      16.40 | 1.11x |
+| echo i8 (number)                  |            19.59 |      20.67 | 0.95x |
+| echo u8 (number)                  |            20.18 |      21.86 | 0.92x |
+| echo i16 (number)                 |            19.27 |      20.69 | 0.93x |
+| echo u16 (number)                 |            20.10 |      21.55 | 0.93x |
+| echo bool (boolean)               |            18.49 |      19.87 | 0.93x |
+| echo i32 (number)                 |            19.63 |      21.05 | 0.93x |
+| echo u32 (number)                 |            26.57 |      29.53 | 0.90x |
+| echo i64 (bigint)                 |            32.53 |      34.75 | 0.94x |
+| echo float (number)               |            26.87 |      28.63 | 0.94x |
+| echo double (number)              |            26.32 |      28.79 | 0.91x |
+| mixed arguments (i32,f64,f32,i32) |            40.14 |      35.48 | 1.13x |
 
 ### Stack arguments
 
@@ -62,8 +62,8 @@ node-ctypes.
 
 | Case                                | node-ctypes (ns) | Koffi (ns) | Ratio |
 | ----------------------------------- | ---------------: | ---------: | ----: |
-| 16 narrow arguments (i64 -> number) |           104.34 |      98.51 | 1.06x |
-| 26 mixed narrow/GP/FP arguments     |           238.81 |     188.55 | 1.27x |
+| 16 narrow arguments (i64 -> number) |           103.37 |      98.19 | 1.05x |
+| 26 mixed narrow/GP/FP arguments     |           221.10 |     179.28 | 1.23x |
 
 ### Prototype callers
 
@@ -71,8 +71,8 @@ node-ctypes.
 
 | Case                         | node-ctypes (ns) | Koffi (ns) | Ratio |
 | ---------------------------- | ---------------: | ---------: | ----: |
-| zero arguments via CFUNCTYPE |            17.88 |      16.77 | 1.07x |
-| echo i32 via CFUNCTYPE       |            19.45 |      21.14 | 0.92x |
+| zero arguments via CFUNCTYPE |            18.00 |      16.45 | 1.09x |
+| echo i32 via CFUNCTYPE       |            19.47 |      20.91 | 0.93x |
 
 ### Strings and buffers
 
@@ -80,9 +80,9 @@ node-ctypes.
 
 | Case                           | node-ctypes (ns) | Koffi (ns) | Ratio |
 | ------------------------------ | ---------------: | ---------: | ----: |
-| string length 16 B -> number   |            57.29 |      40.29 | 1.42x |
-| string length 4096 B -> number |           258.82 |     210.06 | 1.23x |
-| buffer argument (4 x i32)      |            37.84 |      30.15 | 1.25x |
+| string length 16 B -> number   |            46.78 |      39.67 | 1.18x |
+| string length 4096 B -> number |           210.83 |     208.19 | 1.01x |
+| buffer argument (4 x i32)      |            24.90 |      29.97 | 0.83x |
 
 In a separate node-ctypes-only comparison, a synchronous `strlen` binding took
 either a JS string or `Buffer.from(text + "\0", "utf8")`. For 4096 bytes of
@@ -136,15 +136,15 @@ callee, and leave its contents unchanged until every call using it has settled.
 
 | Case                                | node-ctypes (ns) | Koffi (ns) | Ratio |
 | ----------------------------------- | ---------------: | ---------: | ----: |
-| struct return {x,y}                 |           126.76 |     133.59 | 0.95x |
-| struct argument {x,y}               |           123.90 |     115.71 | 1.07x |
-| HFA float4 return                   |           157.24 |     176.15 | 0.89x |
-| HFA float4 argument                 |           205.07 |     206.55 | 0.99x |
-| HFA double4 return                  |           176.87 |     180.79 | 0.98x |
-| HFA double4 argument                |           231.92 |     210.96 | 1.10x |
-| struct mixed GP return and argument |           286.27 |     289.33 | 0.99x |
-| struct double5 return (indirect)    |           194.73 |     191.67 | 1.02x |
-| struct double5 argument (indirect)  |           207.30 |     237.11 | 0.87x |
+| struct return {x,y}                 |           122.12 |     132.47 | 0.92x |
+| struct argument {x,y}               |           118.67 |     112.58 | 1.05x |
+| HFA float4 return                   |           155.60 |     174.02 | 0.89x |
+| HFA float4 argument                 |           200.18 |     197.69 | 1.01x |
+| HFA double4 return                  |           172.46 |     176.77 | 0.98x |
+| HFA double4 argument                |           216.36 |     201.90 | 1.07x |
+| struct mixed GP return and argument |           285.81 |     291.83 | 0.98x |
+| struct double5 return (indirect)    |           192.45 |     190.22 | 1.01x |
+| struct double5 argument (indirect)  |           205.23 |     354.90 | 0.58x |
 
 ### Async calls (scheduling included)
 
@@ -152,20 +152,20 @@ callee, and leave its contents unchanged until every call using it has settled.
 
 | Case                                         | node-ctypes (ns) | Koffi (ns) | Ratio |
 | -------------------------------------------- | ---------------: | ---------: | ----: |
-| async HFA double4 return (1 in flight)       |             7945 |       6568 | 1.21x |
-| async HFA double4 return (8 in flight)       |             3092 |       2872 | 1.08x |
-| async HFA double4 argument (1 in flight)     |             7195 |       6518 | 1.10x |
-| async HFA double4 argument (8 in flight)     |             3213 |       2826 | 1.14x |
-| async thread-safe callback i32 (1 in flight) |            14082 |      12787 | 1.10x |
-| async thread-safe callback i32 (8 in flight) |             5410 |       5104 | 1.06x |
-| async inferred mixed (1 in flight)           |             6787 |       6174 | 1.10x |
-| async inferred mixed (8 in flight)           |             3000 |       2825 | 1.06x |
-| async i32 (1 in flight)                      |             6525 |       6048 | 1.08x |
-| async i32 (8 in flight)                      |             2871 |       2743 | 1.05x |
-| async double5 return (1 in flight)           |             7981 |       6508 | 1.23x |
-| async double5 return (8 in flight)           |             3125 |       2906 | 1.08x |
-| async double5 argument (1 in flight)         |             7232 |       6512 | 1.11x |
-| async double5 argument (8 in flight)         |             3297 |       2830 | 1.16x |
+| async HFA double4 return (1 in flight)       |             7775 |       6530 | 1.19x |
+| async HFA double4 return (8 in flight)       |             3164 |       2951 | 1.07x |
+| async HFA double4 argument (1 in flight)     |             7017 |       6424 | 1.09x |
+| async HFA double4 argument (8 in flight)     |             3338 |       2873 | 1.16x |
+| async thread-safe callback i32 (1 in flight) |            13795 |      12883 | 1.07x |
+| async thread-safe callback i32 (8 in flight) |             5432 |       5309 | 1.02x |
+| async inferred mixed (1 in flight)           |             6655 |       5895 | 1.13x |
+| async inferred mixed (8 in flight)           |             3167 |       2961 | 1.07x |
+| async i32 (1 in flight)                      |             6517 |       5909 | 1.10x |
+| async i32 (8 in flight)                      |             3004 |       2891 | 1.04x |
+| async double5 return (1 in flight)           |             7788 |       6502 | 1.20x |
+| async double5 return (8 in flight)           |             3221 |       3054 | 1.05x |
+| async double5 argument (1 in flight)         |             6995 |       6491 | 1.08x |
+| async double5 argument (8 in flight)         |             3403 |       2918 | 1.17x |
 
 ### Memory access
 
@@ -173,7 +173,7 @@ callee, and leave its contents unchanged until every call using it has settled.
 
 | Case                | node-ctypes (ns) | Koffi (ns) | Ratio |
 | ------------------- | ---------------: | ---------: | ----: |
-| read two i32 fields |             7.94 |     115.41 | 0.07x |
+| read two i32 fields |             7.95 |     113.19 | 0.07x |
 
 ### Callbacks
 
@@ -181,17 +181,17 @@ callee, and leave its contents unchanged until every call using it has settled.
 
 | Case                                                | node-ctypes (ns) | Koffi (ns) | Ratio |
 | --------------------------------------------------- | ---------------: | ---------: | ----: |
-| C -> JS callback (i32)                              |           130.98 |     103.46 | 1.27x |
-| C -> JS callback (i32, 64 C-loop calls)             |             3986 |       4644 | 0.86x |
-| C -> JS callback (GP Point)                         |           369.46 |     219.32 | 1.68x |
-| C -> JS callback (HFA double4)                      |           663.79 |     386.39 | 1.72x |
-| C -> JS callback (indirect bytes33)                 |           696.74 |     384.09 | 1.81x |
-| C -> JS thread-safe callback (GP Point)             |           372.42 |     218.53 | 1.70x |
-| C -> JS thread-safe callback (HFA double4)          |           685.13 |     385.36 | 1.78x |
-| C -> JS thread-safe callback (indirect bytes33)     |           691.87 |     377.95 | 1.83x |
-| C -> JS callback (indirect bytes33, no field read)  |           323.10 |     368.05 | 0.88x |
-| C -> JS callback (indirect bytes33, one field view) |           617.61 |     396.94 | 1.56x |
-| C -> JS thread-safe callback (i32 host thread)      |           160.69 |     102.88 | 1.56x |
+| C -> JS callback (i32)                              |           105.04 |     102.71 | 1.02x |
+| C -> JS callback (i32, 64 C-loop calls)             |             3952 |       4680 | 0.84x |
+| C -> JS callback (GP Point)                         |           175.79 |     219.58 | 0.80x |
+| C -> JS callback (HFA double4)                      |           349.42 |     379.52 | 0.92x |
+| C -> JS callback (indirect bytes33)                 |           355.60 |     376.62 | 0.94x |
+| C -> JS thread-safe callback (GP Point)             |           193.37 |     216.98 | 0.89x |
+| C -> JS thread-safe callback (HFA double4)          |           355.22 |     378.57 | 0.94x |
+| C -> JS thread-safe callback (indirect bytes33)     |           356.43 |     377.81 | 0.94x |
+| C -> JS callback (indirect bytes33, no field read)  |           207.92 |     367.43 | 0.57x |
+| C -> JS callback (indirect bytes33, one field view) |           380.54 |     392.37 | 0.97x |
+| C -> JS thread-safe callback (i32 host thread)      |           129.96 |     101.25 | 1.28x |
 
 ### Variadic calls
 
@@ -199,8 +199,8 @@ callee, and leave its contents unchanged until every call using it has settled.
 
 | Case                         | node-ctypes (ns) | Koffi (ns) | Ratio |
 | ---------------------------- | ---------------: | ---------: | ----: |
-| variadic sum (3 integers)    |           144.04 |      89.88 | 1.60x |
-| variadic doubles (10 values) |           170.97 |     281.54 | 0.61x |
+| variadic sum (3 integers)    |            61.88 |      89.18 | 0.69x |
+| variadic doubles (10 values) |           110.06 |     279.25 | 0.39x |
 
 ### Inferred calls
 
@@ -208,10 +208,10 @@ callee, and leave its contents unchanged until every call using it has settled.
 
 | Case                              | node-ctypes (ns) | Koffi (ns) | Ratio |
 | --------------------------------- | ---------------: | ---------: | ----: |
-| inferred mixed (without argtypes) |            64.35 |      41.25 | 1.56x |
-| declared mixed (argtypes control) |            44.68 |      41.34 | 1.08x |
-| inferred stack (10 integers)      |           102.28 |      58.07 | 1.76x |
-| declared stack (argtypes control) |            88.28 |      58.63 | 1.51x |
+| inferred mixed (without argtypes) |            53.87 |      40.92 | 1.32x |
+| declared mixed (argtypes control) |            38.67 |      41.02 | 0.94x |
+| inferred stack (10 integers)      |            90.08 |      57.06 | 1.58x |
+| declared stack (argtypes control) |            67.81 |      57.09 | 1.19x |
 
 Asynchronous rows include Promise completion; the two libraries use
 different worker pools. Koffi 3.3.8 has no asynchronous entry for variadic

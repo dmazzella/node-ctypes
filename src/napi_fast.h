@@ -179,4 +179,23 @@ inline std::atomic<bool> buffer_info_checks_type{true};
   return true;
 }
 
+// Verifica se un ArrayBuffer è stato staccato (transfer / transfer list).
+[[nodiscard]] inline bool IsArrayBufferDetached(Napi::Env env, napi_value arraybuffer) {
+  bool detached = false;
+  const napi_status status = napi_is_detached_arraybuffer(env, arraybuffer, &detached);
+  NAPI_THROW_IF_FAILED(env, status, true);
+  return detached;
+}
+
+// Vista Uint8Array su un ArrayBuffer esistente senza round-trip C++ -> JS.
+[[nodiscard]] inline Napi::Value CreateUint8Array(Napi::Env env,
+                                                  napi_value arraybuffer,
+                                                  size_t byte_offset,
+                                                  size_t length) {
+  napi_value result;
+  const napi_status status = napi_create_typedarray(env, napi_uint8_array, length, arraybuffer, byte_offset, &result);
+  NAPI_THROW_IF_FAILED(env, status, Napi::Value());
+  return Napi::Value(env, result);
+}
+
 }  // namespace ctypes::napi_fast

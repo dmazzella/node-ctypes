@@ -14,6 +14,7 @@ namespace ctypes {
 
 // Costanti per ottimizzazione
 static constexpr size_t MAX_INLINE_ARGS = 16;
+static constexpr size_t kMaxSimpleArgs = 32;
 static constexpr size_t ARG_SLOT_SIZE = 16;  // Abbastanza per qualsiasi tipo base
 static constexpr size_t RETURN_BUFFER_SIZE = 64;
 static constexpr size_t MAX_VARIADIC_EXTRA_ARGS = MAX_INLINE_ARGS;  // Per stack allocation
@@ -29,14 +30,22 @@ struct ReturnValue {
 
 // Firme concrete dedotte o variadiche, con CIF/plan libffi lazy.
 struct ExtraCallCache : LibffiExtraCallState {
-  size_t total_args = 0;           // Numero totale argomenti (fissi + variadici)
-  std::vector<CType> extra_types;  // Tipi degli argomenti extra
+  static_assert(frame::Plan::kMaxArgs == kMaxSimpleArgs);
+  size_t total_args = 0;  // Numero totale argomenti (fissi + variadici)
+  size_t extra_count = 0;
+  std::array<CType, kMaxSimpleArgs> extra_types{};  // Tipi degli argomenti extra (inline fino a kMaxSimpleArgs)
+  std::vector<CType> extra_types_overflow;          // Usato solo oltre kMaxSimpleArgs argomenti extra
   bool valid = false;
   // Chiamate in corso che usano la firma: una chiamata rientrante (da un
   // callback) non può ricostruire lo slot mentre la chiamata esterna lo usa.
   uint32_t in_use = 0;
   // Chiamata a registri della firma completa (SimpleCall), se consentita.
   frame::Plan frame;
+
+  [[nodiscard]] std::span<const CType> ExtraTypes() const noexcept {
+    return extra_types_overflow.empty() ? std::span<const CType>(extra_types.data(), extra_count)
+                                        : std::span<const CType>(extra_types_overflow);
+  }
 };
 
 // Buffer heap di una chiamata sincrona. L'istanza ne riusa uno (capacità
@@ -242,9 +251,9 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
 
   // Entry point of the per-instance `call` function: the FFIFunction* is the
   // function's N-API data, so the hot path skips the napi_unwrap of InstanceMethod.
-  // Capacità iniziale secondo la firma: 2, 4 o 8 slot, oppure 16 per 9–16
-  // argomenti dichiarati. napi_get_cb_info scrive undefined negli slot oltre argc.
-  template <size_t Capacity, bool UnaryPointer = false>
+  // Capacità iniziale secondo la firma: 2, 4, 8, 16 o 32 (kMaxSimpleArgs) slot.
+  // napi_get_cb_info scrive undefined negli slot oltre argc.
+  template <size_t Capacity>
   static napi_value FastCall(napi_env env, napi_callback_info info);
   // Funzione d'ingresso (_makeEntry), la funzione restituita all'utente: le
   // chiamate con argomenti che il wrapper JS passerebbe così come sono vanno
@@ -252,6 +261,12 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
   // SimpleCall non copre) al wrapper JS, il fallback, con gli stessi argomenti.
   template <size_t Capacity, int ShortArity = -1, typename T = int32_t>
   static napi_value FastEntry(napi_env env, napi_callback_info info);
+  template <typename R>
+  static napi_value CoreDirectEntry(napi_env env, napi_callback_info info);
+  template <size_t Capacity>
+  static napi_value AllInt32Entry(napi_env env, napi_callback_info info);
+  static napi_value UnaryStringEntry(napi_env env, napi_callback_info info);
+  static napi_value UnaryPointerCall(napi_env env, napi_callback_info info);
   template <size_t Count>
   static napi_value MixedEntry(napi_env env, napi_callback_info info);
   napi_value CallEntryFallback(napi_env env, napi_callback_info info);
@@ -262,7 +277,7 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
 
   // Firma semplice (vedi SimpleCall): scalari, puntatori, stringhe e piccoli
   // aggregati negli slot inline. Calcolato in PrepareCall.
-  static constexpr size_t kMaxSimpleArgs = 32;
+  static constexpr size_t kMaxSimpleArgs = ctypes::kMaxSimpleArgs;
   // Argomenti letti da FastCall con la prima napi_get_cb_info.
   static constexpr size_t kFastCallArgs = 8;
   static constexpr size_t kMaxSimpleStructReturn = 64;
@@ -273,11 +288,14 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
   // funzione, e allora *needs_js è true (il wrapper JS deve convertirlo).
   // Sempre espansa: con più chiamanti gcc ne farebbe una copia fuori linea
   // (+10% sulle chiamate brevi).
-  template <ArgumentList Args, bool HasErrcheck = true, bool Entry = false, bool UnaryPointer = false>
+  template <ArgumentList Args, bool HasErrcheck = true, bool Entry = false>
   [[nodiscard]] CTYPES_ALWAYS_INLINE bool SimpleCall(const Args& info,
                                                      Napi::Value& result,
                                                      const Napi::Function* errcheck,
                                                      bool* needs_js = nullptr);
+  // Copia una stringa lunga in scratch_.strings da heap_offset; std::nullopt
+  // se il valore non è una stringa.
+  [[nodiscard]] std::optional<size_t> CopyStringToScratch(const Napi::Value& val, size_t heap_offset);
   template <typename Args, bool HasErrcheck = true>
     requires(std::same_as<Args, Napi::CallbackInfo> || std::same_as<Args, FunctionArguments>)
   Napi::Value InvokeCall(const Args& info, const Napi::Function* errcheck);
@@ -335,6 +353,9 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
   // ============================================================
   class PreparedCall : private LibffiAsyncCallState {
    public:
+    static constexpr size_t kInlineArgs = 8;
+    static constexpr size_t kInlineReturnSize = 64;
+
     PreparedCall(Napi::Env env,
                  FFIFunction* ffi_function,
                  FixedInvoker invoker,
@@ -342,8 +363,9 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
                  CType return_type,
                  std::shared_ptr<StructInfo> return_struct_info,
                  std::shared_ptr<ArrayInfo> return_array_info,
-                 std::vector<uint8_t>&& arg_storage,
-                 std::vector<void*>&& arg_values,
+                 size_t argc,
+                 std::span<const uint8_t> inline_arg_storage,
+                 std::vector<uint8_t>&& heap_arg_storage,
                  std::vector<char>&& string_buffer,
                  std::vector<std::pair<size_t, size_t>>&& string_fixups,
                  std::vector<std::pair<size_t, size_t>>&& wstring_fixups,
@@ -381,7 +403,12 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
     CType return_type_;
     std::shared_ptr<StructInfo> return_struct_info_;
     std::shared_ptr<ArrayInfo> return_array_info_;
-    alignas(16) ReturnValue return_value_;
+    size_t argc_ = 0;
+    // SBO per chiamate comuni (<= kInlineArgs argomenti, ritorni <= kInlineReturnSize):
+    // evita fino a 3 allocazioni heap di std::vector per chiamata asincrona.
+    alignas(16) std::array<uint8_t, kInlineArgs * ARG_SLOT_SIZE> inline_arg_storage_{};
+    std::array<void*, kInlineArgs> inline_arg_values_{};
+    alignas(16) std::array<uint8_t, kInlineReturnSize> inline_return_storage_{};
     std::vector<uint8_t> arg_storage_;
     std::vector<void*> arg_values_;
     std::vector<char> string_buffer_;
@@ -390,8 +417,8 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
     std::vector<Napi::ObjectReference> buffer_refs_;
     std::vector<std::vector<uint8_t>> large_arg_buffers_;  // overflow for struct/array > ARG_SLOT_SIZE
     std::vector<size_t> large_arg_indices_;                // which arg slots use large_arg_buffers_ (in order)
-    std::vector<uint8_t> return_buffer_;                   // for struct/array returns > sizeof(ReturnValue)
-    void* return_ptr_;                                     // &return_value_ or return_buffer_.data()
+    std::vector<uint8_t> return_buffer_;                   // for struct/array returns > kInlineReturnSize
+    void* return_ptr_;                                     // inline_return_storage_.data() o return_buffer_.data()
     Napi::Promise::Deferred deferred_;
     Napi::FunctionReference errcheck_ref_;
     bool result_handler_;
@@ -446,6 +473,8 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
   // la sequenza completa.
   enum class PointerHint : uint8_t { kNone, kView, kBigInt, kNumber, kNullish };
   std::array<PointerHint, kMaxSimpleArgs> pointer_hints_{};
+  // Posizioni c_char_p che hanno superato inline_strings_: copiano subito nello scratch.
+  uint32_t long_string_hints_ = 0;
   [[nodiscard]] static bool HintedPointer(const Napi::Value& val, PointerHint hint, void*& ptr, bool& memory);
 
   // Funzione d'ingresso: il wrapper JS (riferimento debole: lo tiene vivo una
@@ -486,7 +515,8 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
   // Cache delle firme concrete con argomenti oltre gli argtypes
   // ============================================================
   std::array<ExtraCallCache, MAX_CACHED_EXTRA_CALLS> extra_call_cache_;
-  size_t next_cache_slot_;  // Round-robin replacement
+  ExtraCallCache* last_extra_cache_ = nullptr;  // Ultimo slot usato (lookup O(1) sul caso monomorfico)
+  size_t next_cache_slot_;                      // Round-robin replacement
 
   // ============================================================
   // Error checking callback (Python ctypes errcheck)

@@ -48,17 +48,20 @@ inline constexpr Abi kAbi = Abi::None;
 #endif
 // Stack impacchettato per dimensione (Apple ARM64) invece di slot di 8 byte.
 #if defined(__APPLE__) && (defined(__aarch64__) || defined(_M_ARM64))
+inline constexpr bool kAppleArm64 = true;
 inline constexpr bool kPackedStack = true;
 #else
+inline constexpr bool kAppleArm64 = false;
 inline constexpr bool kPackedStack = false;
 #endif
 
 // Registri del frame: interi e floating point (banchi indipendenti) o
 // posizioni (Win64, kFpRegisters = 0).
-// Argomenti variadici (oltre gli argtypes) con il frame: solo con il prototipo
-// variadico di x86-64, che li passa come una funzione variadica si aspetta.
-// AArch64 no: Apple li vuole sullo stack, Windows i float nei registri interi.
-inline constexpr bool kVariadicCalls = kAbi == Abi::SysV || kAbi == Abi::Win64;
+// Argomenti variadici (oltre gli argtypes) con il frame: x86-64 usa il
+// prototipo variadico; Apple ARM64 passa tutti gli argomenti variadici sullo
+// stack in slot allineati a 8 byte, esattamente come gli slot di stack del
+// prototipo fisso CallBanks. Windows ARM64 (float nei registri interi) resta su libffi.
+inline constexpr bool kVariadicCalls = kAbi == Abi::SysV || kAbi == Abi::Win64 || kAppleArm64;
 
 inline constexpr size_t kGpRegisters = kAbi == Abi::SysV ? 6 : kAbi == Abi::Win64 ? 4 : 8;
 inline constexpr size_t kFpRegisters = kAbi == Abi::Win64 ? 0 : 8;
@@ -196,16 +199,16 @@ Invoker Select(size_t stack_words) {
 // stretto copre anche i byte degli argomenti successivi, che però sono scritti
 // dopo; Prepare garantisce che anche l'ultima parola stia nel frame.
 struct Plan {
-  std::vector<uint16_t> offsets;  // offset in byte nel frame, per argomento
+  static constexpr size_t kMaxArgs = 32;
+  std::array<uint16_t, kMaxArgs> offsets{};  // offset in byte nel frame, per argomento (inline, senza heap)
   Invoker invoker = nullptr;
   size_t stack_words = 0;  // parole di stack occupate dagli argomenti
   size_t stack_slots = 0;  // slot passati dall'invoker (StackSlots)
 
-  // L'invoker legge tutti i registri e stack_slots slot: prima degli argomenti
-  // (che sovrascrivono le loro posizioni) azzera i registri e gli slot aggiunti
-  // dall'arrotondamento, così che nessuna parola letta sia indeterminata. Con
-  // lo stack impacchettato azzera tutti gli slot: allineamenti e argomenti
-  // stretti lasciano byte non scritti anche dentro le parole occupate.
+  // L'invoker legge tutti i registri e stack_slots slot: azzera i registri con
+  // lunghezza nota a compilazione (nessun ramo) e gli slot di stack necessari.
+  // Con lo stack impacchettato azzera tutti gli slot di stack: allineamenti e
+  // argomenti stretti lasciano byte non scritti anche dentro le parole occupate.
   void Clear(Word* frame) const noexcept {
     std::fill_n(frame, kStackBase, Word{0});
     std::fill(frame + kStackBase + (kPackedStack ? 0 : stack_words), frame + kStackBase + stack_slots, Word{0});
@@ -217,23 +220,29 @@ struct Plan {
   }
 
   // false se la firma non è coperta (aggregati, troppi argomenti sullo stack).
-  bool Prepare(CType result, std::span<const CType> args) {
-    offsets.clear();
+  // fixed_args > 0 indica una chiamata variadica: su Apple ARM64 gli argomenti
+  // da fixed_args in poi vanno sullo stack in slot allineati a 8 byte.
+  bool Prepare(CType result, std::span<const CType> args, size_t fixed_args = 0) {
     invoker = nullptr;
     stack_words = stack_slots = 0;
     if constexpr (kAbi == Abi::None || sizeof(void*) != sizeof(Word) || std::endian::native != std::endian::little) {
       return false;
     }
+    if (args.size() > offsets.size()) {
+      return false;
+    }
     constexpr size_t kStackBytes = kMaxStackWords * sizeof(Word);
     size_t gp = 0, fp = 0, stack = 0;  // stack: byte usati dagli argomenti
-    // Posizione sullo stack: uno slot di 8 byte, o (Apple) la dimensione del
-    // tipo al suo allineamento naturale; false se la sua parola uscirebbe dal frame.
-    const auto on_stack = [&stack](CType type, size_t& offset) {
+    // Posizione sullo stack: uno slot di 8 byte, o (Apple, argomenti fissi) la
+    // dimensione del tipo al suo allineamento naturale; false se esce dal frame.
+    const auto on_stack = [&stack](CType type, bool variadic_slot, size_t& offset) {
       size_t size = sizeof(Word);
       size_t alignment = sizeof(Word);
       if constexpr (kPackedStack) {
-        size = CTypeSize(type);  // > 0 per ogni tipo ammesso (IsSimpleArgumentType)
-        alignment = CTypeAlignment(type);
+        if (!variadic_slot) {
+          size = CTypeSize(type);  // > 0 per ogni tipo ammesso (IsSimpleArgumentType)
+          alignment = CTypeAlignment(type);
+        }
       }
       const size_t start = (stack + alignment - 1) / alignment * alignment;
       if (start + sizeof(Word) > kStackBytes) {
@@ -243,26 +252,34 @@ struct Plan {
       stack = start + size;
       return true;
     };
-    for (const CType type : args) {
+    for (size_t i = 0; i < args.size(); i++) {
+      if constexpr (kAppleArm64) {
+        if (fixed_args > 0 && i == fixed_args) {
+          gp = kGpRegisters;
+          fp = kFpRegisters;
+        }
+      }
+      const CType type = args[i];
       if (!IsSimpleArgumentType(type)) {
         return false;
       }
       const bool floating = IsFloatingPoint(type);
+      const bool variadic_slot = fixed_args > 0 && i >= fixed_args;
       size_t offset;
       if constexpr (kAbi == Abi::Win64) {
         if (gp < kGpRegisters) {
           offset = gp++ * sizeof(Word);
-        } else if (!on_stack(type, offset)) {
+        } else if (!on_stack(type, variadic_slot, offset)) {
           return false;
         }
       } else if (floating && fp < kFpRegisters) {
         offset = (kGpRegisters + fp++) * sizeof(Word);
       } else if (!floating && gp < kGpRegisters) {
         offset = gp++ * sizeof(Word);
-      } else if (!on_stack(type, offset)) {
+      } else if (!on_stack(type, variadic_slot, offset)) {
         return false;
       }
-      offsets.push_back(static_cast<uint16_t>(offset));
+      offsets[i] = static_cast<uint16_t>(offset);
     }
     stack_words = (stack + sizeof(Word) - 1) / sizeof(Word);
     invoker = SelectReturn(result, stack_words);

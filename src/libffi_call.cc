@@ -80,8 +80,9 @@ bool FFIFunction::PrepareExtraFFI(Napi::Env env, ExtraCallCache& entry) {
   const size_t fixed_args = arg_types_.size();
   entry.ffi_types.resize(entry.total_args);
   std::copy(ffi_arg_types_.begin(), ffi_arg_types_.end(), entry.ffi_types.begin());
-  for (size_t i = 0; i < entry.extra_types.size(); i++) {
-    entry.ffi_types[fixed_args + i] = CTypeToFFI(entry.extra_types[i]);
+  const std::span<const CType> extras = entry.ExtraTypes();
+  for (size_t i = 0; i < extras.size(); i++) {
+    entry.ffi_types[fixed_args + i] = CTypeToFFI(extras[i]);
   }
 
   // Senza argtypes sono argomenti fissi; solo il suffisso dopo gli argtypes e' variadico.
@@ -100,8 +101,8 @@ bool FFIFunction::PrepareExtraFFI(Napi::Env env, ExtraCallCache& entry) {
   // frame li passa come una funzione variadica (frame::kVariadicCalls).
   if (UsesDefaultABI() && (fixed_args == 0 || frame::kVariadicCalls)) {
     std::vector<CType> types(arg_types_);
-    types.insert(types.end(), entry.extra_types.begin(), entry.extra_types.end());
-    entry.frame.Prepare(return_type_, types);
+    types.insert(types.end(), extras.begin(), extras.end());
+    entry.frame.Prepare(return_type_, types, fixed_args);
   }
   entry.cif_prepared = true;
   return true;

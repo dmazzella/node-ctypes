@@ -111,8 +111,9 @@ The maintained outgoing paths are the bounded C++ direct invokers, register-fram
 calls and libffi. Register-frame calls cover any signature of scalars, pointers
 and strings up to 32 arguments on AArch64, x86-64 System V and Win64: each
 argument is converted straight into its register or stack word, and one C++
-signature per ABI passes the whole frame (on Apple ARM64 the stack arguments
-are packed by size and natural alignment, as the platform ABI requires).
+signature per ABI passes the whole frame (on Apple ARM64 fixed stack arguments
+are packed by size and natural alignment, and anonymous variadic arguments use
+8-byte aligned stack slots, as the platform ABI requires).
 libffi remains for aggregates, other calling conventions
 and the remaining cases. `CDLL.func()` and prototype calls return the native
 function itself when the arguments need no JavaScript conversion (scalars,
@@ -132,15 +133,23 @@ where needed:
 | [libffi_type_cache.h](../src/libffi_type_cache.h)                                              | Concrete owned aggregate cache used by layout metadata                                      |
 | [libffi_call.cc](../src/libffi_call.cc), [libffi_call.h](../src/libffi_call.h)                 | Calling conventions, CIFs, reusable plans and worker-owned extra-call interfaces            |
 | [libffi_callback.cc](../src/libffi_callback.cc), [libffi_callback.h](../src/libffi_callback.h) | Closure preparation, allocation and release                                                 |
-| [function.cc](../src/function.cc), [function.h](../src/function.h)                             | Node-API call orchestration, marshalling, hooks and sync/async ownership                    |
-| [callback.cc](../src/callback.cc), [callback.h](../src/callback.h)                             | Shared callback conversions, TSFN delivery, native-context hooks and lifetime               |
+| [function.cc](../src/function.cc), [function.h](../src/function.h)                             | `FFIFunction` lifecycle, call preparation, error state and general synchronous calls         |
+| [function_marshal.cc](../src/function_marshal.cc), [function_marshal.h](../src/function_marshal.h) | Scalar, pointer, string, aggregate and variadic marshalling helpers and return conversion |
+| [function_fast.cc](../src/function_fast.cc)                                                    | Hot Node-API entry points (`FastCall`, `FastEntry`, `SimpleCall` and specialized entries)   |
+| [function_async.cc](../src/function_async.cc)                                                  | `PreparedCall` (inline SBO up to 8 args / 64 B return), `CallWorker` and `callOn` dispatch  |
+| [callback.cc](../src/callback.cc), [callback.h](../src/callback.h)                             | Shared callback JS-thread execution, snapshot pool and main-thread `Callback`               |
+| [callback_threadsafe.cc](../src/callback_threadsafe.cc)                                        | `ThreadSafeCallback`, TSFN delivery, `nativeContext` hooks and `drain()`                    |
 
 CMake discovers native files with `file(GLOB_RECURSE ... CONFIGURE_DEPENDS ...)`.
 The public layouts retain their physical size/alignment; the libffi descriptor
 cache in `layout.h` is intentionally concrete rather than ABI-agnostic.
-High-level callback snapshot pooling and cached struct/array readers remain:
-slices are never recycled, retained views have independent bytes and identity,
-and custom getters, mirrored synchronization and Node-API ownership are preserved.
+Callback snapshot pooling (a native C++ 8 KB `ArrayBuffer` pool for functional
+`struct()`/`union()` callbacks, with `allocSnapshot` and `Buffer::Copy`
+retained for derived scalars, mirror mode, class aggregates, over-aligned
+layouts and raw callbacks) and prototype-backed struct/array views remain
+non-recycling: retained views have independent bytes and identity, and custom
+getters, CPython write validation, mirrored synchronization and Node-API
+ownership are preserved.
 
 **libffi dependency.** The unmodified
 [libffi submodule](https://github.com/libffi/libffi/tree/v3.8.1) is at the

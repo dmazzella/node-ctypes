@@ -135,4 +135,27 @@ describe("TestCallbacks", function () {
     assert.equal(memmove(overridden, null, 0), address);
     assert.equal(callback(3, 4), 7);
   });
+
+  it("test_callback_two_by_value_aggregates", function () {
+    const lib = new c.CDLL(FIXTURE);
+    class Bytes33 extends c.Structure {
+      static _fields_ = [["values", c.ARRAY(c.c_uint8, 33)]];
+    }
+    const cbType = c.CFUNCTYPE(c.c_int32, Bytes33, Bytes33, c.c_void_p);
+    const seen = [];
+    const cb = cbType((first, second, rawPtr) => {
+      first.values[0] = 99;
+      seen.push([first.values[0], second.values[0], second.values[32], rawPtr !== null]);
+      return first.values[0] + second.values[0] + second.values[32];
+    });
+    try {
+      const invoke = lib.fixture_callback_large_alias;
+      invoke.argtypes = [cbType, c.c_uint8];
+      invoke.restype = c.c_int32;
+      assert.equal(invoke(cb, 10), 99 + 10 + 42);
+      assert.deepEqual(seen, [[99, 10, 42, true]]);
+    } finally {
+      cb.release();
+    }
+  });
 });

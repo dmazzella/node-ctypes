@@ -33,6 +33,12 @@ class CTypesAddon : public Napi::Addon<CTypesAddon> {
   Napi::FunctionReference errcheck_owner_set;
   Napi::FunctionReference errcheck_owner_delete;
 
+  // Pool di snapshot per argomenti aggregati nei callback (non riusati, allineati a 8 byte).
+  static constexpr size_t kCallbackSnapshotPoolSize = 8192;
+  Napi::Reference<Napi::ArrayBuffer> callback_snapshot_pool;
+  uint8_t* callback_snapshot_data = nullptr;
+  size_t callback_snapshot_offset = 0;
+
   CTypesAddon(Napi::Env env, Napi::Object exports);
   ~CTypesAddon();
 

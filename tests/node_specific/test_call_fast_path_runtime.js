@@ -344,5 +344,144 @@ describe("CDLL.func conversion entry-point regressions", function () {
       assert.strictEqual(abs(2n ** 40n + 3n), 3);
       assert.strictEqual(sqrt(16n), 4);
     });
+
+    it("specialized entries preserve adapter deferral, validation and errcheck", { skip: !fixtureAvailable && "native fixture not built" }, function () {
+      const echoBool = fixture.func("fixture_scalar_bool", ctypes.c_bool, [ctypes.c_bool]);
+      assert.strictEqual(echoBool(true), true);
+      assert.strictEqual(echoBool(false), false);
+      assert.strictEqual(echoBool(0), false);
+      assert.strictEqual(echoBool("nonempty"), true);
+      assert.strictEqual(echoBool(new ctypes.c_bool(false)), false);
+      assert.strictEqual(echoBool({ _as_parameter_: false }), false);
+
+      const mixed = fixture.func("fixture_exact_mixed", ctypes.c_double, [ctypes.c_int32, ctypes.c_double, ctypes.c_float, ctypes.c_int32]);
+      assert.strictEqual(mixed(-7, 1.5, 2.25, 8), 10.75);
+      assert.strictEqual(mixed({ _as_parameter_: -7 }, 1.5, 2.25, 8n), 10.75);
+      assert.throws(() => mixed(1.5, 1.5, 2.25, 8), /argument 1: TypeError: 'float' object cannot be interpreted as an integer/);
+      assert.throws(() => mixed(1, "x", 2.25, 8), /argument 2/);
+
+      const stack10 = fixture.func("fixture_abi_i32_stack", ctypes.c_int64, Array(10).fill(ctypes.c_int32));
+      const vals = Array.from({ length: 10 }, (_, i) => i + 1);
+      assert.strictEqual(stack10(...vals), 385n);
+      assert.strictEqual(stack10({ _as_parameter_: 1 }, ...vals.slice(1)), 385n);
+      assert.throws(() => stack10(1, 2, 3.5, 4, 5, 6, 7, 8, 9, 10), /argument 3: TypeError: 'float' object cannot be interpreted as an integer/);
+
+      const strLen = fixture.func("fixture_string_length", ctypes.c_size_t, [ctypes.c_char_p]);
+      assert.strictEqual(strLen("short"), 5n);
+      assert.strictEqual(strLen("x".repeat(4096)), 4096n);
+      assert.strictEqual(strLen("tiny"), 4n);
+      assert.strictEqual(strLen({ _as_parameter_: "abc" }), 3n);
+      assert.throws(() => strLen(123), /argument 1/);
+    });
+
+    it("specialized entries handle dynamic errcheck, reentrancy, overflow and fallback transitions", { skip: !fixtureAvailable && "native fixture not built" }, async function () {
+      // Dynamic errcheck + reentrancy on CoreDirectEntry and AllInt32Entry<32>
+      const mixed = fixture.func("fixture_exact_mixed", ctypes.c_double, [ctypes.c_int32, ctypes.c_double, ctypes.c_float, ctypes.c_int32]);
+      let nestedSeen = 0;
+      mixed.errcheck = (result) => {
+        if (nestedSeen++ === 0) {
+          assert.strictEqual(mixed(1, 2.0, 3.0, 4), 19.0);
+        }
+        return result + 1;
+      };
+      try {
+        assert.strictEqual(mixed(-7, 1.5, 2.25, 8), 11.75);
+        assert.strictEqual(nestedSeen, 2);
+      } finally {
+        mixed.errcheck = null;
+      }
+      assert.strictEqual(mixed(-7, 1.5, 2.25, 8), 10.75);
+      assert.throws(() => mixed(1, 2n ** 1024n, 1.0, 1), /argument 2/);
+      assert.throws(() => mixed(1, 1.0), /Expected 4 arguments, got 2/);
+
+      const stack32 = fixture.func("fixture_abi_i32_32", ctypes.c_int32, Array(32).fill(ctypes.c_int32));
+      const vals32 = Array.from({ length: 32 }, (_, i) => i + 1);
+      const expected32 = vals32.reduce((sum, v) => sum + v * v, 0);
+      assert.strictEqual(stack32(...vals32), expected32);
+      // BigInt truncation + boolean + _as_parameter_ on 32-arg AllInt32Entry<32>
+      assert.strictEqual(stack32(0x100000001n, ...vals32.slice(1)), expected32);
+      assert.strictEqual(stack32(true, ...vals32.slice(1)), expected32);
+      assert.strictEqual(stack32({ _as_parameter_: 1 }, ...vals32.slice(1)), expected32);
+      assert.throws(() => stack32(1, 2, 3, 4.5, ...vals32.slice(4)), /argument 4: TypeError: 'float' object cannot be interpreted as an integer/);
+      stack32.errcheck = (r) => r + 5;
+      try {
+        assert.strictEqual(stack32(...vals32), expected32 + 5);
+      } finally {
+        stack32.errcheck = null;
+      }
+      assert.strictEqual(stack32(...vals32), expected32);
+
+      // UnaryStringEntry transitions after long_string_hints_ is set
+      const charPtrAddr = fixture.func("fixture_address", ctypes.c_size_t, [ctypes.c_char_p]);
+      assert.ok(charPtrAddr("short") !== 0n);
+      assert.ok(charPtrAddr("x".repeat(4096)) !== 0n);
+      assert.strictEqual(charPtrAddr(null), 0n);
+      assert.strictEqual(charPtrAddr(undefined), 0n);
+      const cbuf = ctypes.create_string_buffer("buf");
+      assert.strictEqual(charPtrAddr(cbuf), ctypes.addressof(cbuf));
+      assert.throws(() => charPtrAddr(42), /argument 1/);
+      assert.ok(charPtrAddr("short-again") !== 0n);
+
+      // UnaryPointerCall across view types, scalars, errors and errcheck
+      const sum4 = fixture.func("fixture_sum_int4", ctypes.c_int32, [ctypes.c_void_p]);
+      const raw = new Int32Array([10, 20, 30, 40]);
+      const buf = Buffer.from(raw.buffer);
+      const dv = new DataView(raw.buffer);
+      assert.strictEqual(sum4(buf), 100);
+      assert.strictEqual(sum4(raw), 100);
+      assert.strictEqual(sum4(dv), 100);
+      assert.strictEqual(sum4(ctypes.addressof(buf)), 100);
+      assert.throws(() => sum4(1.5), /cannot be interpreted as ctypes.c_void_p/);
+      sum4.errcheck = (r) => r * 2;
+      try {
+        assert.strictEqual(sum4(buf), 200);
+      } finally {
+        sum4.errcheck = null;
+      }
+      assert.strictEqual(sum4(buf), 100);
+
+      // specializeCall case 2 variadic path: primitive fast-path vs object extra args
+      const vsum = fixture.func("fixture_variadic_sum", ctypes.c_int32, [ctypes.c_void_p, ctypes.c_int32]);
+      assert.strictEqual(vsum(null, 3, 7, 8, 9), 24);
+      assert.strictEqual(vsum(null, 3, 7, new ctypes.c_int32(8), { _as_parameter_: 9 }), 24);
+      let cbHits = 0;
+      const hook = ctypes.callback(
+        () => {
+          cbHits++;
+        },
+        ctypes.c_void,
+        [],
+      );
+      try {
+        assert.strictEqual(vsum(hook, 3, 7, 8, 9), 24);
+        assert.strictEqual(cbHits, 1);
+      } finally {
+        hook.release();
+      }
+
+      // PreparedCall inline SBO boundaries (argc 0, 4, 10, 32; return <=64B and 65B)
+      const zero = fixture.func("fixture_benchmark_zero", ctypes.c_int32, []);
+      const stack10 = fixture.func("fixture_abi_i32_stack", ctypes.c_int64, Array(10).fill(ctypes.c_int32));
+      const Bytes33 = ctypes.struct({ values: ctypes.array(ctypes.c_uint8, 33) });
+      const Bytes65 = ctypes.struct({ values: ctypes.array(ctypes.c_uint8, 65) });
+      const echo33 = fixture.func("fixture_bytes_33_echo", Bytes33, [Bytes33]);
+      const echo65 = fixture.func("fixture_bytes_65_echo", Bytes65, [Bytes65]);
+      const in33 = { values: Array.from({ length: 33 }, (_, i) => i + 1) };
+      const in65 = { values: Array.from({ length: 65 }, (_, i) => (i * 3) & 0xff) };
+      const executor = new ctypes.Executor();
+      try {
+        assert.strictEqual(await zero.callAsync(), 7);
+        assert.strictEqual(await zero.callOn(executor), 7);
+        assert.strictEqual(await mixed.callAsync(-7, 1.5, 2.25, 8), 10.75);
+        assert.strictEqual(await stack10.callAsync(...Array.from({ length: 10 }, (_, i) => i + 1)), 385n);
+        assert.strictEqual(await stack32.callAsync(...vals32), expected32);
+        assert.strictEqual(await stack32.callOn(executor, ...vals32), expected32);
+        assert.deepStrictEqual([...(await echo33.callAsync(in33)).values], in33.values);
+        assert.deepStrictEqual([...(await echo65.callAsync(in65)).values], in65.values);
+        assert.deepStrictEqual([...(await echo65.callOn(executor, in65)).values], in65.values);
+      } finally {
+        await executor.close();
+      }
+    });
   });
 });

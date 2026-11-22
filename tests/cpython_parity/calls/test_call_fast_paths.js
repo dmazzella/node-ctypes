@@ -243,4 +243,67 @@ describe("TestCallFastPaths", function () {
     assert.equal(absolute(2n ** 40n + 3n), 3);
     assert.equal(sqrt(16n), 4);
   });
+
+  it("test_bool_echo_and_coercions", function () {
+    const echo = fixture.fixture_scalar_bool;
+    echo.argtypes = [c.c_bool];
+    echo.restype = c.c_bool;
+    assert.strictEqual(echo(true), true);
+    assert.strictEqual(echo(false), false);
+    assert.strictEqual(echo(0), false);
+    assert.strictEqual(echo(1), true);
+    assert.strictEqual(echo(""), false);
+    assert.strictEqual(echo("nonempty"), true);
+    assert.strictEqual(echo(new c.c_bool(false)), false);
+    const seen = [];
+    echo.errcheck = (result, func, args) => {
+      seen.push([result, args]);
+      return !result;
+    };
+    try {
+      assert.strictEqual(echo(true), false);
+      assert.deepEqual(seen, [[true, [true]]]);
+    } finally {
+      echo.errcheck = null;
+    }
+    assert.strictEqual(echo(true), true);
+  });
+
+  it("test_exact_mixed_and_int32_stack", function () {
+    const mixed = fixture.fixture_exact_mixed;
+    mixed.argtypes = [c.c_int32, c.c_double, c.c_float, c.c_int32];
+    mixed.restype = c.c_double;
+    assert.equal(mixed(-7, 1.5, 2.25, 8), 10.75);
+    assert.equal(mixed(true, true, false, 2), 5.0);
+    assert.throws(() => mixed(1.5, 1.5, 2.25, 8), c.ArgumentError);
+    assert.throws(() => mixed(-7, "bad", 2.25, 8), c.ArgumentError);
+
+    const stack10 = fixture.fixture_abi_i32_stack;
+    stack10.argtypes = Array(10).fill(c.c_int32);
+    stack10.restype = c.c_int64;
+    const vals10 = Array.from({ length: 10 }, (_, i) => i + 1);
+    assert.equal(stack10(...vals10), 385n);
+    assert.throws(() => stack10(1, 2, 3.5, 4, 5, 6, 7, 8, 9, 10), c.ArgumentError);
+
+    const stack32 = fixture.fixture_abi_i32_32;
+    stack32.argtypes = Array(32).fill(c.c_int32);
+    stack32.restype = c.c_int32;
+    const vals32 = Array.from({ length: 32 }, (_, i) => i + 1);
+    const expected32 = vals32.reduce((sum, v) => sum + v * v, 0);
+    assert.equal(stack32(...vals32), expected32);
+  });
+
+  it("test_variadic_sum_and_doubles", function () {
+    const vsum = fixture.fixture_variadic_sum;
+    vsum.argtypes = [c.c_void_p, c.c_int32];
+    vsum.restype = c.c_int32;
+    assert.equal(vsum(null, 3, 7, 8, 9), 24);
+    assert.equal(vsum(null, 5, -2, 4, 6, 8, 10), 26);
+
+    const vdbl = fixture.fixture_variadic_double_sum;
+    vdbl.argtypes = [c.c_int32];
+    vdbl.restype = c.c_double;
+    const doubles = Array.from({ length: 10 }, (_, i) => i + 0.25);
+    assert.equal(vdbl(10, ...doubles.map((v) => new c.c_double(v))), 47.5);
+  });
 });

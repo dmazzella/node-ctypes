@@ -220,7 +220,7 @@ inline void StoreNarrowIntegerValue(CType type, const void* source, void* destin
   }
 }
 
-[[nodiscard]] constexpr bool IsSimpleArgumentType(CType type) noexcept {
+[[nodiscard]] constexpr bool IsNumericCType(CType type) noexcept {
   switch (type) {
     case CType::CTYPES_INT8:
     case CType::CTYPES_UINT8:
@@ -230,21 +230,69 @@ inline void StoreNarrowIntegerValue(CType type, const void* source, void* destin
     case CType::CTYPES_UINT32:
     case CType::CTYPES_INT64:
     case CType::CTYPES_UINT64:
-    case CType::CTYPES_FLOAT:
-    case CType::CTYPES_DOUBLE:
-    case CType::CTYPES_POINTER:
-    case CType::CTYPES_STRING:
-    case CType::CTYPES_WCHAR:
-    case CType::CTYPES_BOOL:
     case CType::CTYPES_SIZE_T:
     case CType::CTYPES_SSIZE_T:
     case CType::CTYPES_LONG:
     case CType::CTYPES_ULONG:
-    case CType::CTYPES_CHAR:
+    case CType::CTYPES_FLOAT:
+    case CType::CTYPES_DOUBLE:
       return true;
     default:
       return false;
   }
+}
+
+[[nodiscard]] constexpr bool IsDirectScalarReturn(CType type) noexcept {
+  return type == CType::CTYPES_VOID || type == CType::CTYPES_BOOL || type == CType::CTYPES_POINTER ||
+         IsNumericCType(type);
+}
+
+// Dispatch centralizzato CType scalare -> tipo C++ corrispondente.
+template <typename Fn, typename Fallback>
+[[nodiscard]] constexpr decltype(auto) VisitScalarCType(CType type, Fn&& fn, Fallback&& fallback) {
+  switch (type) {
+    case CType::CTYPES_INT8:
+      return fn.template operator()<int8_t>();
+    case CType::CTYPES_UINT8:
+      return fn.template operator()<uint8_t>();
+    case CType::CTYPES_INT16:
+      return fn.template operator()<int16_t>();
+    case CType::CTYPES_UINT16:
+      return fn.template operator()<uint16_t>();
+    case CType::CTYPES_INT32:
+      return fn.template operator()<int32_t>();
+    case CType::CTYPES_UINT32:
+      return fn.template operator()<uint32_t>();
+    case CType::CTYPES_INT64:
+      return fn.template operator()<int64_t>();
+    case CType::CTYPES_UINT64:
+      return fn.template operator()<uint64_t>();
+    case CType::CTYPES_FLOAT:
+      return fn.template operator()<float>();
+    case CType::CTYPES_DOUBLE:
+      return fn.template operator()<double>();
+    case CType::CTYPES_CHAR:
+      return fn.template operator()<char>();
+    case CType::CTYPES_WCHAR:
+      return fn.template operator()<wchar_t>();
+    case CType::CTYPES_BOOL:
+      return fn.template operator()<bool>();
+    case CType::CTYPES_SIZE_T:
+      return fn.template operator()<size_t>();
+    case CType::CTYPES_SSIZE_T:
+      return fn.template operator()<ssize_t>();
+    case CType::CTYPES_LONG:
+      return fn.template operator()<long>();
+    case CType::CTYPES_ULONG:
+      return fn.template operator()<unsigned long>();
+    default:
+      return fallback();
+  }
+}
+
+[[nodiscard]] constexpr bool IsSimpleArgumentType(CType type) noexcept {
+  return IsNumericCType(type) || type == CType::CTYPES_POINTER || type == CType::CTYPES_STRING ||
+         type == CType::CTYPES_WCHAR || type == CType::CTYPES_BOOL || type == CType::CTYPES_CHAR;
 }
 
 // Converte un valore JS in bytes C

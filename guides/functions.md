@@ -28,8 +28,9 @@ How a call reaches C depends on its signature; the JavaScript API is the same:
 - Synchronous calls of scalars, pointers and strings, up to 32 arguments, are
   register-frame calls on AArch64, x86-64 System V and Win64 with the default
   calling convention: each argument is converted straight into its register
-  or stack slot, and one C++ call per ABI passes them. On Apple ARM64 the stack
-  arguments are packed by size and alignment, as that ABI requires.
+  or stack slot, and one C++ call per ABI passes them. On Apple ARM64 fixed
+  stack arguments are packed by size and alignment, while anonymous variadic
+  arguments are placed in 8-byte aligned stack slots, as that ABI requires.
 - A bounded set of exact scalar signatures with up to four arguments uses fixed
   C++ invokers instead (on x86-64 without `float`/`double` arguments, so that
   a variadic function declared with `argtypes` gets its doubles as libffi

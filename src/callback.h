@@ -8,25 +8,43 @@
 
 namespace ctypes {
 
-// ========================================================================
-// Callback - Solo main thread, veloce, zero overhead
-// ========================================================================
-
-struct CallbackData : LibffiCallbackState {
+// Stato condiviso da Callback e ThreadSafeCallback: metadati della firma,
+// riferimenti JS, pool di snapshot, stato di rilascio e diagnostica.
+struct CallbackBaseData : LibffiCallbackState {
   Napi::FunctionReference js_function_ref;
   Napi::FunctionReference buffer_allocator_ref;
   Napi::FunctionReference error_handler_ref;  // Error handler opzionale
+  bool use_native_snapshot_pool = false;
   void* code_ptr = nullptr;
   CType return_type;
   std::vector<TypeSpec> arg_types;  // primitivi o struct per valore
   std::atomic<bool> released{false};
   std::string last_error;  // Ultimo errore catturato
   std::mutex error_mutex;  // Protezione per last_error
-  // Thread che ha creato il callback, l'unico su cui può eseguire JS.
+  // Thread host che ha creato il callback, l'unico su cui può eseguire JS.
   std::thread::id thread_id;
   // Environment del callback: conta le esecuzioni JS (CTypesAddon::callback_epoch).
   CTypesAddon* addon = nullptr;
 };
+
+// Helper condivisi tra callback.cc e callback_threadsafe.cc.
+void ParseCallbackTypes(const Napi::CallbackInfo& info, CType& return_type, std::vector<TypeSpec>& arg_types);
+Napi::FunctionReference CallbackBufferAllocator(const Napi::CallbackInfo& info, bool& use_native_pool);
+void RecordCallbackError(CallbackBaseData* data, std::string message);
+void InvokeCallbackOnJsThread(Napi::Env env,
+                              const Napi::Function& fn,
+                              CallbackBaseData* data,
+                              void** args,
+                              void* ret,
+                              const char* default_error,
+                              const char* warning_type,
+                              bool warn_on_conversion_error);
+
+// ========================================================================
+// Callback - Solo main thread, veloce, zero overhead
+// ========================================================================
+
+struct CallbackData : CallbackBaseData {};
 
 void DispatchCallback(CallbackData* data, void* ret, void** args);
 
@@ -82,19 +100,7 @@ struct NativeCallbackContext {
   Notify notify = nullptr;
 };
 
-struct ThreadSafeCallbackData : LibffiCallbackState {
-  Napi::FunctionReference js_function_ref;
-  Napi::FunctionReference buffer_allocator_ref;
-  Napi::FunctionReference error_handler_ref;  // Error handler opzionale
-  std::thread::id main_thread_id;
-  // Environment del callback: conta le esecuzioni JS (CTypesAddon::callback_epoch).
-  CTypesAddon* addon = nullptr;
-  void* code_ptr = nullptr;
-  CType return_type;
-  std::vector<TypeSpec> arg_types;  // primitivi o struct per valore
-  std::atomic<bool> released{false};
-  std::string last_error;  // Ultimo errore catturato
-  std::mutex error_mutex;  // Protezione per last_error
+struct ThreadSafeCallbackData : CallbackBaseData {
   std::optional<NativeCallbackContext> native_context;
   PendingCallbackCall* active_call = nullptr;  // Accessibile solo dal thread host Node.
   std::atomic<size_t> active_calls{0};

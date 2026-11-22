@@ -224,3 +224,67 @@ class TestCallFastPaths(unittest.TestCase):
         self.assertEqual(absolute(-5), 5)
         self.assertEqual(absolute(2 ** 40 + 3), 3)
         self.assertEqual(sqrt(16), 4)
+
+    def test_bool_echo_and_coercions(self):
+        echo = self.fixture.fixture_scalar_bool
+        echo.argtypes = [c.c_bool]
+        echo.restype = c.c_bool
+        self.assertIs(echo(True), True)
+        self.assertIs(echo(False), False)
+        self.assertIs(echo(0), False)
+        self.assertIs(echo(1), True)
+        self.assertIs(echo(""), False)
+        self.assertIs(echo("nonempty"), True)
+        self.assertIs(echo(c.c_bool(False)), False)
+        seen = []
+
+        def check(result, func, args):
+            seen.append((result, args))
+            return not result
+
+        echo.errcheck = check
+        try:
+            self.assertIs(echo(True), False)
+            self.assertEqual(seen, [(True, (True,))])
+        finally:
+            del echo.errcheck
+        self.assertIs(echo(True), True)
+
+    def test_exact_mixed_and_int32_stack(self):
+        mixed = self.fixture.fixture_exact_mixed
+        mixed.argtypes = [c.c_int32, c.c_double, c.c_float, c.c_int32]
+        mixed.restype = c.c_double
+        self.assertEqual(mixed(-7, 1.5, 2.25, 8), 10.75)
+        self.assertEqual(mixed(True, True, False, 2), 5.0)
+        with self.assertRaises(c.ArgumentError):
+            mixed(1.5, 1.5, 2.25, 8)
+        with self.assertRaises(c.ArgumentError):
+            mixed(-7, "bad", 2.25, 8)
+
+        stack10 = self.fixture.fixture_abi_i32_stack
+        stack10.argtypes = [c.c_int32] * 10
+        stack10.restype = c.c_int64
+        vals10 = list(range(1, 11))
+        self.assertEqual(stack10(*vals10), 385)
+        with self.assertRaises(c.ArgumentError):
+            stack10(1, 2, 3.5, 4, 5, 6, 7, 8, 9, 10)
+
+        stack32 = self.fixture.fixture_abi_i32_32
+        stack32.argtypes = [c.c_int32] * 32
+        stack32.restype = c.c_int32
+        vals32 = [i + 1 for i in range(32)]
+        expected32 = sum((i + 1) * (i + 1) for i in range(32))
+        self.assertEqual(stack32(*vals32), expected32)
+
+    def test_variadic_sum_and_doubles(self):
+        vsum = self.fixture.fixture_variadic_sum
+        vsum.argtypes = [c.c_void_p, c.c_int32]
+        vsum.restype = c.c_int32
+        self.assertEqual(vsum(None, 3, 7, 8, 9), 24)
+        self.assertEqual(vsum(None, 5, -2, 4, 6, 8, 10), 26)
+
+        vdbl = self.fixture.fixture_variadic_double_sum
+        vdbl.argtypes = [c.c_int32]
+        vdbl.restype = c.c_double
+        doubles = [i + 0.25 for i in range(10)]
+        self.assertEqual(vdbl(10, *[c.c_double(v) for v in doubles]), 47.5)

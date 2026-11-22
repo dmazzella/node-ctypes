@@ -602,6 +602,244 @@ describe("Callbacks", function () {
         callback.release();
       }
     });
+
+    it("prototype-backed callback views recover from detached snapshot pools and validate array writes", function () {
+      using fixture = new ctypes.CDLL(FIXTURE);
+      const Bytes = ctypes.struct({ values: ctypes.array(ctypes.c_uint8, 33) });
+      const invoke = fixture.func("fixture_bytes_33_callback", ctypes.c_int64, [ctypes.c_void_p]);
+      let calls = 0;
+      const cb = ctypes.callback(
+        (value) => {
+          calls++;
+          strictEqual(value.values[0], 1);
+          strictEqual(value.values[32], 33);
+          assert.throws(() => {
+            value.values[0] = 1.5;
+          }, /'float' object cannot be interpreted as an integer/);
+          assert.throws(() => {
+            value.values[0] = new ctypes.c_double(2);
+          }, /incompatible types, c_double instance instead of/);
+          value.values[0] = 42;
+          assert.ok(Buffer.isBuffer(value._buffer));
+          strictEqual(value._buffer[0], 42);
+          if (calls === 1 && typeof value._buffer.buffer.transfer === "function") {
+            value._buffer.buffer.transfer();
+          }
+          return 34n;
+        },
+        ctypes.c_int64,
+        [Bytes],
+      );
+      try {
+        strictEqual(invoke(cb), 34n);
+        strictEqual(invoke(cb), 34n);
+        strictEqual(cb._callback.getLastError(), null);
+      } finally {
+        cb.release();
+      }
+    });
+
+    it("prototype-backed callback views handle non-zero array offsets, reserved props, all scalar widths, pool rotation and >2KB fallback", function () {
+      using fixture = new ctypes.CDLL(FIXTURE);
+
+      // 1. Array field at non-zero offset (fullSpan === false) + FastArrayView methods
+      const TaggedBytes = ctypes.struct({ tag: ctypes.c_int32, values: ctypes.array(ctypes.c_uint8, 4) });
+      const invokePoint = fixture.func("fixture_point_callback", ctypes.c_int32, [ctypes.c_void_p, ctypes.c_int32, ctypes.c_int32]);
+      const offsetCb = ctypes.callback(
+        (value) => {
+          strictEqual(value.tag, 7);
+          const v1 = value.values;
+          const v2 = value.values;
+          assert.notStrictEqual(v1, v2);
+          strictEqual(v1.length, 4);
+          strictEqual(v1.byteLength, 4);
+          assert.deepStrictEqual([...v1], [0x11, 0x22, 0x33, 0x44]);
+          assert.deepStrictEqual(v1.slice(1, 3), [0x22, 0x33]);
+          assert.deepStrictEqual(
+            v1.map((x) => x + 1),
+            [0x12, 0x23, 0x34, 0x45],
+          );
+          strictEqual(v1.toString(), "[17, 34, 51, 68]");
+          assert.deepStrictEqual(v1.toJSON(), [0x11, 0x22, 0x33, 0x44]);
+          throws(() => {
+            v1.length = 99;
+          });
+          v1[2] = 0x99;
+          strictEqual(v2[2], 0x99);
+          strictEqual(value._buffer[6], 0x99);
+          return value.tag + v2[2];
+        },
+        ctypes.c_int32,
+        [TaggedBytes],
+      );
+      try {
+        strictEqual(invokePoint(offsetCb, 7, 0x44332211), 7 + 0x99);
+        strictEqual(offsetCb._callback.getLastError(), null);
+      } finally {
+        offsetCb.release();
+      }
+
+      // 2. Reserved metadata properties (length, toObject) are not shadowed by fields
+      const Reserved = ctypes.struct({ length: ctypes.c_int32, toObject: ctypes.c_int32 });
+      const reservedCb = ctypes.callback(
+        (value) => {
+          strictEqual(value.length, 8);
+          strictEqual(typeof value.toObject, "function");
+          assert.deepStrictEqual(value.toObject(), { length: 11, toObject: 22 });
+          return 1;
+        },
+        ctypes.c_int32,
+        [Reserved],
+      );
+      try {
+        strictEqual(invokePoint(reservedCb, 11, 22), 1);
+      } finally {
+        reservedCb.release();
+      }
+
+      // 3. Custom def.get override on functional struct is respected on array field access
+      const CustomGet = ctypes.struct({ values: ctypes.array(ctypes.c_uint8, 33) });
+      const origGet = CustomGet.get;
+      let customGetCalls = 0;
+      CustomGet.get = (buf, name) => {
+        customGetCalls++;
+        return origGet(buf, name);
+      };
+      const invoke33 = fixture.func("fixture_bytes_33_callback", ctypes.c_int64, [ctypes.c_void_p]);
+      const customCb = ctypes.callback((value) => BigInt(value.values[0] + value.values[32]), ctypes.c_int64, [CustomGet]);
+      try {
+        strictEqual(invoke33(customCb), 34n);
+        assert.ok(customGetCalls >= 2);
+      } finally {
+        customCb.release();
+      }
+
+      // 4. All scalar widths in directBytesReader (i8, u8, i16, u16, i32, u32, i64, u64, f32, f64, bool)
+      const MixedScalarsA = ctypes.struct(
+        {
+          i8: ctypes.c_int8,
+          u8: ctypes.c_uint8,
+          i16: ctypes.c_int16,
+          u16: ctypes.c_uint16,
+          i32: ctypes.c_int32,
+          u32: ctypes.c_uint32,
+          i64: ctypes.c_int64,
+          f64: ctypes.c_double,
+          b: ctypes.c_bool,
+          pad: ctypes.c_uint16,
+        },
+        { packed: true },
+      );
+      strictEqual(MixedScalarsA.size, 33);
+      const scalarCbA = ctypes.callback(
+        (value) => {
+          const buf = value._buffer;
+          strictEqual(value.i8, buf.readInt8(0));
+          strictEqual(value.u8, buf.readUInt8(1));
+          strictEqual(value.i16, buf.readInt16LE(2));
+          strictEqual(value.u16, buf.readUInt16LE(4));
+          strictEqual(value.i32, buf.readInt32LE(6));
+          strictEqual(value.u32, buf.readUInt32LE(10));
+          strictEqual(value.i64, buf.readBigInt64LE(14));
+          strictEqual(value.f64, buf.readDoubleLE(22));
+          strictEqual(value.b, buf[30] !== 0);
+          return 1n;
+        },
+        ctypes.c_int64,
+        [MixedScalarsA],
+      );
+      const MixedScalarsB = ctypes.struct(
+        {
+          u64: ctypes.c_uint64,
+          f32: ctypes.c_float,
+          tail: ctypes.array(ctypes.c_uint8, 21),
+        },
+        { packed: true },
+      );
+      strictEqual(MixedScalarsB.size, 33);
+      const scalarCbB = ctypes.callback(
+        (value) => {
+          const buf = value._buffer;
+          strictEqual(value.u64, buf.readBigUInt64LE(0));
+          strictEqual(value.f32, buf.readFloatLE(8));
+          strictEqual(value.tail[0], buf[12]);
+          strictEqual(value.tail[20], buf[32]);
+          return 2n;
+        },
+        ctypes.c_int64,
+        [MixedScalarsB],
+      );
+      try {
+        strictEqual(invoke33(scalarCbA), 1n);
+        strictEqual(scalarCbA._callback.getLastError(), null);
+        strictEqual(invoke33(scalarCbB), 2n);
+        strictEqual(scalarCbB._callback.getLastError(), null);
+      } finally {
+        scalarCbA.release();
+        scalarCbB.release();
+      }
+
+      // 5. Native snapshot pool rotation (>8192B across 300 calls) + >2048B fallback (4097B) + 3-arg struct adapter
+      const Bytes33 = ctypes.struct({ values: ctypes.array(ctypes.c_uint8, 33) });
+      const retained = [];
+      const rotateCb = ctypes.callback(
+        (value) => {
+          value.values[0] = (retained.length + 1) & 0xff;
+          retained.push(value);
+          return BigInt(value.values[0]);
+        },
+        ctypes.c_int64,
+        [Bytes33],
+      );
+      try {
+        for (let i = 0; i < 300; i++) {
+          strictEqual(invoke33(rotateCb), BigInt((i + 1) & 0xff));
+        }
+        for (let i = 0; i < 300; i++) {
+          strictEqual(retained[i].values[0], (i + 1) & 0xff);
+          strictEqual(retained[i].values[32], 33);
+        }
+      } finally {
+        rotateCb.release();
+      }
+
+      const Bytes4097 = ctypes.struct({ values: ctypes.array(ctypes.c_uint8, 4097) });
+      const invoke4097 = fixture.func("fixture_bytes_4097_callback", ctypes.c_int64, [ctypes.c_void_p]);
+      const bigCb = ctypes.callback(
+        (value) => {
+          assert.ok(Buffer.isBuffer(value._buffer));
+          strictEqual(value._buffer.length, 4097);
+          return BigInt(value.values[0] + value.values[4096]);
+        },
+        ctypes.c_int64,
+        [Bytes4097],
+      );
+      try {
+        strictEqual(invoke4097(bigCb), BigInt((1 & 0xff) + (4097 & 0xff)));
+        strictEqual(bigCb._callback.getLastError(), null);
+      } finally {
+        bigCb.release();
+      }
+
+      const invokeAlias = fixture.func("fixture_callback_large_alias", ctypes.c_int32, [ctypes.c_void_p, ctypes.c_uint8]);
+      const aliasCb = ctypes.callback(
+        (first, second, rawPtr) => {
+          assert.notStrictEqual(first, second);
+          first.values[0] = 99;
+          strictEqual(second.values[0], 10);
+          assert.ok(rawPtr !== null && rawPtr !== 0n);
+          return first.values[0] + second.values[0] + second.values[32];
+        },
+        ctypes.c_int32,
+        [Bytes33, Bytes33, ctypes.c_void_p],
+      );
+      try {
+        strictEqual(invokeAlias(aliasCb, 10), 99 + 10 + 42);
+        strictEqual(aliasCb._callback.getLastError(), null);
+      } finally {
+        aliasCb.release();
+      }
+    });
   });
 
   describe("threadSafeCallback ref() / unref()", function () {
