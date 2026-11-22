@@ -92,6 +92,7 @@ std::unique_ptr<FFIFunction::PreparedCall> FFIFunction::PrepareAsyncCall(const F
 
   // SBO: per <= PreparedCall::kInlineArgs evita le allocazioni heap di arg_storage/arg_values.
   alignas(16) std::array<uint8_t, PreparedCall::kInlineArgs * ARG_SLOT_SIZE> inline_arg_storage{};
+  uint8_t inline_large_arg_index = PreparedCall::kNoInlineLargeArg;
   std::vector<uint8_t> heap_arg_storage;
   if (argc > PreparedCall::kInlineArgs) {
     heap_arg_storage.resize(argc * ARG_SLOT_SIZE, 0);
@@ -244,6 +245,18 @@ std::unique_ptr<FFIFunction::PreparedCall> FFIFunction::PrepareAsyncCall(const F
 
         case CType::CTYPES_STRUCT: {
           if (i < expected_argc && arg_struct_infos_[i]) {
+            const size_t struct_size = arg_struct_infos_[i]->GetSize();
+            if (argc <= PreparedCall::kInlineLargeArgMaxArgs && struct_size > ARG_SLOT_SIZE &&
+                struct_size <= PreparedCall::kInlineLargeArgSize &&
+                inline_large_arg_index == PreparedCall::kNoInlineLargeArg) {
+              size_t view_len = 0;
+              if (void* view_data = napi_fast::TryViewData(val, &view_len);
+                  view_data != nullptr && view_len >= struct_size) [[likely]] {
+                std::memcpy(inline_arg_storage.data() + PreparedCall::kInlineLargeArgOffset, view_data, struct_size);
+                inline_large_arg_index = static_cast<uint8_t>(i);
+                break;
+              }
+            }
             if (!MarshalStructArg(env, val, i, arg_struct_infos_[i], slot, &arg_value_placeholder, large_arg_buffers,
                                   &large_arg_indices, &buffer_refs)) {
               return nullptr;
@@ -279,11 +292,14 @@ std::unique_ptr<FFIFunction::PreparedCall> FFIFunction::PrepareAsyncCall(const F
   // ---- PreparedCall: owns the converted arguments until completion ----
   // =====================================================================
 
+  const size_t inline_copy_bytes = inline_large_arg_index != PreparedCall::kNoInlineLargeArg
+                                     ? inline_arg_storage.size()
+                                     : std::min(argc, PreparedCall::kInlineArgs) * ARG_SLOT_SIZE;
   auto call = std::make_unique<PreparedCall>(
     env, this, is_variadic ? nullptr : fixed_invoker_, fn_ptr_, return_type_, return_struct_info_, return_array_info_,
-    argc, std::span(inline_arg_storage).first(std::min(argc, PreparedCall::kInlineArgs) * ARG_SLOT_SIZE),
-    std::move(heap_arg_storage), std::move(async_string_buffer), std::move(string_fixups), std::move(wstring_fixups),
-    std::move(buffer_refs), std::move(libffi), std::move(large_arg_buffers), std::move(large_arg_indices), errcheck,
+    argc, std::span(inline_arg_storage).first(inline_copy_bytes), std::move(heap_arg_storage),
+    std::move(async_string_buffer), std::move(string_fixups), std::move(wstring_fixups), std::move(buffer_refs),
+    std::move(libffi), std::move(large_arg_buffers), std::move(large_arg_indices), inline_large_arg_index, errcheck,
     info.HasResultHandler());
 
   if (errcheck != nullptr && !info.HasResultHandler()) {
@@ -356,6 +372,7 @@ FFIFunction::PreparedCall::PreparedCall(Napi::Env env,
                                         LibffiAsyncCallState&& libffi,
                                         std::vector<std::vector<uint8_t>>&& large_arg_buffers,
                                         std::vector<size_t>&& large_arg_indices,
+                                        uint8_t inline_large_arg_index,
                                         const Napi::Function* errcheck,
                                         bool result_handler)
   : LibffiAsyncCallState(std::move(libffi)),
@@ -380,7 +397,8 @@ FFIFunction::PreparedCall::PreparedCall(Napi::Env env,
     capture_last_error_(parent->capture_last_error_),
     capture_errno_(parent->capture_errno_),
     struct_as_buffer_(parent->struct_as_buffer_),
-    scalar_as_buffer_(parent->scalar_as_buffer_) {
+    scalar_as_buffer_(parent->scalar_as_buffer_),
+    inline_large_arg_index_(inline_large_arg_index) {
   if (parent->addon_ != nullptr) {
     last_error_in_ = parent->addon_->captured_last_error;
     errno_in_ = parent->addon_->captured_errno;
@@ -430,7 +448,10 @@ void FFIFunction::PreparedCall::FixupPointers() {
     values[i] = base + (i * ARG_SLOT_SIZE);
   }
 
-  // 2. Fixup large struct/array args: point to their overflow buffers
+  // 2. Fixup large struct/array args: point to inline SBO or overflow buffers
+  if (inline_large_arg_index_ != kNoInlineLargeArg) {
+    values[inline_large_arg_index_] = inline_arg_storage_.data() + kInlineLargeArgOffset;
+  }
   for (size_t k = 0; k < large_arg_indices_.size(); k++) {
     const size_t arg_idx = large_arg_indices_[k];
     values[arg_idx] = large_arg_buffers_[k].data();

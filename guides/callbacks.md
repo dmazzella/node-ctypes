@@ -53,11 +53,15 @@ Pointer fields copy the address, not the pointed-to memory.
 
 Signatures with a class aggregate keep incoming bytes in dedicated buffers,
 so a reentrant constructor cannot alter them through a previously exposed
-snapshot pool. Otherwise, small functional aggregates and scalar-instance
-arguments use distinct slices of an 8 KB off-heap pool reserved for callback
-snapshots. Native-call temporaries use a separate pool that is never exposed.
-Slices are never reused. Detaching a pooled snapshot's `ArrayBuffer` only
-affects snapshots in that pool; later callbacks use a fresh one.
+snapshot pool. Otherwise, small functional `struct()`/`union()` arguments slice
+an 8 KB native C++ pool directly (`Uint8Array`) and are exposed through cached
+prototype-backed views without per-call `Proxy` objects (including small
+native-endian numeric array fields up to 64 elements, while preserving full
+CPython write validation); scalar-instance arguments and mirror mode use the
+dedicated JS snapshot pool. Native-call temporaries use a separate pool that is
+never exposed. Slices are never reused. Detaching a pooled snapshot's
+`ArrayBuffer` only affects snapshots in that pool; later callbacks use a fresh
+one.
 
 - Retaining any slice keeps its whole 8 KB backing `ArrayBuffer` alive. When
   storing many small arguments for a long time, copy them, for example

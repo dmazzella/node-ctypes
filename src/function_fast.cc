@@ -409,6 +409,15 @@ void FFIFunction::InstallFastCall(Napi::Env env) {
   if (declared == 1 && arg_types_[0] == CType::CTYPES_POINTER && frame_plan_.invoker && !scalar_as_buffer_ &&
       IsDirectScalarReturn(return_type_)) {
     callback = &FFIFunction::UnaryPointerCall;
+  } else if (declared >= 2 && declared <= 4 && frame_plan_.invoker && !scalar_as_buffer_ &&
+             IsDirectScalarReturn(return_type_) &&
+             std::ranges::any_of(arg_types_, [](CType t) { return t == CType::CTYPES_POINTER; }) &&
+             std::ranges::all_of(arg_types_, [](CType t) {
+               return t == CType::CTYPES_POINTER || t == CType::CTYPES_INT32 || t == CType::CTYPES_UINT32 ||
+                      t == CType::CTYPES_INT64 || t == CType::CTYPES_UINT64 || t == CType::CTYPES_SIZE_T ||
+                      t == CType::CTYPES_SSIZE_T;
+             })) {
+    callback = &FFIFunction::DirectPointerCall;
   }
   Napi::Function fast_call = napi_fast::NewFunction(env, "call", callback, this);
   fast_call.DefineProperty(Napi::PropertyDescriptor::Value("_ffiFunction", self, napi_default));
@@ -1069,6 +1078,134 @@ napi_value FFIFunction::UnaryPointerCall(napi_env env, napi_callback_info info) 
       }
     }
     return FastCall<2>(env, info);
+  });
+}
+
+// Percorso diretto per firme da 2-4 argomenti con puntatori e interi (es. memset,
+// memcpy, memcmp, qsort): scrive direttamente nel frame evitando lo stack di SimpleCall.
+napi_value FFIFunction::DirectPointerCall(napi_env env, napi_callback_info info) {
+  return GuardNapiCall(env, [&]() -> napi_value {
+    std::array<napi_value, 4> args;
+    size_t argc = 0;
+    void* data = nullptr;
+    if (!napi_fast::GetArguments(env, info, args, argc, data)) [[unlikely]] {
+      return nullptr;
+    }
+    auto* self = static_cast<FFIFunction*>(data);
+    const size_t expected = self->arg_types_.size();
+    if (argc == expected && self->simple_call_ && self->call_depth_ == 0 && self->errcheck_callback_.IsEmpty())
+      [[likely]] {
+      const LibraryCallScope scope(self->library_, env);
+      alignas(16) std::array<frame::Word, frame::kWords> words;
+      self->frame_plan_.Clear(words.data());
+      uint32_t memory_args = 0;
+      bool complete = true;
+      for (size_t i = 0; i < expected; i++) {
+        uint8_t* slot = self->frame_plan_.At(words.data(), i);
+        const Napi::Value val(env, args[i]);
+        switch (self->arg_types_[i]) {
+          case CType::CTYPES_POINTER:
+            if (void* ptr = napi_fast::TryViewData(val); ptr != nullptr) [[likely]] {
+              StoreArgument(slot, ptr);
+              memory_args |= 1u << i;
+            } else if (uint64_t addr; napi_fast::TryBigIntWord(val, addr)) {
+              StoreArgument(slot, reinterpret_cast<void*>(static_cast<uintptr_t>(addr)));
+            } else {
+              const auto kind = val.Type();
+              if (kind == napi_null || kind == napi_undefined) {
+                StoreArgument(slot, static_cast<void*>(nullptr));
+              } else {
+                complete = false;
+              }
+            }
+            break;
+          case CType::CTYPES_INT32:
+            if (double d; napi_fast::TryDouble(val, d) && d >= -2147483648.0 && d <= 2147483647.0) [[likely]] {
+              const auto v = static_cast<int32_t>(d);
+              if (static_cast<double>(v) == d) [[likely]] {
+                StoreArgument(slot, v);
+                break;
+              }
+            }
+            complete = false;
+            break;
+          case CType::CTYPES_UINT32:
+            if (double d; napi_fast::TryDouble(val, d) && d >= 0.0 && d <= 4294967295.0) [[likely]] {
+              const auto v = static_cast<uint32_t>(d);
+              if (static_cast<double>(v) == d) [[likely]] {
+                StoreArgument(slot, v);
+                break;
+              }
+            }
+            complete = false;
+            break;
+          case CType::CTYPES_INT64:
+          case CType::CTYPES_SSIZE_T:
+            if (double d; napi_fast::TryDouble(val, d) && d >= -9007199254740991.0 && d <= 9007199254740991.0)
+              [[likely]] {
+              const auto v = static_cast<int64_t>(d);
+              if (static_cast<double>(v) == d) [[likely]] {
+                StoreArgument(slot, v);
+                break;
+              }
+            } else if (uint64_t bits; napi_fast::TryBigIntWord(val, bits)) {
+              StoreArgument(slot, static_cast<int64_t>(bits));
+              break;
+            }
+            complete = false;
+            break;
+          case CType::CTYPES_UINT64:
+          case CType::CTYPES_SIZE_T:
+            if (double d; napi_fast::TryDouble(val, d) && d >= 0.0 && d <= 9007199254740991.0) [[likely]] {
+              const auto v = static_cast<uint64_t>(d);
+              if (static_cast<double>(v) == d) [[likely]] {
+                StoreArgument(slot, v);
+                break;
+              }
+            } else if (uint64_t bits; napi_fast::TryBigIntWord(val, bits)) {
+              StoreArgument(slot, bits);
+              break;
+            }
+            complete = false;
+            break;
+          default:
+            complete = false;
+            break;
+        }
+        if (!complete) [[unlikely]] {
+          break;
+        }
+      }
+      if (complete) [[likely]] {
+        const CountScope depth(&self->call_depth_);
+        const uint64_t epoch = self->CallbackEpoch();
+        const CTypesAddon::ScopelessCallbacks callbacks(self->addon_);
+        alignas(8) std::array<std::byte, 8> out{};
+        const auto saved = self->SwapInErrorState();
+        self->frame_plan_.invoker(self->fn_ptr_, words.data(), out.data());
+        self->CaptureErrorState(saved);
+        if (self->CallbackEpoch() != epoch && memory_args != 0) [[unlikely]] {
+          ThrowIfArgumentDetached(RawArguments{Napi::Env(env), args.data(), argc}, memory_args);
+        }
+        return ReturnScalar(env, self->return_type_, out.data());
+      }
+    }
+    if (self->simple_call_ && argc >= expected && argc <= kMaxSimpleArgs && self->errcheck_callback_.IsEmpty())
+      [[likely]] {
+      std::array<napi_value, kMaxSimpleArgs> all;
+      napi_value* values = args.data();
+      if (argc > args.size()) [[unlikely]] {
+        if (!napi_fast::GetArguments(env, info, std::span(all).first(argc), argc, data)) [[unlikely]] {
+          return nullptr;
+        }
+        values = all.data();
+      }
+      if (Napi::Value result; self->SimpleCall<RawArguments, false>(RawArguments{Napi::Env(env), values, argc}, result,
+                                                                    nullptr)) [[likely]] {
+        return result;
+      }
+    }
+    return self->CallFromInfo(Napi::CallbackInfo(env, info));
   });
 }
 

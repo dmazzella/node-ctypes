@@ -15,6 +15,7 @@ struct CallbackBaseData : LibffiCallbackState {
   Napi::FunctionReference buffer_allocator_ref;
   Napi::FunctionReference error_handler_ref;  // Error handler opzionale
   bool use_native_snapshot_pool = false;
+  bool simple_args = false;  // <= 8 argomenti, nessuno struct_info o scalar_buffer
   void* code_ptr = nullptr;
   CType return_type;
   std::vector<TypeSpec> arg_types;  // primitivi o struct per valore
@@ -28,7 +29,7 @@ struct CallbackBaseData : LibffiCallbackState {
 };
 
 // Helper condivisi tra callback.cc e callback_threadsafe.cc.
-void ParseCallbackTypes(const Napi::CallbackInfo& info, CType& return_type, std::vector<TypeSpec>& arg_types);
+void ParseCallbackTypes(const Napi::CallbackInfo& info, CallbackBaseData& data);
 Napi::FunctionReference CallbackBufferAllocator(const Napi::CallbackInfo& info, bool& use_native_pool);
 void RecordCallbackError(CallbackBaseData* data, std::string message);
 void InvokeCallbackOnJsThread(Napi::Env env,

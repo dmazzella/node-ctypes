@@ -215,6 +215,149 @@ describe("native fixture", { skip: !existsSync(FIXTURE) && `${FIXTURE} not built
       assert.deepStrictEqual([reads, calls], [1, 1]);
     });
 
+    it("supports single-probe plain-object structs across 2-4 arguments (sync, async, overrides and error order)", async function () {
+      const Point = ctypes.struct({ x: c_int32, y: c_int32 });
+      const sumExtra = lib.func("fixture_point_sum_extra", c_int32, [Point, c_int32]);
+      assert.strictEqual(sumExtra({ x: 3, y: 4 }, 0), 7);
+      assert.strictEqual(await sumExtra.callAsync({ x: 5, y: 6 }, 0), 11);
+
+      // 3-arg and 4-arg callbacks exercising case 3 & case 4 resolvePlain paths
+      const cb3 = ctypes.callback((a, p, b) => a + p.x + p.y + b, c_int32, [c_int32, Point, c_int32]);
+      const cb4 = ctypes.callback((a, p1, b, p2) => a + p1.x + p1.y + b + p2.x + p2.y, c_int32, [c_int32, Point, c_int32, Point]);
+      try {
+        const fn3 = ctypes.CFUNCTYPE(c_int32, c_int32, Point, c_int32)(cb3.pointer);
+        const fn4 = ctypes.CFUNCTYPE(c_int32, c_int32, Point, c_int32, Point)(cb4.pointer);
+        assert.strictEqual(fn3(10, { x: 2, y: 3 }, 20), 35);
+        assert.strictEqual(fn4(1, { x: 2, y: 3 }, 4, { x: 5, y: 6 }), 21);
+
+        // Left-to-right error order: invalid argument 1 must throw before reading argument 2 getters
+        let readSecond = false;
+        const second = {
+          get x() {
+            readSecond = true;
+            return 1;
+          },
+          y: 2,
+        };
+        assert.throws(() => fn3(1.5, second, 0), /argument 1/);
+        assert.strictEqual(readSecond, false);
+
+        // create override on multi-arg binding still reads getter once
+        const origCreate = Point.create;
+        let createReads = 0;
+        Object.defineProperty(Point, "create", {
+          configurable: true,
+          get() {
+            createReads++;
+            return function (v) {
+              return origCreate.call(this, { x: v.x + 100, y: v.y });
+            };
+          },
+        });
+        try {
+          assert.strictEqual(fn3(1, { x: 2, y: 3 }, 4), 110);
+          assert.strictEqual(createReads, 1);
+          assert.strictEqual(await sumExtra.callAsync({ x: 3, y: 4 }, 0), 107);
+          assert.strictEqual(createReads, 2);
+        } finally {
+          Object.defineProperty(Point, "create", { configurable: true, writable: true, value: origCreate });
+        }
+
+        // case 2 combined (c_void_p plain Buffer, Point plain object) including create override
+        const cbPtrPt = ctypes.callback((ptr, p) => (ptr === null ? 0 : p.x + p.y), c_int32, [ctypes.c_void_p, Point]);
+        try {
+          const fnPtrPt = ctypes.CFUNCTYPE(c_int32, ctypes.c_void_p, Point)(cbPtrPt.pointer);
+          const buf = Buffer.alloc(8);
+          assert.strictEqual(fnPtrPt(buf, { x: 4, y: 6 }), 10);
+          let ptrPtReads = 0;
+          Object.defineProperty(Point, "create", {
+            configurable: true,
+            get() {
+              ptrPtReads++;
+              return function (v) {
+                return origCreate.call(this, { x: v.x + 50, y: v.y });
+              };
+            },
+          });
+          try {
+            assert.strictEqual(fnPtrPt(buf, { x: 4, y: 6 }), 60);
+            assert.strictEqual(ptrPtReads, 1);
+          } finally {
+            Object.defineProperty(Point, "create", { configurable: true, writable: true, value: origCreate });
+          }
+        } finally {
+          cbPtrPt.release();
+        }
+
+        // Single-probe Proxy prototype on Buffer across case 2, case 3 and case 4 (c_void_p first arg)
+        const cb2 = ctypes.callback((p, a) => (p ? a + 1 : 0), c_int32, [ctypes.c_void_p, c_int32]);
+        const cb3p = ctypes.callback((p, a, b) => (p ? a + b : 0), c_int32, [ctypes.c_void_p, c_int32, c_int32]);
+        const cb4p = ctypes.callback((p, a, b, c) => (p ? a + b + c : 0), c_int32, [ctypes.c_void_p, c_int32, c_int32, c_int32]);
+        try {
+          const fn2p = ctypes.CFUNCTYPE(c_int32, ctypes.c_void_p, c_int32)(cb2.pointer);
+          const fn3p = ctypes.CFUNCTYPE(c_int32, ctypes.c_void_p, c_int32, c_int32)(cb3p.pointer);
+          const fn4p = ctypes.CFUNCTYPE(c_int32, ctypes.c_void_p, c_int32, c_int32, c_int32)(cb4p.pointer);
+          let probes = 0;
+          const proto = new Proxy(Buffer.prototype, {
+            has(target, prop) {
+              if (prop === "_buffer") probes++;
+              return Reflect.has(target, prop);
+            },
+          });
+          const probedBuf = Object.setPrototypeOf(Buffer.alloc(8), proto);
+          probes = 0;
+          assert.strictEqual(fn2p(probedBuf, 10), 11);
+          assert.strictEqual(probes, 1);
+          probes = 0;
+          assert.strictEqual(fn3p(probedBuf, 10, 20), 30);
+          assert.strictEqual(probes, 1);
+          probes = 0;
+          assert.strictEqual(fn4p(probedBuf, 10, 20, 30), 60);
+          assert.strictEqual(probes, 1);
+        } finally {
+          cb2.release();
+          cb3p.release();
+          cb4p.release();
+        }
+
+        // Unrolled createScalar / readAll boundaries: 1, 5, 6 fields and toObject override
+        const S1 = ctypes.struct({ a: c_int32 });
+        const S5 = ctypes.struct({ a: c_int32, b: c_int32, c: c_int32, d: c_int32, e: c_int32 });
+        const S6 = ctypes.struct({ a: c_int32, b: c_int32, c: c_int32, d: c_int32, e: c_int32, f: c_int32 });
+        const cbS1 = ctypes.callback((v) => v.a * 2, c_int32, [S1]);
+        const cbS5 = ctypes.callback((v) => v.a + v.b + v.c + v.d + v.e, c_int32, [S5]);
+        const cbS6 = ctypes.callback((v) => v.a + v.b + v.c + v.d + v.e + v.f, c_int32, [S6]);
+        try {
+          assert.strictEqual(ctypes.CFUNCTYPE(c_int32, S1)(cbS1.pointer)({ a: 21 }), 42);
+          assert.strictEqual(ctypes.CFUNCTYPE(c_int32, S5)(cbS5.pointer)({ a: 1, b: 2, c: 3, d: 4, e: 5 }), 15);
+          assert.strictEqual(ctypes.CFUNCTYPE(c_int32, S6)(cbS6.pointer)({ a: 1, b: 2, c: 3, d: 4, e: 5, f: 6 }), 21);
+        } finally {
+          cbS1.release();
+          cbS5.release();
+          cbS6.release();
+        }
+
+        // toObject override on struct return still runs and receives an independent Buffer copy
+        const origToObject = Point.toObject;
+        let toObjectCalls = 0;
+        Point.toObject = function (buf) {
+          toObjectCalls++;
+          assert.ok(Buffer.isBuffer(buf));
+          return { x: origToObject.call(this, buf).x + 1, y: origToObject.call(this, buf).y + 2 };
+        };
+        try {
+          const makePt = lib.func("fixture_point_make", Point, [c_int32, c_int32]);
+          assert.deepStrictEqual(makePt(3, 4), { x: 4, y: 6 });
+          assert.strictEqual(toObjectCalls, 1);
+        } finally {
+          Point.toObject = origToObject;
+        }
+      } finally {
+        cb3.release();
+        cb4.release();
+      }
+    });
+
     it("captures from_param adapters per binding and preserves original errcheck arguments", async function () {
       const Point = ctypes.struct({ x: c_int32, y: c_int32 });
       Point.from_param = function (value) {

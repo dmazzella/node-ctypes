@@ -50,7 +50,9 @@ class CTypesAddon : public Napi::Addon<CTypesAddon> {
   // Solo questa classe tocca il contatore (scopeless_callbacks_).
   class ScopelessCallbacks {
    public:
-    static constexpr uint32_t kBudget = 64;
+    // 2048 callback x ~3 handle V8 ~= 48 KB temporanei liberati al ritorno della chiamata C:
+    // copre cicli C come qsort(200) senza aprire HandleScope per invocazione, limitando loop infiniti.
+    static constexpr uint32_t kBudget = 2048;
     explicit ScopelessCallbacks(CTypesAddon* addon) noexcept
       : addon_(addon), saved_(addon != nullptr ? std::exchange(addon->scopeless_callbacks_, kBudget) : 0) {}
     ~ScopelessCallbacks() {

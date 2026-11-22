@@ -179,6 +179,44 @@ inline std::atomic<bool> buffer_info_checks_type{true};
   return true;
 }
 
+// Chiamata diretta a funzione JS nel percorso caldo dei callback C -> JS:
+// evita try/catch e costruzione di Napi::Error/std::string quando ritorna napi_ok.
+[[nodiscard]] inline bool CallFunction(napi_env env,
+                                       napi_value recv,
+                                       napi_value fn,
+                                       size_t argc,
+                                       const napi_value* argv,
+                                       napi_value& result) noexcept {
+  return napi_call_function(env, recv, fn, argc, argv, &result) == napi_ok;
+}
+
+[[nodiscard]] inline napi_value Undefined(napi_env env) noexcept {
+  napi_value undef = nullptr;
+  napi_get_undefined(env, &undef);
+  return undef;
+}
+
+[[nodiscard]] inline napi_value PointerBigInt(napi_env env, uint64_t addr) {
+  napi_value result = nullptr;
+  const napi_status status = napi_create_bigint_uint64(env, addr, &result);
+  NAPI_THROW_IF_FAILED(env, status, nullptr);
+  return result;
+}
+
+[[nodiscard]] inline napi_value Int64BigInt(napi_env env, int64_t value) {
+  napi_value result = nullptr;
+  const napi_status status = napi_create_bigint_int64(env, value, &result);
+  NAPI_THROW_IF_FAILED(env, status, nullptr);
+  return result;
+}
+
+[[nodiscard]] inline napi_value Double(napi_env env, double value) {
+  napi_value result = nullptr;
+  const napi_status status = napi_create_double(env, value, &result);
+  NAPI_THROW_IF_FAILED(env, status, nullptr);
+  return result;
+}
+
 // Verifica se un ArrayBuffer è stato staccato (transfer / transfer list).
 [[nodiscard]] inline bool IsArrayBufferDetached(Napi::Env env, napi_value arraybuffer) {
   bool detached = false;

@@ -267,6 +267,7 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
   static napi_value AllInt32Entry(napi_env env, napi_callback_info info);
   static napi_value UnaryStringEntry(napi_env env, napi_callback_info info);
   static napi_value UnaryPointerCall(napi_env env, napi_callback_info info);
+  static napi_value DirectPointerCall(napi_env env, napi_callback_info info);
   template <size_t Count>
   static napi_value MixedEntry(napi_env env, napi_callback_info info);
   napi_value CallEntryFallback(napi_env env, napi_callback_info info);
@@ -355,6 +356,12 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
    public:
     static constexpr size_t kInlineArgs = 8;
     static constexpr size_t kInlineReturnSize = 64;
+    // Con <= 4 argomenti la seconda metà di inline_arg_storage_ (64 B) ospita
+    // 1 struct arg > 16 B senza aumentare sizeof(PreparedCall).
+    static constexpr size_t kInlineLargeArgMaxArgs = 4;
+    static constexpr size_t kInlineLargeArgOffset = kInlineLargeArgMaxArgs * ARG_SLOT_SIZE;
+    static constexpr size_t kInlineLargeArgSize = kInlineArgs * ARG_SLOT_SIZE - kInlineLargeArgOffset;
+    static constexpr uint8_t kNoInlineLargeArg = 0xFF;
 
     PreparedCall(Napi::Env env,
                  FFIFunction* ffi_function,
@@ -373,6 +380,7 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
                  LibffiAsyncCallState&& libffi,
                  std::vector<std::vector<uint8_t>>&& large_arg_buffers,
                  std::vector<size_t>&& large_arg_indices,
+                 uint8_t inline_large_arg_index,
                  const Napi::Function* errcheck,
                  bool result_handler);
     ~PreparedCall();
@@ -405,7 +413,7 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
     std::shared_ptr<ArrayInfo> return_array_info_;
     size_t argc_ = 0;
     // SBO per chiamate comuni (<= kInlineArgs argomenti, ritorni <= kInlineReturnSize):
-    // evita fino a 3 allocazioni heap di std::vector per chiamata asincrona.
+    // con <= 4 argomenti riusa gli ultimi 64 B di inline_arg_storage_ per 1 struct arg.
     alignas(16) std::array<uint8_t, kInlineArgs * ARG_SLOT_SIZE> inline_arg_storage_{};
     std::array<void*, kInlineArgs> inline_arg_values_{};
     alignas(16) std::array<uint8_t, kInlineReturnSize> inline_return_storage_{};
@@ -428,6 +436,7 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
     bool capture_errno_;
     bool struct_as_buffer_;
     bool scalar_as_buffer_;
+    uint8_t inline_large_arg_index_ = kNoInlineLargeArg;
     uint32_t last_error_ = 0;
     int last_errno_ = 0;
     // Valori privati (get_last_error() / get_errno()) al momento della chiamata.

@@ -45,6 +45,19 @@ bool StoreNumberResult(const Napi::Value& result, CType type, void* destination)
     StoreReturnValue(destination, static_cast<float>(d));
     return true;
   }
+  if (type == CType::CTYPES_INT32 && d >= -2147483648.0 && d <= 2147483647.0) [[likely]] {
+    const auto v = static_cast<int32_t>(d);
+    if (static_cast<double>(v) == d) [[likely]] {
+      StoreReturnValue(destination, v);
+      return true;
+    }
+  } else if (type == CType::CTYPES_UINT32 && d >= 0.0 && d <= 4294967295.0) {
+    const auto v = static_cast<uint32_t>(d);
+    if (static_cast<double>(v) == d) {
+      StoreReturnValue(destination, v);
+      return true;
+    }
+  }
   const uint64_t bits = IntegerBitsFromNumber(result, d);
   switch (type) {
     case CType::CTYPES_INT8:
@@ -91,24 +104,30 @@ bool StoreJSCallbackResult(const Napi::Value& result, CType type, void* destinat
   return true;
 }
 
-// Chiama la funzione JS del callback. Se lancia, l'eccezione arriva come
-// Napi::Error (NAPI_CPP_EXCEPTIONS), che la recupera e la rimuove dall'env:
-// ritorna false e lascia il messaggio in error_msg.
-bool CallJSCallback(Napi::Env env,
-                    const Napi::Function& fn,
-                    size_t nargs,
-                    const napi_value* args,
-                    Napi::Value& result,
-                    std::string& error_msg) {
-  try {
-    result = fn.Call(env.Undefined(), nargs, args);
-    return true;
-  } catch (const std::exception& e) {
-    // Anche un'eccezione C++ non Napi: non deve attraversare il frame C del callback.
-    if (const std::string_view message = e.what(); !message.empty()) {
-      error_msg = message;
+// Conversione inline degli argomenti scalari/puntatori comuni (evita CToJS cross-TU).
+[[nodiscard]] CTYPES_ALWAYS_INLINE napi_value SimpleCallbackArgToJS(Napi::Env env, void* arg, CType type) {
+  switch (type) {
+    case CType::CTYPES_POINTER: {
+      void* const ptr = LoadAs<void*>(arg);
+      if (ptr == nullptr) [[unlikely]] {
+        return env.Null();
+      }
+      return napi_fast::PointerBigInt(env, reinterpret_cast<uintptr_t>(ptr));
     }
-    return false;
+    case CType::CTYPES_INT32:
+      return napi_fast::Int32(env, LoadAs<int32_t>(arg));
+    case CType::CTYPES_UINT32:
+      return napi_fast::Uint32(env, LoadAs<uint32_t>(arg));
+    case CType::CTYPES_INT64:
+      return napi_fast::Int64BigInt(env, LoadAs<int64_t>(arg));
+    case CType::CTYPES_UINT64:
+      return napi_fast::PointerBigInt(env, LoadAs<uint64_t>(arg));
+    case CType::CTYPES_DOUBLE:
+      return napi_fast::Double(env, LoadAs<double>(arg));
+    case CType::CTYPES_FLOAT:
+      return napi_fast::Double(env, static_cast<double>(LoadAs<float>(arg)));
+    default:
+      return CToJS(env, arg, type);
   }
 }
 
@@ -180,12 +199,41 @@ void EmitCallbackWarning(Napi::Env env, const std::string& message, const char* 
   }
 }
 
+// Recupera l'eccezione JS pendente dopo una napi_call_function fallita.
+CTYPES_NOINLINE void HandleCallbackCallFailure(Napi::Env env,
+                                               CallbackBaseData* data,
+                                               void* ret,
+                                               const char* default_error,
+                                               const char* warning_type) {
+  std::string error_msg;
+  if (env.IsExceptionPending()) {
+    const Napi::Error err = env.GetAndClearPendingException();
+    error_msg = err.Message();
+  }
+  if (error_msg.empty()) {
+    error_msg = default_error;
+  }
+  RecordCallbackError(data, error_msg);
+  if (!data->error_handler_ref.IsEmpty()) {
+    try {
+      data->error_handler_ref.Value().Call({Napi::String::New(env, error_msg)});
+    } catch (...) {
+      // Un errore dell'error handler non deve propagare nel frame C.
+    }
+  } else {
+    EmitCallbackWarning(env, error_msg, warning_type);
+  }
+  ZeroReturnValue(data->return_type, ret);
+}
+
 }  // namespace
 
 // Tipi di un callback (info[1] ritorno, info[2] argomenti): CType primitivi,
 // convertiti con CToJS / JSToC, e argomenti struct/union per valore. Come in
 // Python, il ritorno non può essere una struct e gli array non sono argomenti.
-void ParseCallbackTypes(const Napi::CallbackInfo& info, CType& return_type, std::vector<TypeSpec>& arg_types) {
+void ParseCallbackTypes(const Napi::CallbackInfo& info, CallbackBaseData& data) {
+  CType& return_type = data.return_type;
+  std::vector<TypeSpec>& arg_types = data.arg_types;
   Napi::Env env = info.Env();
   if (info[1].IsObject() && TypeSpecFromJS(info[1]).type != CType::CTYPES_VOID) {
     throw Napi::TypeError::New(env, "invalid result type for callback function");
@@ -229,6 +277,9 @@ void ParseCallbackTypes(const Napi::CallbackInfo& info, CType& return_type, std:
     }
     arg_types.push_back(std::move(spec));
   }
+  data.simple_args =
+    arg_types.size() <= kMaxInlineCallbackArgs &&
+    std::ranges::all_of(arg_types, [](const TypeSpec& s) { return !s.struct_info && !s.scalar_buffer; });
 }
 
 Napi::FunctionReference CallbackBufferAllocator(const Napi::CallbackInfo& info, bool& use_native_pool) {
@@ -277,41 +328,33 @@ void InvokeCallbackOnJsThread(Napi::Env env,
   std::array<napi_value, kMaxInlineCallbackArgs> inline_args;
   std::vector<napi_value> heap_args;
   napi_value* js_args = inline_args.data();
-  if (nargs > kMaxInlineCallbackArgs) {
+  if (nargs > kMaxInlineCallbackArgs) [[unlikely]] {
     heap_args.resize(nargs);
     js_args = heap_args.data();
   }
 
   try {
-    for (size_t i = 0; i < nargs; i++) {
-      js_args[i] = CallbackArgToJS(env, args[i], data->arg_types[i], data->buffer_allocator_ref,
-                                   data->use_native_snapshot_pool, data->addon);
+    if (data->simple_args) [[likely]] {
+      for (size_t i = 0; i < nargs; i++) {
+        js_args[i] = SimpleCallbackArgToJS(env, args[i], data->arg_types[i].type);
+      }
+    } else {
+      for (size_t i = 0; i < nargs; i++) {
+        js_args[i] = CallbackArgToJS(env, args[i], data->arg_types[i], data->buffer_allocator_ref,
+                                     data->use_native_snapshot_pool, data->addon);
+      }
     }
 
-    Napi::Value result;
-    std::string error_msg;
-    if (!CallJSCallback(env, fn, nargs, js_args, result, error_msg)) {
-      if (error_msg.empty()) {
-        error_msg = default_error;
-      }
-      RecordCallbackError(data, error_msg);
-      if (!data->error_handler_ref.IsEmpty()) {
-        try {
-          data->error_handler_ref.Value().Call({Napi::String::New(env, error_msg)});
-        } catch (...) {
-          // Un errore dell'error handler non deve propagare nel frame C.
-        }
-      } else {
-        EmitCallbackWarning(env, error_msg, warning_type);
-      }
-      ZeroReturnValue(data->return_type, ret);
+    napi_value raw_result = nullptr;
+    if (!napi_fast::CallFunction(env, napi_fast::Undefined(env), fn, nargs, js_args, raw_result)) [[unlikely]] {
+      HandleCallbackCallFailure(env, data, ret, default_error, warning_type);
       return;
     }
 
     // Converti risultato JS -> C direttamente nel buffer di ret, senza
     // heap-allocare un vettore temporaneo e memcpy in ogni invocazione.
     if (data->return_type != CType::CTYPES_VOID) {
-      if (!StoreJSCallbackResult(result, data->return_type, ret)) {
+      if (!StoreJSCallbackResult(Napi::Value(env, raw_result), data->return_type, ret)) [[unlikely]] {
         ZeroReturnValue(data->return_type, ret);
       }
     }
@@ -379,7 +422,7 @@ Callback::Callback(const Napi::CallbackInfo& info) : Napi::ObjectWrap<Callback>(
   data_->addon = env.GetInstanceData<CTypesAddon>();
   data_->js_function_ref = Napi::Persistent(info[0].As<Napi::Function>());
 
-  ParseCallbackTypes(info, data_->return_type, data_->arg_types);
+  ParseCallbackTypes(info, *data_);
   data_->buffer_allocator_ref = CallbackBufferAllocator(info, data_->use_native_snapshot_pool);
 
   // Legge il quarto argomento opzionale: la stringa della convenzione di chiamata.

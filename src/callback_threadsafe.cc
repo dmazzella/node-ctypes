@@ -204,7 +204,7 @@ ThreadSafeCallback::ThreadSafeCallback(const Napi::CallbackInfo& info) : Napi::O
   data_->addon = env.GetInstanceData<CTypesAddon>();
   data_->js_function_ref = Napi::Persistent(js_func);
 
-  ParseCallbackTypes(info, data_->return_type, data_->arg_types);
+  ParseCallbackTypes(info, *data_);
   data_->buffer_allocator_ref = CallbackBufferAllocator(info, data_->use_native_snapshot_pool);
 
   if (info.Length() > 5 && !info[5].IsUndefined()) {

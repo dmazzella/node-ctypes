@@ -440,6 +440,72 @@ describe("CDLL.func conversion entry-point regressions", function () {
       }
       assert.strictEqual(sum4(buf), 100);
 
+      // DirectPointerCall (2-4 args with pointers + ints): memset & qsort edge cases
+      const libc = new ctypes.CDLL(process.platform === "win32" ? "msvcrt.dll" : null);
+      try {
+        const memsetFn = libc.func("memset", ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_int32, ctypes.c_size_t]);
+        const target = Buffer.alloc(32);
+        assert.strictEqual(memsetFn(target, 0x5a, 32), ctypes.addressof(target));
+        assert.strictEqual(target[0], 0x5a);
+        assert.strictEqual(target[31], 0x5a);
+        const sub = new Uint8Array(target.buffer, target.byteOffset + 8, 8);
+        assert.strictEqual(memsetFn(sub, 0x22, 8), ctypes.addressof(target) + 8n);
+        assert.strictEqual(target[7], 0x5a);
+        assert.strictEqual(target[8], 0x22);
+        assert.strictEqual(target[15], 0x22);
+        assert.strictEqual(target[16], 0x5a);
+        assert.strictEqual(memsetFn(ctypes.addressof(target), 0x11, 4n), ctypes.addressof(target));
+        assert.strictEqual(target[0], 0x11);
+        assert.strictEqual(target[4], 0x5a);
+        // Boolean, zero-length buffer, pre-detached view, and negative/large BigInt fallbacks on DirectPointerCall
+        assert.strictEqual(memsetFn(target, true, 2), ctypes.addressof(target));
+        assert.strictEqual(target[0], 1);
+        assert.strictEqual(target[1], 1);
+        assert.strictEqual(memsetFn(target, false, 1n), ctypes.addressof(target));
+        assert.strictEqual(target[0], 0);
+        const emptyBuf = Buffer.alloc(0);
+        const emptyRet = memsetFn(emptyBuf, 0x44, 0);
+        assert.ok(emptyRet === null || typeof emptyRet === "bigint");
+        const preDetachedAb = new ArrayBuffer(8);
+        const preDetachedView = new Uint8Array(preDetachedAb);
+        preDetachedAb.transfer();
+        assert.strictEqual(memsetFn(preDetachedView, 0, 0), null);
+        assert.throws(() => memsetFn(target, 1.5, 4), /argument 2/);
+        assert.throws(() => memsetFn(target, 1, 4.5), /argument 3/);
+        assert.throws(() => memsetFn(1.5, 1, 4), /cannot be interpreted as ctypes.c_void_p/);
+        memsetFn.errcheck = (r) => r + 1n;
+        try {
+          assert.strictEqual(memsetFn(target, 0x33, 4), ctypes.addressof(target) + 1n);
+        } finally {
+          memsetFn.errcheck = null;
+        }
+
+        // Detached ArrayBuffer during a DirectPointerCall callback (qsort)
+        const qsortFn = libc.func("qsort", ctypes.c_void, [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_void_p]);
+        const ab = new ArrayBuffer(16);
+        const arr = new Int32Array(ab);
+        arr.set([4, 1, 3, 2]);
+        let detachedOnce = false;
+        const detachCb = ctypes.callback(
+          (a, b) => {
+            if (!detachedOnce) {
+              detachedOnce = true;
+              ab.transfer();
+            }
+            return a < b ? -1 : a > b ? 1 : 0;
+          },
+          ctypes.c_int32,
+          [ctypes.c_void_p, ctypes.c_void_p],
+        );
+        try {
+          assert.throws(() => qsortFn(arr, 4, 4, detachCb.pointer), /argument 1:.*detached/);
+        } finally {
+          detachCb.release();
+        }
+      } finally {
+        libc.close();
+      }
+
       // specializeCall case 2 variadic path: primitive fast-path vs object extra args
       const vsum = fixture.func("fixture_variadic_sum", ctypes.c_int32, [ctypes.c_void_p, ctypes.c_int32]);
       assert.strictEqual(vsum(null, 3, 7, 8, 9), 24);
@@ -479,6 +545,40 @@ describe("CDLL.func conversion entry-point regressions", function () {
         assert.deepStrictEqual([...(await echo33.callAsync(in33)).values], in33.values);
         assert.deepStrictEqual([...(await echo65.callAsync(in65)).values], in65.values);
         assert.deepStrictEqual([...(await echo65.callOn(executor, in65)).values], in65.values);
+
+        // PreparedCall inline large-struct SBO edge cases:
+        // 1) struct 32B + errcheck (KeepArguments), 2) two 32B structs in one callAsync (1st inline, 2nd heap),
+        // 3) 32B struct + c_char_p string (FixupPointers interaction), 4) 5 args with 32B struct (>4 args fallback)
+        const HFA = ctypes.struct({ a: ctypes.c_double, b: ctypes.c_double, c: ctypes.c_double, d: ctypes.c_double });
+        const sumHFA = fixture.func("fixture_hfa_f64_4_sum", ctypes.c_double, [HFA]);
+        const hfaVal = { a: 0.25, b: 1.25, c: 2.25, d: 3.25 };
+        const seenErrcheckArgs = [];
+        sumHFA.errcheck = (res, _fn, args) => {
+          seenErrcheckArgs.push(args[0]);
+          return res + 1;
+        };
+        try {
+          assert.strictEqual(await sumHFA.callAsync(hfaVal), 23.5);
+          assert.strictEqual(seenErrcheckArgs[0], hfaVal);
+        } finally {
+          sumHFA.errcheck = null;
+        }
+
+        const tsTwoHfa = ctypes.threadSafeCallback((x, y) => x.a + x.d + y.b + y.c, ctypes.c_double, [HFA, HFA]);
+        const tsHfaStr = ctypes.threadSafeCallback((x, s) => x.a + x.d + s.length, ctypes.c_double, [HFA, ctypes.c_char_p]);
+        const tsFiveArgs = ctypes.threadSafeCallback((a, b, c, d, x) => a + b + c + d + x.a + x.d, ctypes.c_double, [ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, HFA]);
+        try {
+          const callTwoHfa = ctypes.CFUNCTYPE(ctypes.c_double, HFA, HFA)(tsTwoHfa.pointer);
+          const callHfaStr = ctypes.CFUNCTYPE(ctypes.c_double, HFA, ctypes.c_char_p)(tsHfaStr.pointer);
+          const callFiveArgs = ctypes.CFUNCTYPE(ctypes.c_double, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, HFA)(tsFiveArgs.pointer);
+          assert.strictEqual(await callTwoHfa.callAsync(hfaVal, { a: 10, b: 20, c: 30, d: 40 }), 0.25 + 3.25 + 20 + 30);
+          assert.strictEqual(await callHfaStr.callAsync(hfaVal, "hello world"), 0.25 + 3.25 + 11);
+          assert.strictEqual(await callFiveArgs.callAsync(1, 2, 3, 4, hfaVal), 10 + 0.25 + 3.25);
+        } finally {
+          tsTwoHfa.release();
+          tsHfaStr.release();
+          tsFiveArgs.release();
+        }
       } finally {
         await executor.close();
       }

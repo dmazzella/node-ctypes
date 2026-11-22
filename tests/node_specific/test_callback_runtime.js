@@ -840,6 +840,96 @@ describe("Callbacks", function () {
         aliasCb.release();
       }
     });
+
+    it("simple_args fast path handles NULL pointers, >2048 scopeless budget, int32/uint32 return edges, and non-Error throws", function () {
+      using fixture = new ctypes.CDLL(FIXTURE);
+
+      // 1. Exceed ScopelessCallbacks::kBudget (2048) inside a single C loop (2200 invocations) + nested reentry
+      const invokeLoop = fixture.func("fixture_callback_loop", ctypes.c_int64, [ctypes.c_void_p, ctypes.c_int32]);
+      const innerCb = ctypes.callback((x) => x * 2, ctypes.c_int32, [ctypes.c_int32]);
+      const outerCb = ctypes.callback((x) => (x === 2050 ? Number(invokeLoop(innerCb, 5)) : x + 1), ctypes.c_int32, [ctypes.c_int32]);
+      try {
+        // fixture_callback_loop iterates 0..n-1: sum_{i=0..2199}(i+1) - 2051 + sum_{j=0..4}(2*j)
+        const expected = (2200n * 2201n) / 2n - 2051n + 20n;
+        strictEqual(invokeLoop(outerCb, 2200), expected);
+        strictEqual(outerCb._callback.getLastError(), null);
+      } finally {
+        outerCb.release();
+        innerCb.release();
+      }
+
+      // 2. SimpleCallbackArgToJS maps NULL c_void_p to null (not 0n)
+      const seenPtrs = [];
+      const ptrCb = ctypes.callback(
+        (p) => {
+          seenPtrs.push(p);
+          return p === null ? 1 : 2;
+        },
+        ctypes.c_int32,
+        [ctypes.c_void_p],
+      );
+      try {
+        const callPtrCb = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p)(ptrCb.pointer);
+        strictEqual(callPtrCb(null), 1);
+        strictEqual(callPtrCb(0n), 1);
+        strictEqual(callPtrCb(0x1234n), 2);
+        assert.deepStrictEqual(seenPtrs, [null, null, 0x1234n]);
+      } finally {
+        ptrCb.release();
+      }
+
+      // 3. StoreNumberResult fast-path edge values for c_int32 and c_uint32
+      const errors = [];
+      const i32ReturnValues = [1.5, Number.NaN, Number.POSITIVE_INFINITY, -0.0, -2147483648, 2147483648];
+      let idx = 0;
+      const i32Cb = ctypes.callback(() => i32ReturnValues[idx++], ctypes.c_int32, []);
+      i32Cb._callback.setErrorHandler((msg) => errors.push(msg));
+      const u32ReturnValues = [1.5, -1, 0, 0xffffffff];
+      let uIdx = 0;
+      const u32Cb = ctypes.callback(() => u32ReturnValues[uIdx++], ctypes.c_uint32, []);
+      u32Cb._callback.setErrorHandler((msg) => errors.push(msg));
+      try {
+        const callI32 = ctypes.CFUNCTYPE(ctypes.c_int32)(i32Cb.pointer);
+        const callU32 = ctypes.CFUNCTYPE(ctypes.c_uint32)(u32Cb.pointer);
+        strictEqual(callI32(), 0); // 1.5 rejected -> zeroed
+        strictEqual(callI32(), 0); // NaN rejected -> zeroed
+        strictEqual(callI32(), 0); // Infinity rejected -> zeroed
+        strictEqual(callI32(), 0); // -0.0 -> 0
+        strictEqual(callI32(), -2147483648); // INT32_MIN
+        strictEqual(callI32(), -2147483648); // 2^31 wraps mod 2^32
+        strictEqual(callU32(), 0); // 1.5 rejected -> zeroed
+        strictEqual(callU32(), 0xffffffff); // -1 wraps to UINT32_MAX (CPython parity)
+        strictEqual(callU32(), 0);
+        strictEqual(callU32(), 0xffffffff);
+      } finally {
+        i32Cb.release();
+        u32Cb.release();
+      }
+
+      // 4. HandleCallbackCallFailure with non-Error throws (string, number) + error handler
+      const nonErrRecorded = [];
+      let throwKind = 0;
+      const throwCb = ctypes.callback(
+        () => {
+          if (throwKind === 0) throw "plain string failure";
+          throw 42;
+        },
+        ctypes.c_int32,
+        [],
+      );
+      throwCb._callback.setErrorHandler((msg) => nonErrRecorded.push(msg));
+      try {
+        const callThrow = ctypes.CFUNCTYPE(ctypes.c_int32)(throwCb.pointer);
+        strictEqual(callThrow(), 0);
+        throwKind = 1;
+        strictEqual(callThrow(), 0);
+        strictEqual(nonErrRecorded.length, 2);
+        assert.ok(nonErrRecorded[0].length > 0);
+        assert.ok(nonErrRecorded[1].length > 0);
+      } finally {
+        throwCb.release();
+      }
+    });
   });
 
   describe("threadSafeCallback ref() / unref()", function () {

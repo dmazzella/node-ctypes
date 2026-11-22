@@ -5,6 +5,37 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.15.3] - 2026-11-22
+
+### Changed
+
+- **Multi-argument pointer calls (`memset`, `memcpy`, `qsort`)**:
+  - Extended single-probe plain `ArrayBufferView` pass-through in
+    `specializeCall` (`lib/core/invocation.js`) to 2–4 argument signatures with
+    a leading `c_void_p`, avoiding per-call owner-array allocations for plain
+    `Buffer`/`TypedArray` views.
+  - Added `FFIFunction::DirectPointerCall` (`src/function_fast.cc`) for 2–4
+    argument signatures composed of pointers and 32/64-bit integers returning a
+    direct scalar or pointer, writing directly into `frame::Plan` and falling
+    back cleanly without extra `napi_get_cb_info` re-reads on variadic calls.
+- **Synchronous and thread-safe callback hot path**:
+  - Added `CallbackBaseData::simple_args` with inline scalar/pointer argument
+    conversion (`SimpleCallbackArgToJS`), direct `napi_fast::CallFunction`
+    invocation on the `napi_ok` path, inline `c_int32`/`c_uint32` return fast
+    paths in `StoreNumberResult`, and raised `ScopelessCallbacks::kBudget` from
+    `64` to `2048` to avoid per-invocation `HandleScope` churn in C callback
+    loops such as `qsort`.
+- **Plain-object struct arguments and scalar struct returns**:
+  - Reused the unused 64-byte tail of `PreparedCall::inline_arg_storage_` for a
+    by-value struct argument (`17–64` bytes, `argc <= 4`) without growing
+    `sizeof(PreparedCall)`, avoiding per-call heap allocations in `callAsync()`
+    and `callOn()` for common HFA and medium struct arguments.
+  - Monomorphized `createScalar` and `structResultReaders` for 1–5 scalar fields
+    in `lib/structures/helpers/struct.js` and added a single-probe plain-object
+    fast path (`resolvePlain`) across 1–4 argument wrappers in `specializeCall`
+    (`lib/core/invocation.js`), preserving left-to-right error order and
+    single-read `create`/`set` override semantics.
+
 ## [2.15.2] - 2026-11-22
 
 ### Changed
