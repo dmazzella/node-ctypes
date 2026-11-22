@@ -2,6 +2,7 @@
 
 import ctypes as c
 from ctypes.util import find_library
+import platform
 import sys
 import unittest
 
@@ -283,8 +284,11 @@ class TestCallFastPaths(unittest.TestCase):
         self.assertEqual(vsum(None, 3, 7, 8, 9), 24)
         self.assertEqual(vsum(None, 5, -2, 4, 6, 8, 10), 26)
 
-        vdbl = self.fixture.fixture_variadic_double_sum
-        vdbl.argtypes = [c.c_int32]
-        vdbl.restype = c.c_double
-        doubles = [i + 0.25 for i in range(10)]
-        self.assertEqual(vdbl(10, *[c.c_double(v) for v in doubles]), 47.5)
+        # CPython on Windows does not use ffi_prep_cif_var: variadic doubles
+        # go in the wrong registers on ARM64 (node-ctypes handles them).
+        if not (platform.system() == "Windows" and platform.machine().lower() in ("arm64", "aarch64")):
+            vdbl = self.fixture.fixture_variadic_double_sum
+            vdbl.argtypes = [c.c_int32]
+            vdbl.restype = c.c_double
+            doubles = [i + 0.25 for i in range(10)]
+            self.assertEqual(vdbl(10, *[c.c_double(v) for v in doubles]), 47.5)
