@@ -52,13 +52,18 @@ struct LibffiExtraCallState {
   }
 };
 
+// Il CIF e l'array a cui punta non si spostano durante l'esecuzione del worker.
+struct LibffiAsyncSignature {
+  ffi_cif cif{};
+  std::vector<ffi_type*> types;
+};
+
 struct LibffiAsyncCallState {
   ffi_cif* active_cif_ = nullptr;
-  std::unique_ptr<ffi_cif> owned_cif_;
-  std::vector<ffi_type*> owned_ffi_types_;
+  std::unique_ptr<LibffiAsyncSignature> signature_;
 
   void Activate(LibffiCallState& parent, bool has_invoker) {
-    active_cif_ = has_invoker ? nullptr : owned_cif_ ? owned_cif_.get() : parent.cif_prepared_ ? &parent.cif_ : nullptr;
+    active_cif_ = has_invoker ? nullptr : signature_ ? &signature_->cif : parent.cif_prepared_ ? &parent.cif_ : nullptr;
     if (!has_invoker && active_cif_ == nullptr) {
       throw std::logic_error("Async call has neither a native invoker nor a prepared FFI interface");
     }

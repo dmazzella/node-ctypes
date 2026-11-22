@@ -113,9 +113,20 @@ bool FFIFunction::PrepareAsyncFFI(Napi::Env env,
                                   LibffiAsyncCallState& state) {
   PrepareFFITypes();
   const size_t expected_argc = arg_types_.size();
-  auto& owned_cif = state.owned_cif_;
-  auto& owned_ffi_types = state.owned_ffi_types_;
-  owned_cif = std::make_unique<ffi_cif>();
+  if (argc <= MAX_INLINE_ARGS && idle_async_signature_) {
+    state.signature_ = std::move(idle_async_signature_);
+    const auto& previous = state.signature_->types;
+    // Prefisso, tipo di ritorno e ABI appartengono a questa FFIFunction.
+    if (previous.size() == argc &&
+        std::equal(extra_types.begin(), extra_types.end(), previous.begin() + expected_argc,
+                   [](CType type, ffi_type* cached) { return CTypeToFFI(type) == cached; })) {
+      return true;
+    }
+  } else {
+    state.signature_ = std::make_unique<LibffiAsyncSignature>();
+  }
+  auto* owned_cif = &state.signature_->cif;
+  auto& owned_ffi_types = state.signature_->types;
   owned_ffi_types.resize(argc);
   for (size_t i = 0; i < expected_argc; i++) {
     owned_ffi_types[i] = ffi_arg_types_[i];
@@ -125,9 +136,9 @@ bool FFIFunction::PrepareAsyncFFI(Napi::Env env,
   }
   const ffi_status status =
     expected_argc == 0
-      ? ffi_prep_cif(owned_cif.get(), abi_, static_cast<unsigned int>(argc), ffi_return_type_, owned_ffi_types.data())
-      : ffi_prep_cif_var(owned_cif.get(), abi_, static_cast<unsigned int>(expected_argc),
-                         static_cast<unsigned int>(argc), ffi_return_type_, owned_ffi_types.data());
+      ? ffi_prep_cif(owned_cif, abi_, static_cast<unsigned int>(argc), ffi_return_type_, owned_ffi_types.data())
+      : ffi_prep_cif_var(owned_cif, abi_, static_cast<unsigned int>(expected_argc), static_cast<unsigned int>(argc),
+                         ffi_return_type_, owned_ffi_types.data());
   if (status != FFI_OK) {
     Napi::Error::New(env, "Failed to prepare variadic FFI call for async").ThrowAsJavaScriptException();
     return false;

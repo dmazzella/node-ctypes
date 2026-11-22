@@ -565,7 +565,7 @@ Napi::Value FFIFunction::CheckArgument(Napi::Env env, size_t index, CType type, 
 // a CallFromInfo, che rilegge gli argomenti. Fuori da
 // node-addon-api, quindi le eccezioni C++ si convertono qui come in
 // details::WrapCallback (NODE_ADDON_API_CPP_EXCEPTIONS_ALL).
-template <size_t Capacity>
+template <size_t Capacity, bool UnaryPointer>
 napi_value FFIFunction::FastCall(napi_env env, napi_callback_info info) {
   try {
     // napi_get_cb_info scrive undefined in tutti gli slot oltre argc: la prima
@@ -579,6 +579,15 @@ napi_value FFIFunction::FastCall(napi_env env, napi_callback_info info) {
     FFIFunction* self = static_cast<FFIFunction*>(data);
     if (self->simple_call_ && argc >= self->arg_types_.size() && self->errcheck_callback_.IsEmpty() &&
         argc <= kMaxSimpleArgs) [[likely]] {
+      if constexpr (UnaryPointer) {
+        if (argc == 1) {
+          const RawArguments args{Napi::Env(env), argv.data(), argc};
+          if (Napi::Value result; self->SimpleCall<RawArguments, false, false, true>(args, result, nullptr)) {
+            return result;
+          }
+          return self->CallFromInfo(Napi::CallbackInfo(env, info));
+        }
+      }
       std::array<napi_value, kMaxSimpleArgs> all;
       napi_value* values = argv.data();
       if (argc > argv.size()) [[unlikely]] {
@@ -634,7 +643,7 @@ CTYPES_NOINLINE bool FFIFunction::HintedPointer(const Napi::Value& val, PointerH
   }
 }
 
-template <size_t Capacity>
+template <size_t Capacity, int ShortArity, typename T>
 napi_value FFIFunction::FastEntry(napi_env env, napi_callback_info info) {
   try {
     std::array<napi_value, Capacity> argv;
@@ -645,6 +654,84 @@ napi_value FFIFunction::FastEntry(napi_env env, napi_callback_info info) {
     }
     FFIFunction* self = static_cast<FFIFunction*>(data);
     if (!self->entry_defer_ && argc >= self->arg_types_.size() && self->errcheck_callback_.IsEmpty()) [[likely]] {
+      if constexpr (ShortArity >= 0) {
+        static_assert(std::is_arithmetic_v<T>);
+        bool needs_js = false;
+        if (argc == ShortArity && self->call_depth_ == 0) {
+          const LibraryCallScope library_scope(self->library_, env);
+          T arg = 0;
+          bool ready = true;
+          if constexpr (ShortArity == 1) {
+            const Napi::Value val(env, argv[0]);
+            double number;
+            ready = napi_fast::TryDouble(val, number);
+            if constexpr (std::floating_point<T>) {
+              if (ready) {
+                arg = static_cast<T>(number);
+              } else if (IsObjectLike(val)) {
+                needs_js = true;
+              } else {
+                try {
+                  // Per i reali un BigInt va arrotondato, non troncato a 64 bit.
+                  arg = static_cast<T>(DoubleArgSlow(val));
+                } catch (const Napi::Error& e) {
+                  throw ArgumentErrorFor(env, 0, e);
+                }
+                ready = true;
+              }
+            } else if (ready) {
+              try {
+                if constexpr (sizeof(T) == sizeof(uint64_t)) {
+                  arg = static_cast<T>(Int64FromNumber(val, number));
+                } else if constexpr (std::is_unsigned_v<T>) {
+                  arg = static_cast<T>(Uint32FromNumber(val, number));
+                } else {
+                  arg = static_cast<T>(Int32FromNumber(val, number));
+                }
+              } catch (const Napi::Error& e) {
+                throw ArgumentErrorFor(env, 0, e);
+              }
+            } else {
+              const auto kind = val.Type();
+              if (kind == napi_bigint) {
+                bool lossless;
+                arg = static_cast<T>(val.As<Napi::BigInt>().Uint64Value(&lossless));
+                ready = true;
+              } else if (kind == napi_boolean) {
+                arg = static_cast<T>(val.As<Napi::Boolean>().Value());
+                ready = true;
+              } else {
+                needs_js = kind == napi_object || kind == napi_function;
+              }
+            }
+          }
+          if (ready) {
+            const CountScope depth(&self->call_depth_);
+            const CTypesAddon::ScopelessCallbacks callbacks(self->addon_);
+            const auto saved = self->SwapInErrorState();
+            T out;
+            if constexpr (ShortArity == 0) {
+              out = reinterpret_cast<T (*)()>(self->fn_ptr_)();
+            } else {
+              out = reinterpret_cast<T (*)(T)>(self->fn_ptr_)(arg);
+            }
+            self->CaptureErrorState(saved);
+            if constexpr (std::floating_point<T>) {
+              return Napi::Number::New(env, static_cast<double>(out));
+            } else if constexpr (sizeof(T) == sizeof(uint64_t)) {
+              return Napi::BigInt::New(env, out);
+            } else if constexpr (std::is_unsigned_v<T>) {
+              return napi_fast::Uint32(env, out);
+            } else {
+              return napi_fast::Int32(env, out);
+            }
+          }
+        }
+        if (needs_js) {
+          // Il getter JS può chiudere la libreria: chiamarlo fuori da library_scope.
+          return self->CallEntryFallback(env, info);
+        }
+      }
       bool needs_js = argc > kMaxSimpleArgs;
       if (!needs_js) [[likely]] {
         std::array<napi_value, kMaxSimpleArgs> all;
@@ -711,9 +798,64 @@ Napi::Value FFIFunction::MakeEntry(const Napi::CallbackInfo& info) {
   const Napi::Function fallback = info[0].As<Napi::Function>();
   const std::string name = info.Length() > 1 && info[1].IsString() ? info[1].As<Napi::String>().Utf8Value() : name_;
   const size_t declared = arg_types_.size();
-  const napi_callback callback = declared <= 2   ? &FFIFunction::FastEntry<2>
-                                 : declared <= 4 ? &FFIFunction::FastEntry<4>
-                                                 : &FFIFunction::FastEntry<kFastCallArgs>;
+  napi_callback callback = declared <= 2                    ? &FFIFunction::FastEntry<2>
+                           : declared <= 4                  ? &FFIFunction::FastEntry<4>
+                           : declared > 8 && declared <= 16 ? &FFIFunction::FastEntry<16>
+                                                            : &FFIFunction::FastEntry<kFastCallArgs>;
+  constexpr std::array mixed = {CType::CTYPES_INT8, CType::CTYPES_UINT8, CType::CTYPES_INT16, CType::CTYPES_UINT16};
+  // Solo prototipi esatti T() e T(T), già ammessi dall'invoker per questa ABI.
+  if (fixed_invoker_ && !scalar_as_buffer_ && (declared == 0 || (declared == 1 && arg_types_[0] == return_type_))) {
+    const auto entry = [declared]<typename T>() { return declared == 0 ? &FastEntry<2, 0, T> : &FastEntry<2, 1, T>; };
+    switch (return_type_) {
+      case CType::CTYPES_INT8:
+        callback = entry.operator()<int8_t>();
+        break;
+      case CType::CTYPES_UINT8:
+        callback = entry.operator()<uint8_t>();
+        break;
+      case CType::CTYPES_INT16:
+        callback = entry.operator()<int16_t>();
+        break;
+      case CType::CTYPES_UINT16:
+        callback = entry.operator()<uint16_t>();
+        break;
+      case CType::CTYPES_INT32:
+        callback = entry.operator()<int32_t>();
+        break;
+      case CType::CTYPES_UINT32:
+        callback = entry.operator()<uint32_t>();
+        break;
+      case CType::CTYPES_INT64:
+        callback = entry.operator()<int64_t>();
+        break;
+      case CType::CTYPES_UINT64:
+        callback = entry.operator()<uint64_t>();
+        break;
+      case CType::CTYPES_FLOAT:
+        callback = entry.operator()<float>();
+        break;
+      case CType::CTYPES_DOUBLE:
+        callback = entry.operator()<double>();
+        break;
+      default:
+        break;
+    }
+  }
+  if (!scalar_as_buffer_ && frame_plan_.invoker &&
+      (return_type_ == CType::CTYPES_INT32 || return_type_ == CType::CTYPES_INT64) && declared >= 4 && declared <= 16 &&
+      (declared % 4 == 0 || declared > 8)) {
+    const auto groups = std::span(arg_types_);
+    bool matches = true;
+    for (size_t i = 0; i < declared && matches; i += 4) {
+      const auto length = std::min(size_t{4}, declared - i);
+      matches = std::ranges::equal(groups.subspan(i, length), std::span(mixed).first(length));
+    }
+    if (matches) {
+      constexpr std::array<napi_callback, 4> entries = {&MixedEntry<4>, &MixedEntry<8>, &MixedEntry<12>,
+                                                        &MixedEntry<16>};
+      callback = declared % 4 == 0 ? entries[declared / 4 - 1] : &MixedEntry<0>;
+    }
+  }
   Napi::Function entry = napi_fast::NewFunction(env, name.c_str(), callback, this);
   // La funzione d'ingresso tiene vivi l'istanza nativa e il wrapper JS.
   entry.DefineProperty(Napi::PropertyDescriptor::Value("_ffiFunction", Value(), napi_default));
@@ -788,9 +930,14 @@ Napi::Value FFIFunction::MakeCheckedCall(const Napi::CallbackInfo& info) {
 void FFIFunction::InstallFastCall(Napi::Env env) {
   Napi::Object self = Value();
   const size_t declared = arg_types_.size();
-  const napi_callback callback = declared <= 2   ? &FFIFunction::FastCall<2>
-                                 : declared <= 4 ? &FFIFunction::FastCall<4>
-                                                 : &FFIFunction::FastCall<kFastCallArgs>;
+  napi_callback callback = declared <= 2                    ? &FFIFunction::FastCall<2>
+                           : declared <= 4                  ? &FFIFunction::FastCall<4>
+                           : declared > 8 && declared <= 16 ? &FFIFunction::FastCall<16>
+                                                            : &FFIFunction::FastCall<kFastCallArgs>;
+  if (declared == 1 && arg_types_[0] == CType::CTYPES_POINTER && return_type_ == CType::CTYPES_POINTER &&
+      frame_plan_.invoker && !scalar_as_buffer_) {
+    callback = &FastCall<2, true>;
+  }
   Napi::Function fast_call = napi_fast::NewFunction(env, "call", callback, this);
   fast_call.DefineProperty(Napi::PropertyDescriptor::Value("_ffiFunction", self, napi_default));
   self.DefineProperty(Napi::PropertyDescriptor::Value(
@@ -1821,7 +1968,7 @@ void FFIFunction::ThrowIfArgumentDetached(const Args& info) {
 // CallContext o scratch. Le stringhe corte vanno nel buffer
 // inline dell'istanza, come in Call(); una stringa che non ci sta e le chiamate
 // rientranti passano a Call() prima di qualunque effetto.
-template <ArgumentList Args, bool HasErrcheck, bool Entry>
+template <ArgumentList Args, bool HasErrcheck, bool Entry, bool UnaryPointer>
 bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::Function* errcheck, bool* needs_js) {
   // Funzione d'ingresso: un argomento che solo il wrapper JS sa convertire.
   const auto defer = [needs_js] {
@@ -1834,8 +1981,8 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
   if (call_depth_ != 0) [[unlikely]] {
     return false;
   }
-  const size_t argc = info.Length();
-  const size_t expected_argc = arg_types_.size();
+  const size_t argc = UnaryPointer ? 1 : info.Length();
+  const size_t expected_argc = UnaryPointer ? 1 : arg_types_.size();
   if (argc > kMaxSimpleArgs) [[unlikely]] {
     return false;
   }
@@ -1889,7 +2036,7 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
   };
   // Chiamata a registri: ogni argomento è convertito direttamente nella sua
   // parola del frame (registro o slot di stack), senza slot intermedi.
-  const bool use_frame = frame_plan_.invoker != nullptr && num_extra == 0;
+  const bool use_frame = UnaryPointer || (frame_plan_.invoker != nullptr && num_extra == 0);
   alignas(16) std::array<frame::Word, frame::kWords> frame_words;
   if (use_frame) {
     frame_plan_.Clear(frame_words.data());
@@ -1906,7 +2053,7 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
     Napi::Value val = info[i];
     CType type;
     if (i < expected_argc) [[likely]] {
-      type = arg_types_[i];
+      type = UnaryPointer ? CType::CTYPES_POINTER : arg_types_[i];
       // Funzione d'ingresso: solo i valori che il JavaScript passerebbe così
       // come sono; un oggetto o una funzione va al wrapper JS (false).
       if constexpr (Entry) {
@@ -2106,7 +2253,7 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
   const uint64_t epoch = CallbackEpoch();
   const CTypesAddon::ScopelessCallbacks scopeless(addon_);
   const SavedErrorState saved_errors = SwapInErrorState();
-  if (cache_entry == nullptr && fixed_invoker_) [[likely]] {
+  if (!UnaryPointer && cache_entry == nullptr && fixed_invoker_) [[likely]] {
     fixed_invoker_(fn_ptr_, values.data(), return_value);
   } else if (use_frame) {
     frame_plan_.invoker(fn_ptr_, frame_words.data(), return_value);
@@ -2128,7 +2275,9 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
     ThrowIfArgumentDetached(info, memory_args);
   }
 
-  if (scalar_as_buffer_) {
+  if constexpr (UnaryPointer) {
+    result = ConvertReturn(env, return_value, CType::CTYPES_POINTER, return_struct_info_, return_array_info_, false);
+  } else if (scalar_as_buffer_) {
     result = ConvertReturn(env, return_value, return_type_, return_struct_info_, return_array_info_, false, true);
   } else {
     switch (return_type_) {
@@ -2159,6 +2308,90 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
     }
   }
   return true;
+}
+
+template <size_t Count>
+napi_value FFIFunction::MixedEntry(napi_env env, napi_callback_info info) {
+  try {
+    // Count == 0: ingresso condiviso per le firme con un ultimo gruppo parziale.
+    constexpr size_t capacity = Count == 0 ? 16 : Count;
+    std::array<napi_value, capacity> args;
+    size_t argc = 0;
+    void* data = nullptr;
+    napi_value receiver;
+    if (!napi_fast::GetArguments(env, info, args, argc, data, &receiver)) {
+      return nullptr;
+    }
+    auto* self = static_cast<FFIFunction*>(data);
+    const size_t expected = Count == 0 ? self->arg_types_.size() : Count;
+    bool needs_js = false;
+    if (argc == expected && !self->entry_defer_ && self->call_depth_ == 0 && self->errcheck_callback_.IsEmpty()) {
+      const LibraryCallScope scope(self->library_, env);
+      alignas(16) std::array<frame::Word, frame::kWords> words;
+      self->frame_plan_.Clear(words.data());
+      const auto convert = [&]<CType T>(size_t i) {
+        Napi::Value val(env, args[i]);
+        double number;
+        if (!napi_fast::TryDouble(val, number)) {
+          const auto kind = val.Type();
+          if (kind == napi_bigint) {
+            bool lossless;
+            MarshalIntegerBits(val.As<Napi::BigInt>().Uint64Value(&lossless), T, self->frame_plan_.At(words.data(), i));
+            return true;
+          }
+          needs_js = kind == napi_object || kind == napi_function;
+          return false;
+        }
+        try {
+          MarshalNumber(val, number, T, self->frame_plan_.At(words.data(), i));
+        } catch (const Napi::Error& e) {
+          throw ArgumentErrorFor(env, i, e);
+        }
+        return true;
+      };
+      size_t i = 0;
+      const size_t full = expected - expected % 4;
+      while (i < full && convert.template operator()<CType::CTYPES_INT8>(i) &&
+             convert.template operator()<CType::CTYPES_UINT8>(i + 1) &&
+             convert.template operator()<CType::CTYPES_INT16>(i + 2) &&
+             convert.template operator()<CType::CTYPES_UINT16>(i + 3)) {
+        i += 4;
+      }
+      bool complete = i == full;
+      if constexpr (Count == 0) {
+        complete = complete && convert.template operator()<CType::CTYPES_INT8>(i) &&
+                   (expected - i < 2 || convert.template operator()<CType::CTYPES_UINT8>(i + 1)) &&
+                   (expected - i < 3 || convert.template operator()<CType::CTYPES_INT16>(i + 2));
+      }
+      if (complete) {
+        const CountScope depth(&self->call_depth_);
+        const CTypesAddon::ScopelessCallbacks callbacks(self->addon_);
+        alignas(16) std::array<std::byte, kMaxSimpleStructReturn> out{};
+        const auto saved = self->SwapInErrorState();
+        self->frame_plan_.invoker(self->fn_ptr_, words.data(), out.data());
+        self->CaptureErrorState(saved);
+        if (self->return_type_ == CType::CTYPES_INT64) {
+          return Napi::BigInt::New(env, LoadAs<int64_t>(out.data()));
+        }
+        return napi_fast::Int32(env, LoadAs<int32_t>(out.data()));
+      }
+    }
+    if (argc == expected && (needs_js || self->entry_defer_ || !self->errcheck_callback_.IsEmpty())) {
+      Napi::Function fallback = self->entry_fallback_.Value();
+      if (fallback.IsEmpty()) {
+        throw Napi::Error::New(env, "function wrapper is no longer available");
+      }
+      return fallback.Call(receiver, argc, args.data());
+    }
+    return FastEntry<(capacity > 8 ? 16 : capacity)>(env, info);
+  } catch (const Napi::Error& e) {
+    e.ThrowAsJavaScriptException();
+  } catch (const std::exception& e) {
+    Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
+  } catch (...) {
+    Napi::Error::New(env, "A native exception was thrown").ThrowAsJavaScriptException();
+  }
+  return nullptr;
 }
 
 Napi::Value FFIFunction::Call(const Napi::CallbackInfo& info) {
@@ -2788,6 +3021,9 @@ void FFIFunction::PreparedCall::KeepArguments(const FunctionArguments& info) {
 }
 
 FFIFunction::PreparedCall::~PreparedCall() {
+  if (signature_ && signature_->types.size() <= MAX_INLINE_ARGS && !ffi_function_->idle_async_signature_) {
+    ffi_function_->idle_async_signature_ = std::move(signature_);
+  }
   if (ffi_function_->library_ != nullptr) {
     ffi_function_->library_->EndCall();
   }

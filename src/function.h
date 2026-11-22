@@ -242,17 +242,18 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
 
   // Entry point of the per-instance `call` function: the FFIFunction* is the
   // function's N-API data, so the hot path skips the napi_unwrap of InstanceMethod.
-  // Capacity: argomenti letti dalla prima napi_get_cb_info, 2, 4 o kFastCallArgs
-  // secondo quelli dichiarati (napi_get_cb_info scrive undefined negli slot oltre
-  // argc). Solo tre valori: ogni istanza contiene una copia di SimpleCall.
-  template <size_t Capacity>
+  // Capacità iniziale secondo la firma: 2, 4 o 8 slot, oppure 16 per 9–16
+  // argomenti dichiarati. napi_get_cb_info scrive undefined negli slot oltre argc.
+  template <size_t Capacity, bool UnaryPointer = false>
   static napi_value FastCall(napi_env env, napi_callback_info info);
   // Funzione d'ingresso (_makeEntry), la funzione restituita all'utente: le
   // chiamate con argomenti che il wrapper JS passerebbe così come sono vanno
   // direttamente a SimpleCall; le altre (oggetti, errcheck, firme che
   // SimpleCall non copre) al wrapper JS, il fallback, con gli stessi argomenti.
-  template <size_t Capacity>
+  template <size_t Capacity, int ShortArity = -1, typename T = int32_t>
   static napi_value FastEntry(napi_env env, napi_callback_info info);
+  template <size_t Count>
+  static napi_value MixedEntry(napi_env env, napi_callback_info info);
   napi_value CallEntryFallback(napi_env env, napi_callback_info info);
   Napi::Value CallFromInfo(const Napi::CallbackInfo& info);
   static Napi::Value FastCheckedCall(const Napi::CallbackInfo& info);
@@ -272,7 +273,7 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
   // funzione, e allora *needs_js è true (il wrapper JS deve convertirlo).
   // Sempre espansa: con più chiamanti gcc ne farebbe una copia fuori linea
   // (+10% sulle chiamate brevi).
-  template <ArgumentList Args, bool HasErrcheck = true, bool Entry = false>
+  template <ArgumentList Args, bool HasErrcheck = true, bool Entry = false, bool UnaryPointer = false>
   [[nodiscard]] CTYPES_ALWAYS_INLINE bool SimpleCall(const Args& info,
                                                      Napi::Value& result,
                                                      const Napi::Function* errcheck,
@@ -522,6 +523,8 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
   // Cached addon pointer (avoid GetInstanceData<>() map lookup on every call).
   // CTypesAddon lives in env instance data; lifetime >= this object's lifetime.
   CTypesAddon* addon_;
+  // Sul thread JS: al massimo una firma corta inattiva, mai prestata a due chiamate.
+  std::unique_ptr<LibffiAsyncSignature> idle_async_signature_;
 
  public:
   Napi::Value GetLastErrorCaptured(const Napi::CallbackInfo& info);

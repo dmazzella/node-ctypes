@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.15.1] - 2026-11-22
+
+### Changed
+
+- Short asynchronous calls with inferred or variadic arguments can reuse a
+  completed call's libffi interface. Each in-flight call still owns its own
+  interface; declared signatures and result buffers are unchanged.
+- Reduced synchronous public call overhead for `() -> T` and `(T) -> T` when a
+  fixed direct invoker is available and `T` is a fixed-width integer, `float`
+  or `double`. On x64, signatures with a floating-point argument still use the
+  existing ABI path. `int64` and `uint64` still return a `bigint`.
+- Reduced synchronous call overhead when a function takes one pointer and
+  returns a pointer, using the existing ABI register frame and argument
+  conversions.
+- Reduced JavaScript wrapper overhead for synchronous one-argument calls
+  without custom argument or result handling, including `c_void_p` addresses
+  passed as `bigint`. Argument conversion and ownership checks still run.
+- Reduced the overhead of accessing single-digit indices in ctypes arrays.
+- Synchronous calls with 9–16 declared arguments can read them in one
+  Node-API call instead of two, without changing argument conversion.
+- Synchronous public bindings taking 4 or 8–16 arguments in the repeating
+  order `(int8, uint8, int16, uint16)` and returning `int32` or `int64` can convert
+  `Number` and `BigInt` arguments directly into the register frame.
+
 ## [2.15.0] - 2026-11-20
 
 ### Changed
@@ -1535,7 +1559,8 @@ It contains breaking changes: see [Migrating from 1.x](guides/python.md#migratin
 
 Initial releases.
 
-[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.15.0...HEAD
+[Unreleased]: https://github.com/dmazzella/node-ctypes/compare/v2.15.1...HEAD
+[2.15.1]: https://github.com/dmazzella/node-ctypes/compare/v2.15.0...v2.15.1
 [2.15.0]: https://github.com/dmazzella/node-ctypes/compare/v2.14.0...v2.15.0
 [2.14.0]: https://github.com/dmazzella/node-ctypes/compare/v2.13.2...v2.14.0
 [2.13.2]: https://github.com/dmazzella/node-ctypes/compare/v2.13.1...v2.13.2

@@ -171,9 +171,10 @@ inline std::atomic<bool> buffer_info_checks_type{true};
                                        napi_callback_info info,
                                        std::span<napi_value> argv,
                                        size_t& argc,
-                                       void*& data) {
+                                       void*& data,
+                                       napi_value* receiver = nullptr) {
   argc = argv.size();
-  const napi_status status = napi_get_cb_info(env, info, &argc, argv.data(), nullptr, &data);
+  const napi_status status = napi_get_cb_info(env, info, &argc, argv.data(), receiver, &data);
   NAPI_THROW_IF_FAILED(env, status, false);
   return true;
 }
