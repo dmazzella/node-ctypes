@@ -265,6 +265,8 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
   static napi_value CoreDirectEntry(napi_env env, napi_callback_info info);
   template <size_t Capacity>
   static napi_value AllInt32Entry(napi_env env, napi_callback_info info);
+  template <size_t Capacity>
+  static napi_value ScalarFrameEntry(napi_env env, napi_callback_info info);
   static napi_value UnaryStringEntry(napi_env env, napi_callback_info info);
   static napi_value UnaryPointerCall(napi_env env, napi_callback_info info);
   static napi_value DirectPointerCall(napi_env env, napi_callback_info info);
@@ -294,6 +296,13 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
                                                      Napi::Value& result,
                                                      const Napi::Function* errcheck,
                                                      bool* needs_js = nullptr);
+  template <ArgumentList Args, bool HasErrcheck>
+  [[nodiscard]] CTYPES_NOINLINE bool TryExtraFrameCall(Napi::Env env,
+                                                       const Args& info,
+                                                       size_t argc,
+                                                       size_t expected_argc,
+                                                       Napi::Value& result,
+                                                       const Napi::Function* errcheck);
   // Copia una stringa lunga in scratch_.strings da heap_offset; std::nullopt
   // se il valore non è una stringa.
   [[nodiscard]] std::optional<size_t> CopyStringToScratch(const Napi::Value& val, size_t heap_offset);
@@ -387,8 +396,9 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
     PreparedCall(const PreparedCall&) = delete;
     PreparedCall& operator=(const PreparedCall&) = delete;
 
-    // Thread nativo: nessun accesso a V8.
-    void Run() noexcept;
+    // Thread nativo: nessun accesso a V8. `measure_duration` è true solo per
+    // Executor (`callOn`), che usa RunDuration() per l'attesa in linea.
+    void Run(bool measure_duration = true) noexcept;
     [[nodiscard]] bool Failed() const noexcept { return failed_; }
     [[nodiscard]] const std::string& FailureMessage() const noexcept { return failure_; }
     // Funzione chiamata e durata della chiamata nativa (misurata da Run()):
@@ -396,8 +406,9 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
     [[nodiscard]] const void* Function() const noexcept { return fn_ptr_; }
     [[nodiscard]] std::chrono::nanoseconds RunDuration() const noexcept { return run_duration_; }
 
-    // Thread JS.
-    void Complete(Napi::Env env);
+    // Thread JS. `open_scope` è false da CallWorker::OnOK (AsyncWorker apre già
+    // il proprio HandleScope).
+    void Complete(Napi::Env env, bool open_scope = true);
     void Reject(Napi::Value reason);
     Napi::Promise GetPromise() { return deferred_.Promise(); }
     void KeepArguments(const FunctionArguments& info);
@@ -414,8 +425,8 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
     size_t argc_ = 0;
     // SBO per chiamate comuni (<= kInlineArgs argomenti, ritorni <= kInlineReturnSize):
     // con <= 4 argomenti riusa gli ultimi 64 B di inline_arg_storage_ per 1 struct arg.
-    alignas(16) std::array<uint8_t, kInlineArgs * ARG_SLOT_SIZE> inline_arg_storage_{};
-    std::array<void*, kInlineArgs> inline_arg_values_{};
+    alignas(16) std::array<uint8_t, kInlineArgs * ARG_SLOT_SIZE> inline_arg_storage_;
+    std::array<void*, kInlineArgs> inline_arg_values_;
     alignas(16) std::array<uint8_t, kInlineReturnSize> inline_return_storage_{};
     std::vector<uint8_t> arg_storage_;
     std::vector<void*> arg_values_;
@@ -448,23 +459,29 @@ class FFIFunction : public Napi::ObjectWrap<FFIFunction>, private LibffiCallStat
     std::string failure_;
   };
 
-  // Converte gli argomenti di callAsync / callOn in una PreparedCall; nullptr
-  // dopo un'eccezione JS (il chiamante restituisce undefined).
-  [[nodiscard]] std::unique_ptr<PreparedCall> PrepareAsyncCall(const FunctionArguments& info,
-                                                               const Napi::Function* errcheck);
-
  private:
-  // Esegue una PreparedCall su un worker del pool libuv (callAsync).
+  // Converte gli argomenti di callAsync / callOn e costruisce la destinazione
+  // (PreparedCall per Executor, o CallWorker con PreparedCall incorporata in
+  // un'unica allocazione per callAsync).
+  template <typename Target>
+  [[nodiscard]] std::unique_ptr<Target> PrepareAsyncCall(const FunctionArguments& info, const Napi::Function* errcheck);
+
+  // Esegue una PreparedCall incorporata per valore su un worker del pool libuv
+  // (callAsync): una sola allocazione heap per invocazione.
   class CallWorker : public Napi::AsyncWorker {
    public:
-    CallWorker(Napi::Env env, std::unique_ptr<PreparedCall> call);
+    template <typename... Args>
+    explicit CallWorker(Napi::Env env, Args&&... args)
+      : Napi::AsyncWorker(env), call_(env, std::forward<Args>(args)...) {}
+
+    PreparedCall& Call() noexcept { return call_; }
 
     void Execute() override;
     void OnOK() override;
     void OnError(const Napi::Error& error) override;
 
    private:
-    std::unique_ptr<PreparedCall> call_;
+    PreparedCall call_;
   };
 
   void* fn_ptr_;

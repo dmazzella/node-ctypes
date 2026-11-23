@@ -508,12 +508,49 @@ describe("CDLL.func conversion entry-point regressions", function () {
 
       // specializeCall case 2 variadic path: primitive fast-path vs object extra args,
       // plus >32 extra variadic arguments (overflow path in AcquireExtraCall / MarshalArguments)
+      // and TryExtraFrameCall MRU hit, type-change miss, and declared-prefix error handling
       const vsum = fixture.func("fixture_variadic_sum", ctypes.c_int32, [ctypes.c_void_p, ctypes.c_int32]);
       assert.strictEqual(vsum(null, 3, 7, 8, 9), 24);
+      assert.strictEqual(vsum(null, 3, 7, 8, 9), 24); // MRU TryExtraFrameCall hit
+      assert.throws(() => vsum(null, 1.5, 7, 8, 9), /argument 2/);
       assert.strictEqual(vsum(null, 3, 7, new ctypes.c_int32(8), { _as_parameter_: 9 }), 24);
       const many35 = Array.from({ length: 35 }, (_, i) => i + 1);
       assert.strictEqual(vsum(null, 35, ...many35), 630);
       assert.strictEqual(await vsum.callAsync(null, 35, ...many35), 630);
+
+      // Inferred MRU hit followed by extra-argument type change (int <-> double)
+      const infMixed = fixture.func("fixture_inferred_mixed", ctypes.c_double, []);
+      assert.strictEqual(infMixed(7, 1.5, 3), 322);
+      assert.strictEqual(infMixed(7, 1.5, 3), 322); // MRU TryExtraFrameCall hit
+      const vdbl = fixture.func("fixture_variadic_double_sum", ctypes.c_double, [ctypes.c_int32]);
+      assert.strictEqual(vdbl(2, 1.5, 2.5), 4);
+      assert.strictEqual(vdbl(2, 1.5, 2.5), 4); // MRU hit
+      assert.strictEqual(vdbl(2, 1.5, 2.25), 3.75); // MRU hit with different double value
+      assert.strictEqual(vdbl(3, 0.5, 1.5, 2.5), 4.5); // arity change miss -> re-prepares cache
+      assert.throws(() => vdbl(1.5, 0.5, 1.5), /argument 1/);
+
+      // ScalarFrameEntry: mixed numeric types (BigInt, boolean, _as_parameter_, float error, errcheck)
+      const narrow8 = [ctypes.c_int8, ctypes.c_uint8, ctypes.c_int16, ctypes.c_uint16, ctypes.c_int8, ctypes.c_uint8, ctypes.c_int16, ctypes.c_uint16];
+      const stackTypes = [...Array(8).fill(ctypes.c_int32), ...Array(8).fill(ctypes.c_double), ...narrow8, ctypes.c_float, ctypes.c_double];
+      const stack26 = fixture.func("fixture_abi_narrow_mixed_stack", ctypes.c_double, stackTypes);
+      const stackVals = [...Array.from({ length: 8 }, (_, i) => i - 4), ...Array.from({ length: 8 }, (_, i) => i + 0.25), -128, 255, -32768, 65535, 127, 128, 32767, 32768, -1.5, 2.25];
+      const expected26 = stackVals.reduce((s, v, i) => s + v * (i + 1), 0);
+      assert.strictEqual(stack26(...stackVals), expected26);
+      // BigInt + boolean + _as_parameter_ object fallback on ScalarFrameEntry
+      const mixedSpecial = stackVals.slice();
+      mixedSpecial[0] = -4n;
+      mixedSpecial[5] = true;
+      mixedSpecial[16] = { _as_parameter_: -128 };
+      assert.strictEqual(stack26(...mixedSpecial), expected26);
+      const badFloat = stackVals.slice();
+      badFloat[2] = 1.5;
+      assert.throws(() => stack26(...badFloat), /argument 3/);
+      stack26.errcheck = (r) => r + 0.5;
+      try {
+        assert.strictEqual(stack26(...stackVals), expected26 + 0.5);
+      } finally {
+        stack26.errcheck = null;
+      }
       let cbHits = 0;
       const hook = ctypes.callback(
         () => {

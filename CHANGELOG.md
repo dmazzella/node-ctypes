@@ -5,6 +5,34 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.15.5] - 2026-11-23
+
+### Changed
+
+- **Single-allocation `callAsync()` worker (`src/function.h`, `src/function_async.cc`)**:
+  - Embedded `FFIFunction::PreparedCall` directly by value inside `CallWorker`
+    via `PrepareAsyncCall<Target>`, cutting per-call heap allocations for
+    `callAsync()` from two to one.
+  - Skipped `std::chrono::steady_clock::now()` timing inside `PreparedCall::Run`
+    for `callAsync()` (timing is now measured only for `Executor::callOn`),
+    skipped the redundant `Napi::HandleScope` in `CallWorker::OnOK`, and removed
+    redundant default zeroing of `PreparedCall::inline_arg_storage_` /
+    `inline_arg_values_`.
+- **Inferred and variadic MRU direct-to-frame path (`src/function.h`, `src/function_fast.cc`)**:
+  - Added out-of-line `FFIFunction::TryExtraFrameCall` for monomorphic inferred
+    and variadic calls hitting `last_extra_cache_`, marshalling numeric and
+    null/BigInt pointer arguments directly into `frame::Plan` without
+    intermediate `slots[]`, `AcquireExtraCall` memcmp, or the second
+    `slots -> frame_words` copy (with zero code growth in the `num_extra == 0`
+    `SimpleCall` path), and added direct `int64`/`uint64` return handling in
+    `SimpleCall`.
+- **Mixed numeric register-frame entry (`src/function.h`, `src/function_fast.cc`)**:
+  - Added `FFIFunction::ScalarFrameEntry<Capacity>` (capacity 4, 8, 16, or 32)
+    for 2–32 argument pure numeric signatures on `frame::Plan` not already
+    handled by `CoreDirectEntry`, `AllInt32Entry`, or `MixedEntry`, writing
+    directly into `frame_words` without `SimpleCall`'s string/pointer/variadic
+    stack state.
+
 ## [2.15.4] - 2026-11-23
 
 ### Fixed

@@ -40,8 +40,8 @@ Napi::Value FFIFunction::CallAsync(const Napi::CallbackInfo& info) {
   return CallAsyncArguments(FunctionArguments{info}, errcheck.IsEmpty() ? nullptr : &errcheck);
 }
 
-std::unique_ptr<FFIFunction::PreparedCall> FFIFunction::PrepareAsyncCall(const FunctionArguments& info,
-                                                                         const Napi::Function* errcheck) {
+template <typename Target>
+std::unique_ptr<Target> FFIFunction::PrepareAsyncCall(const FunctionArguments& info, const Napi::Function* errcheck) {
   Napi::Env env = info.Env();
 
   size_t argc;
@@ -295,17 +295,12 @@ std::unique_ptr<FFIFunction::PreparedCall> FFIFunction::PrepareAsyncCall(const F
   const size_t inline_copy_bytes = inline_large_arg_index != PreparedCall::kNoInlineLargeArg
                                      ? inline_arg_storage.size()
                                      : std::min(argc, PreparedCall::kInlineArgs) * ARG_SLOT_SIZE;
-  auto call = std::make_unique<PreparedCall>(
+  return std::make_unique<Target>(
     env, this, is_variadic ? nullptr : fixed_invoker_, fn_ptr_, return_type_, return_struct_info_, return_array_info_,
     argc, std::span(inline_arg_storage).first(inline_copy_bytes), std::move(heap_arg_storage),
     std::move(async_string_buffer), std::move(string_fixups), std::move(wstring_fixups), std::move(buffer_refs),
     std::move(libffi), std::move(large_arg_buffers), std::move(large_arg_indices), inline_large_arg_index, errcheck,
     info.HasResultHandler());
-
-  if (errcheck != nullptr && !info.HasResultHandler()) {
-    call->KeepArguments(info);
-  }
-  return call;
 }
 
 // callAsync(): un worker del pool libuv. callOn(): la coda dell'Executor
@@ -324,12 +319,16 @@ Napi::Value FFIFunction::CallAsyncArguments(const FunctionArguments& info,
     }
   }
 
-  std::unique_ptr<PreparedCall> call = PrepareAsyncCall(info, errcheck);
-  if (!call) {
-    return env.Undefined();
-  }
-  Napi::Promise promise = call->GetPromise();
+  const bool keep_args = errcheck != nullptr && !info.HasResultHandler();
   if (executor != nullptr) {
+    std::unique_ptr<PreparedCall> call = PrepareAsyncCall<PreparedCall>(info, errcheck);
+    if (!call) {
+      return env.Undefined();
+    }
+    if (keep_args) {
+      call->KeepArguments(info);
+    }
+    Napi::Promise promise = call->GetPromise();
     // Un segnale annullato durante la preparazione degli argomenti (un
     // adattatore può farlo): la chiamata non viene accodata.
     if (const Napi::Value signal = target->Get("signal"); signal.IsObject()) {
@@ -343,11 +342,20 @@ Napi::Value FFIFunction::CallAsyncArguments(const FunctionArguments& info,
     // nell'oggetto dell'invocazione, non ricostruita in seguito.
     const uint64_t job = executor->Submit(env, std::move(call));
     target->Set("job", Napi::Number::New(env, static_cast<double>(job)));
-  } else {
-    auto worker = std::make_unique<CallWorker>(env, std::move(call));
-    worker->Queue();
-    worker.release();
+    return promise;
   }
+
+  // callAsync: CallWorker incorpora PreparedCall per valore (una sola allocazione heap).
+  std::unique_ptr<CallWorker> worker = PrepareAsyncCall<CallWorker>(info, errcheck);
+  if (!worker) {
+    return env.Undefined();
+  }
+  if (keep_args) {
+    worker->Call().KeepArguments(info);
+  }
+  Napi::Promise promise = worker->Call().GetPromise();
+  worker->Queue();
+  worker.release();
   return promise;
 }
 
@@ -496,9 +504,9 @@ FFIFunction::PreparedCall::~PreparedCall() {
   }
 }
 
-void FFIFunction::PreparedCall::Run() noexcept {
+void FFIFunction::PreparedCall::Run(bool measure_duration) noexcept {
   // *** THREAD NATIVO - Nessun accesso a V8! ***
-  const auto started = std::chrono::steady_clock::now();
+  const auto started = measure_duration ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
   try {
     const SavedErrorState saved = SwapErrorStateIn(capture_last_error_, capture_errno_, last_error_in_, errno_in_);
     void** args = argc_ == 0 ? nullptr : (argc_ <= kInlineArgs ? inline_arg_values_.data() : arg_values_.data());
@@ -513,16 +521,21 @@ void FFIFunction::PreparedCall::Run() noexcept {
     failed_ = true;
     failure_ = "Native function threw an exception";
   }
-  run_duration_ = std::chrono::steady_clock::now() - started;
+  if (measure_duration) {
+    run_duration_ = std::chrono::steady_clock::now() - started;
+  }
 }
 
 void FFIFunction::PreparedCall::Reject(Napi::Value reason) {
   deferred_.Reject(reason);
 }
 
-void FFIFunction::PreparedCall::Complete(Napi::Env env) {
+void FFIFunction::PreparedCall::Complete(Napi::Env env, bool open_scope) {
   // *** MAIN THREAD ***
-  Napi::HandleScope scope(env);
+  std::optional<Napi::HandleScope> scope;
+  if (open_scope) {
+    scope.emplace(env);
+  }
 
   if (failed_) {
     deferred_.Reject(Napi::Error::New(env, failure_).Value());
@@ -569,23 +582,20 @@ void FFIFunction::PreparedCall::Complete(Napi::Env env) {
   }
 }
 
-FFIFunction::CallWorker::CallWorker(Napi::Env env, std::unique_ptr<PreparedCall> call)
-  : Napi::AsyncWorker(env), call_(std::move(call)) {}
-
 void FFIFunction::CallWorker::Execute() {
   // *** WORKER THREAD - Nessun accesso a V8! ***
-  call_->Run();
-  if (call_->Failed()) {
-    SetError(call_->FailureMessage());
+  call_.Run(false);
+  if (call_.Failed()) {
+    SetError(call_.FailureMessage());
   }
 }
 
 void FFIFunction::CallWorker::OnOK() {
-  call_->Complete(Env());
+  call_.Complete(Env(), false);
 }
 
 void FFIFunction::CallWorker::OnError(const Napi::Error& error) {
-  call_->Reject(error.Value());
+  call_.Reject(error.Value());
 }
 
 }  // namespace ctypes

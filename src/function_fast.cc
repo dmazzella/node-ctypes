@@ -337,6 +337,12 @@ Napi::Value FFIFunction::MakeEntry(const Napi::CallbackInfo& info) {
                : declared <= kFastCallArgs ? &FFIFunction::AllInt32Entry<kFastCallArgs>
                : declared <= 16            ? &FFIFunction::AllInt32Entry<16>
                                            : &FFIFunction::AllInt32Entry<kMaxSimpleArgs>;
+  } else if (!scalar_as_buffer_ && frame_plan_.invoker && declared >= 2 && declared <= kMaxSimpleArgs &&
+             IsDirectScalarReturn(return_type_) && std::ranges::all_of(arg_types_, IsNumericCType)) {
+    callback = declared <= 4               ? &FFIFunction::ScalarFrameEntry<4>
+               : declared <= kFastCallArgs ? &FFIFunction::ScalarFrameEntry<kFastCallArgs>
+               : declared <= 16            ? &FFIFunction::ScalarFrameEntry<16>
+                                           : &FFIFunction::ScalarFrameEntry<kMaxSimpleArgs>;
   }
   if (!scalar_as_buffer_ && frame_plan_.invoker &&
       (return_type_ == CType::CTYPES_INT32 || return_type_ == CType::CTYPES_INT64) && declared >= 4 && declared <= 16 &&
@@ -452,6 +458,80 @@ std::optional<size_t> FFIFunction::CopyStringToScratch(const Napi::Value& val, s
   return napi_fast::TryCopyUtf8Into(val.As<Napi::String>(), std::span(buffer).subspan(heap_offset));
 }
 
+// Percorso MRU speculativo per chiamate dedotte/variadiche monomorfiche:
+// fuori linea così da non appesantire SimpleCall quando num_extra == 0;
+// scrive gli argomenti direttamente nel frame senza slots[], AcquireExtraCall
+// o la seconda copia slots -> frame_words.
+template <ArgumentList Args, bool HasErrcheck>
+CTYPES_NOINLINE bool FFIFunction::TryExtraFrameCall(Napi::Env env,
+                                                    const Args& info,
+                                                    size_t argc,
+                                                    size_t expected_argc,
+                                                    Napi::Value& result,
+                                                    const Napi::Function* errcheck) {
+  if (scalar_as_buffer_ || !IsDirectScalarReturn(return_type_)) {
+    return false;
+  }
+  const size_t num_extra = argc - expected_argc;
+  ExtraCallCache* const mru = last_extra_cache_;
+  if (mru == nullptr || !mru->valid || !mru->cif_prepared || mru->total_args != argc || mru->extra_count != num_extra ||
+      mru->frame.invoker == nullptr) {
+    return false;
+  }
+  alignas(16) std::array<frame::Word, frame::kWords> frame_words;
+  mru->frame.Clear(frame_words.data());
+  for (size_t i = 0; i < argc; i++) {
+    uint8_t* const slot = mru->frame.At(frame_words.data(), i);
+    const Napi::Value val = info[i];
+    if (i < expected_argc) {
+      const CType type = arg_types_[i];
+      if (IsNumericCType(type)) {
+        if (double number; napi_fast::TryDouble(val, number)) [[likely]] {
+          try {
+            MarshalNumber(val, number, type, slot);
+          } catch (const Napi::Error& e) {
+            throw ArgumentErrorFor(env, i, e);
+          }
+          continue;
+        }
+      } else if (type == CType::CTYPES_POINTER) {
+        const auto kind = val.Type();
+        if (kind == napi_null || kind == napi_undefined) {
+          StoreArgument(slot, static_cast<void*>(nullptr));
+          continue;
+        }
+        if (kind == napi_bigint) {
+          StoreArgument(slot, reinterpret_cast<void*>(AddressFromBigInt(val)));
+          continue;
+        }
+      }
+      return false;
+    }
+    if (double number; napi_fast::TryDouble(val, number)) [[likely]] {
+      const CType type = VariadicNumberType(number);
+      if (type == mru->extra_types[i - expected_argc]) [[likely]] {
+        StoreVariadicNumber(number, type, slot);
+        continue;
+      }
+    }
+    return false;
+  }
+  const CountScope cache_scope(&mru->in_use);
+  const CountScope depth_scope(&call_depth_);
+  const CTypesAddon::ScopelessCallbacks scopeless(addon_);
+  alignas(8) std::array<std::byte, 8> out{};
+  const SavedErrorState saved_errors = SwapInErrorState();
+  mru->frame.invoker(fn_ptr_, frame_words.data(), out.data());
+  CaptureErrorState(saved_errors);
+  result = ReturnScalar(env, return_type_, out.data());
+  if constexpr (HasErrcheck) {
+    if (errcheck != nullptr) [[unlikely]] {
+      result = ApplyErrcheck(env, result, FunctionArguments{info}, *errcheck);
+    }
+  }
+  return true;
+}
+
 // Firme semplici (simple_call_): slot e risultato sullo stack, senza
 // CallContext o scratch. Le stringhe corte vanno nel buffer
 // inline dell'istanza, come in Call(); una stringa che non ci sta e le chiamate
@@ -476,11 +556,14 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
   }
   Napi::Env env = info.Env();
   const LibraryCallScope library_scope(library_, env);
+  const size_t num_extra = argc - expected_argc;
+  if (num_extra != 0 && TryExtraFrameCall<Args, HasErrcheck>(env, info, argc, expected_argc, result, errcheck)) {
+    return true;
+  }
   alignas(16) std::array<uint64_t, kMaxSimpleArgs*(ARG_SLOT_SIZE / sizeof(uint64_t))> slots;
   std::array<void*, kMaxSimpleArgs> values;
   // Argomenti variadici (oltre argtypes): tipo dedotto dal valore, come Call().
   std::array<CType, kMaxSimpleArgs> extra_types;
-  const size_t num_extra = argc - expected_argc;
   size_t string_offset = 0;
   // Stringhe che non stanno nel buffer inline: nello scratch riutilizzabile
   // delle chiamate (scratch_.strings, come CallArguments), libero perché
@@ -760,6 +843,12 @@ bool FFIFunction::SimpleCall(const Args& info, Napi::Value& result, const Napi::
       case CType::CTYPES_UINT32:
         result = napi_fast::Uint32(env, LoadAs<uint32_t>(return_value));
         break;
+      case CType::CTYPES_INT64:
+        result = Napi::Value(env, napi_fast::Int64BigInt(env, LoadAs<int64_t>(return_value)));
+        break;
+      case CType::CTYPES_UINT64:
+        result = Napi::Value(env, napi_fast::PointerBigInt(env, LoadAs<uint64_t>(return_value)));
+        break;
       case CType::CTYPES_DOUBLE:
         result = Napi::Number::New(env, LoadAs<double>(return_value));
         break;
@@ -987,6 +1076,98 @@ napi_value FFIFunction::AllInt32Entry(napi_env env, napi_callback_info info) {
                           static_cast<int32_t>(val.As<Napi::Boolean>().Value() ? 1 : 0));
           } else {
             needs_js = kind == napi_object || kind == napi_function;
+            complete = false;
+            break;
+          }
+        }
+      }
+      if (complete) [[likely]] {
+        const CountScope depth(&self->call_depth_);
+        const CTypesAddon::ScopelessCallbacks callbacks(self->addon_);
+        alignas(8) std::array<std::byte, 8> out{};
+        const auto saved = self->SwapInErrorState();
+        self->frame_plan_.invoker(self->fn_ptr_, words.data(), out.data());
+        self->CaptureErrorState(saved);
+        return ReturnScalar(env, self->return_type_, out.data());
+      }
+    }
+    if (needs_js) {
+      return self->CallEntryFallback(env, info);
+    }
+    return FastEntry<Capacity>(env, info);
+  });
+}
+
+// Firme numeriche miste su frame a registri (2..32 argomenti): evita lo stack
+// di SimpleCall (slots[], values[], extra_types[], stringhe, puntatori).
+template <size_t Capacity>
+napi_value FFIFunction::ScalarFrameEntry(napi_env env, napi_callback_info info) {
+  return GuardNapiCall(env, [&]() -> napi_value {
+    std::array<napi_value, Capacity> args;
+    size_t argc = 0;
+    void* data = nullptr;
+    if (!napi_fast::GetArguments(env, info, args, argc, data)) [[unlikely]] {
+      return nullptr;
+    }
+    auto* self = static_cast<FFIFunction*>(data);
+    const size_t expected = self->arg_types_.size();
+    bool needs_js = false;
+    if (argc == expected && !self->entry_defer_ && self->call_depth_ == 0 && self->errcheck_callback_.IsEmpty())
+      [[likely]] {
+      const LibraryCallScope scope(self->library_, env);
+      alignas(16) std::array<frame::Word, frame::kWords> words;
+      self->frame_plan_.Clear(words.data());
+      const CType* const types = self->arg_types_.data();
+      bool complete = true;
+      for (size_t i = 0; i < expected; i++) {
+        uint8_t* const slot = self->frame_plan_.At(words.data(), i);
+        const Napi::Value val(env, args[i]);
+        const CType type = types[i];
+        double number;
+        if (napi_fast::TryDouble(val, number)) [[likely]] {
+          if (type == CType::CTYPES_DOUBLE) {
+            StoreArgument(slot, number);
+            continue;
+          }
+          if (type == CType::CTYPES_FLOAT) {
+            StoreArgument(slot, static_cast<float>(number));
+            continue;
+          }
+          if (type == CType::CTYPES_INT32) {
+            if (int32_t v; TryExactInt(number, v)) [[likely]] {
+              StoreArgument(slot, v);
+              continue;
+            }
+          }
+          try {
+            MarshalNumber(val, number, type, slot);
+          } catch (const Napi::Error& e) {
+            throw ArgumentErrorFor(env, i, e);
+          }
+        } else {
+          const auto kind = val.Type();
+          if (kind == napi_object || kind == napi_function) {
+            needs_js = true;
+            complete = false;
+            break;
+          }
+          if (type == CType::CTYPES_DOUBLE || type == CType::CTYPES_FLOAT) {
+            try {
+              const double d = DoubleArgSlow(val);
+              if (type == CType::CTYPES_FLOAT) {
+                StoreArgument(slot, static_cast<float>(d));
+              } else {
+                StoreArgument(slot, d);
+              }
+            } catch (const Napi::Error& e) {
+              throw ArgumentErrorFor(env, i, e);
+            }
+          } else if (kind == napi_bigint) {
+            bool lossless;
+            MarshalIntegerBits(val.As<Napi::BigInt>().Uint64Value(&lossless), type, slot);
+          } else if (kind == napi_boolean) {
+            MarshalIntegerBits(val.As<Napi::Boolean>().Value() ? 1u : 0u, type, slot);
+          } else {
             complete = false;
             break;
           }
