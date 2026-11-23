@@ -302,14 +302,7 @@ CTYPES_ALWAYS_INLINE bool FFIFunction::MarshalArguments(CallContext& ctx) {
     }
     const Napi::Value val = i < expected_argc ? info[i] : ctx.extra_values[i - expected_argc];
 
-    CType type;
-    if (i < expected_argc) [[likely]] {
-      type = arg_types_[i];
-    } else if (ctx.cache_entry) {
-      type = ctx.cache_entry->extra_types[i - expected_argc];
-    } else {
-      type = ctx.extra_types_ptr[i - expected_argc];
-    }
+    CType type = i < expected_argc ? arg_types_[i] : ctx.extra_types_ptr[i - expected_argc];
 
     // Fast path: primitivi.
     try {

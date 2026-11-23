@@ -5,6 +5,50 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.15.4] - 2026-11-23
+
+### Fixed
+
+- Fixed an out-of-bounds read in `FFIFunction::MarshalArguments`
+  (`src/function.cc`) when calling variadic or inferred functions with more than
+  32 extra arguments (`extra_types_overflow` fallback).
+- `StructType.create()` accessors (`src/struct.cc`) now support nested
+  `StructType` and `ArrayType` fields on both get and set instead of returning
+  `undefined` / throwing.
+- `StructInfo::CalculateLayout` and `ArrayInfo` (`src/layout.cc`) now guard
+  layout arithmetic against `size_t` overflow.
+- Functional `union().toObject()` now supports assigning nested `struct()` /
+  `union()` fields and invalidates cached nested snapshots on any aliased field
+  write instead of throwing `TypeError` or returning stale snapshots.
+- Nested `union()` fields returned by `union.get()` now share `buildWrapper()`
+  with `struct()`, enabling promoted `_anonymous_` subfields and mirror-mode
+  (`NODE_CTYPES_NO_EXTERNAL_BUFFERS=1`) synchronization, with per-field cached
+  nested handlers in both `struct()` and `union()`.
+
+### Changed
+
+- **Executor RAII & spin loops (`src/executor.h`, `src/executor.cc`)**:
+  - Replaced the raw owning `PreparedCall*` in `ExecutorJob` with
+    `std::unique_ptr<FFIFunction::PreparedCall>`, removing manual `delete`
+    cleanup across `DeliverExecutorCompletions`, `Abandon`, `Deliver`, and
+    `Cancel` (keeping only the explicit `.release()` on abandoned in-flight
+    calls).
+  - Consolidated `spin` / `spinLimit` option validation via `ReadMicrosOption`,
+    added RAII `DeliveringGuard` in `Executor::Deliver`, used
+    `std::ranges::find_if` in `Executor::Cancel`, and added architecture-aware
+    `CpuRelax()` pause hints (`_mm_pause` / `yield`) inside spin-wait loops.
+- **Internal deduplication, tooling, and CI**:
+  - Centralized exact `double` → `{int32_t, uint32_t, int64_t, uint64_t}`
+    conversion in `TryExactInt<T>` (`src/types.h`), reused across
+    `function_marshal.h`, `function_fast.cc`, and `callback.cc`.
+  - Simplified `specializeCall` in `lib/core/invocation.js` via per-binding
+    `makePlainArgStep` / `applyOrConvert` (preserving monomorphic V8 inlining)
+    and removed unused parameters from `finishOwned`.
+  - Added `format`, `format:cpp`, `format:js`, and `format:check` scripts in
+    `package.json`, removed the TypeDoc directory-link warning in
+    `examples/macos/tray/README.md`, and added a Linux `sanitizers` CI job
+    covering `-DCTYPES_ENABLE_DIRECT_CALLS=OFF` and UndefinedBehaviorSanitizer.
+
 ## [2.15.3] - 2026-11-22
 
 ### Changed

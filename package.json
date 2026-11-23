@@ -1,6 +1,6 @@
 {
   "name": "node-ctypes",
-  "version": "2.15.3",
+  "version": "2.15.4",
   "description": "Python ctypes-like FFI for Node.js using libffi",
   "author": "Damiano Mazzella",
   "license": "MIT",
@@ -31,6 +31,10 @@
     "rebuild": "cmake-js rebuild --target ctypes",
     "clean": "cmake-js clean",
     "generate-ffi-headers": "node third-party/libffi_cmake/generate-headers.js",
+    "format": "npm run format:cpp && npm run format:js",
+    "format:cpp": "clang-format -i --style=file src/*.cc src/*.h",
+    "format:js": "npx prettier --write \"lib/**/*.js\"",
+    "format:check": "clang-format --dry-run -Werror --style=file src/*.cc src/*.h && npx prettier --check \"lib/**/*.js\"",
     "test:types": "tsc -p tests/types/tsconfig.json",
     "bench:koffi": "node tests/benchmarks/benchmark_koffi.js",
     "bench:ffi": "node --experimental-ffi tests/benchmarks/benchmark_node_ffi.js",

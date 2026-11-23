@@ -93,6 +93,14 @@ void StructInfo::CalculateLayout() {
   size_t current_offset = 0;
   size_t max_alignment = min_alignment_;
 
+  constexpr size_t kMaxLayoutSize = SIZE_MAX / 2;
+  auto checked_add = [](size_t a, size_t b) -> size_t {
+    if (b > kMaxLayoutSize - a) {
+      throw std::overflow_error("Struct layout size overflow");
+    }
+    return a + b;
+  };
+
   for (auto& field : fields_) {
     size_t field_alignment = GetTypeAlignment(field.type, field.struct_type, field.array_type);
     max_alignment = std::max(max_alignment, field_alignment);
@@ -103,9 +111,9 @@ void StructInfo::CalculateLayout() {
     } else {
       // Struct: allinea offset al boundary del tipo
       size_t padding = (field_alignment - (current_offset % field_alignment)) % field_alignment;
-      current_offset += padding;
+      current_offset = checked_add(current_offset, padding);
       field.offset = current_offset;
-      current_offset += field.size;
+      current_offset = checked_add(current_offset, field.size);
     }
   }
 
@@ -124,7 +132,7 @@ void StructInfo::CalculateLayout() {
 
   // Padding finale per allineare la struct stessa
   size_t final_padding = (alignment_ - (size_ % alignment_)) % alignment_;
-  size_ += final_padding;
+  size_ = checked_add(size_, final_padding);
 }
 
 bool StructInfo::JSToStruct(Napi::Env env,
@@ -240,6 +248,9 @@ ArrayInfo::ArrayInfo(CType element_type, size_t count, std::shared_ptr<StructInf
     alignment_ = CTypeAlignment(element_type);
   }
 
+  if (element_size_ != 0 && count_ > SIZE_MAX / 2 / element_size_) {
+    throw std::overflow_error("Array layout size overflow");
+  }
   size_ = element_size_ * count_;
 }
 

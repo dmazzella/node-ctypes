@@ -1,7 +1,12 @@
 #include "executor.h"
 
-#ifndef _WIN32
+#ifdef _WIN32
+#include <intrin.h>
+#else
 #include <pthread.h>
+#if defined(__x86_64__) || defined(__i386__)
+#include <immintrin.h>
+#endif
 #endif
 
 namespace ctypes {
@@ -39,6 +44,20 @@ constexpr std::chrono::microseconds kInlineSlice{1000};
 // Dato del segnaposto inviato alla TSFN per contare i giri dell'event loop.
 char turn_marker;
 
+// Hint di pausa per i cicli di attesa attiva: riduce la contesa sui core SMT e
+// il consumo senza cedere il quanto allo scheduler.
+inline void CpuRelax() noexcept {
+#if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
+  _mm_pause();
+#elif defined(_MSC_VER) && defined(_M_ARM64)
+  __yield();
+#elif defined(__x86_64__) || defined(__i386__)
+  _mm_pause();
+#elif defined(__aarch64__) || defined(__arm__)
+  asm volatile("yield" ::: "memory");
+#endif
+}
+
 // Attende attivamente, per al più `spin` (pochi microsecondi), che `counter`
 // cambi da `seen`. Non cede il processore: con altri thread pronti sullo
 // stesso core, yield() lo cederebbe per un intero quanto (decine di ms).
@@ -48,6 +67,7 @@ bool SpinUntilChanged(const std::atomic<uint64_t>& counter, uint64_t seen, std::
     if (std::chrono::steady_clock::now() >= deadline) {
       return false;
     }
+    CpuRelax();
   }
   return true;
 }
@@ -62,8 +82,26 @@ bool AwaitUntilChanged(const std::atomic<uint64_t>& counter, uint64_t seen, std:
         std::chrono::steady_clock::now() >= deadline) {
       return false;
     }
+    CpuRelax();
   }
   return true;
+}
+
+// Legge un'opzione temporale in microsecondi [0, kMaxSpinMicros] dall'oggetto options.
+double ReadMicrosOption(Napi::Env env, const Napi::Object& options, const char* key, double fallback) {
+  const Napi::Value value = options.Get(key);
+  if (value.IsUndefined()) {
+    return fallback;
+  }
+  if (!value.IsNumber()) {
+    throw Napi::TypeError::New(env, std::format("Executor {} must be a number of microseconds", key));
+  }
+  const double micros = value.As<Napi::Number>().DoubleValue();
+  if (!(micros >= 0 && micros <= kMaxSpinMicros)) {
+    throw Napi::RangeError::New(env,
+                                std::format("Executor {} must be between 0 and {} microseconds", key, kMaxSpinMicros));
+  }
+  return micros;
 }
 
 // Nome del thread nei debugger e nei profiler (best effort).
@@ -108,7 +146,7 @@ void ExecutorLoop(std::shared_ptr<ExecutorQueue> queue, std::string name, std::u
     if (queue->abandoned || queue->waiting.empty()) {
       return;
     }
-    const ExecutorJob job = queue->waiting.front();
+    ExecutorJob job = std::move(queue->waiting.front());
     queue->waiting.pop_front();
     queue->busy = true;
     lock.unlock();
@@ -117,12 +155,14 @@ void ExecutorLoop(std::shared_ptr<ExecutorQueue> queue, std::string name, std::u
     queue->busy = false;
     if (queue->abandoned) {
       // Environment chiuso durante la chiamata: la PreparedCall si può
-      // distruggere solo sul thread JS, che non esiste più.
+      // distruggere solo sul thread JS, che non esiste più (leak intenzionale).
+      static_cast<void>(job.call.release());
       return;
     }
-    queue->done.push_back(job);
+    const uint64_t job_id = job.id;
+    queue->done.push_back(std::move(job));
     queue->finished.fetch_add(1, std::memory_order_release);
-    if (queue->awaited == job.id) {
+    if (queue->awaited == job_id) {
       // Il thread JS la sta aspettando e la completa lui.
       queue->awaited = 0;
       queue->awaited_done = true;
@@ -162,9 +202,6 @@ void DeliverExecutorCompletions(Napi::Env env, Napi::Function, ExecutorQueue* qu
   // Callback C della TSFN: nessuna eccezione C++ deve uscirne.
   try {
     if (!deliver) {
-      for (const ExecutorJob& job : jobs) {
-        delete job.call;
-      }
       return;
     }
     deliver(env, std::move(jobs));
@@ -192,45 +229,22 @@ Executor::Executor(const Napi::CallbackInfo& info) : Napi::ObjectWrap<Executor>(
   info.This().As<Napi::Object>().TypeTag(&kTypeTag);
 
   name_ = kDefaultThreadName;
+  double spin = kDefaultSpinMicros;
+  double spin_limit = kDefaultSpinLimitMicros;
   if (info.Length() > 0 && !info[0].IsUndefined() && !info[0].IsNull()) {
     if (!info[0].IsObject()) {
       throw Napi::TypeError::New(env, "Executor options must be an object");
     }
-    const Napi::Value name = info[0].As<Napi::Object>().Get("name");
+    const Napi::Object options = info[0].As<Napi::Object>();
+    const Napi::Value name = options.Get("name");
     if (!name.IsUndefined()) {
       if (!name.IsString()) {
         throw Napi::TypeError::New(env, "Executor name must be a string");
       }
       name_ = name.As<Napi::String>().Utf8Value();
     }
-  }
-  double spin = kDefaultSpinMicros;
-  if (info.Length() > 0 && info[0].IsObject()) {
-    const Napi::Value value = info[0].As<Napi::Object>().Get("spin");
-    if (!value.IsUndefined()) {
-      if (!value.IsNumber()) {
-        throw Napi::TypeError::New(env, "Executor spin must be a number of microseconds");
-      }
-      spin = value.As<Napi::Number>().DoubleValue();
-      if (!(spin >= 0 && spin <= kMaxSpinMicros)) {
-        throw Napi::RangeError::New(env,
-                                    std::format("Executor spin must be between 0 and {} microseconds", kMaxSpinMicros));
-      }
-    }
-  }
-  double spin_limit = kDefaultSpinLimitMicros;
-  if (info.Length() > 0 && info[0].IsObject()) {
-    const Napi::Value value = info[0].As<Napi::Object>().Get("spinLimit");
-    if (!value.IsUndefined()) {
-      if (!value.IsNumber()) {
-        throw Napi::TypeError::New(env, "Executor spinLimit must be a number of microseconds");
-      }
-      spin_limit = value.As<Napi::Number>().DoubleValue();
-      if (!(spin_limit >= 0 && spin_limit <= kMaxSpinMicros)) {
-        throw Napi::RangeError::New(
-          env, std::format("Executor spinLimit must be between 0 and {} microseconds", kMaxSpinMicros));
-      }
-    }
+    spin = ReadMicrosOption(env, options, "spin", kDefaultSpinMicros);
+    spin_limit = ReadMicrosOption(env, options, "spinLimit", kDefaultSpinLimitMicros);
   }
   queue_->spin = std::chrono::microseconds(static_cast<int64_t>(spin));
   spin_limit_ =
@@ -337,12 +351,6 @@ void Executor::Abandon() {
     }
     channel_.Release();
   }
-  for (const ExecutorJob& job : waiting) {
-    delete job.call;
-  }
-  for (const ExecutorJob& job : done) {
-    delete job.call;
-  }
   abandoned_ = true;
   started_ = false;
 }
@@ -374,7 +382,7 @@ uint64_t Executor::Submit(Napi::Env env, std::unique_ptr<FFIFunction::PreparedCa
   {
     std::lock_guard lock(queue_->mutex);
     await_inline = await_inline && queue_->waiting.empty();
-    queue_->waiting.push_back({id, call.release()});
+    queue_->waiting.push_back(ExecutorJob{id, std::move(call)});
     queue_->submitted.fetch_add(1, std::memory_order_release);
     if (await_inline) {
       queue_->awaited = id;
@@ -497,25 +505,29 @@ std::optional<Napi::Error> Executor::Deliver(Napi::Env env, std::vector<Executor
     return std::nullopt;
   }
   std::optional<Napi::Error> first_error;
-  const bool delivering = delivering_;
-  delivering_ = true;
-  for (const ExecutorJob& job : jobs) {
-    const std::unique_ptr<FFIFunction::PreparedCall> call(job.call);
-    pending_--;
-    completed_++;
-    Learn(call->Function(), call->RunDuration());
-    try {
-      call->Complete(env);
-    } catch (const Napi::Error& e) {
-      if (!first_error) {
-        first_error = e;
+  {
+    struct DeliveringGuard {
+      bool& flag;
+      bool previous;
+      ~DeliveringGuard() { flag = previous; }
+    } guard{delivering_, std::exchange(delivering_, true)};
+    for (ExecutorJob& job : jobs) {
+      std::unique_ptr<FFIFunction::PreparedCall> call = std::move(job.call);
+      pending_--;
+      completed_++;
+      Learn(call->Function(), call->RunDuration());
+      try {
+        call->Complete(env);
+      } catch (const Napi::Error& e) {
+        if (!first_error) {
+          first_error = e;
+        }
+      } catch (...) {
+        // Complete non solleva altro; un errore nativo inatteso non deve
+        // impedire di completare le altre chiamate.
       }
-    } catch (...) {
-      // Complete non solleva altro; un errore nativo inatteso non deve
-      // impedire di completare le altre chiamate.
     }
   }
-  delivering_ = delivering;
   Settled(env);
   return first_error;
 }
@@ -584,17 +596,16 @@ Napi::Value Executor::Cancel(const Napi::CallbackInfo& info) {
   ExecutorJob job;
   {
     std::lock_guard lock(queue_->mutex);
-    const auto found = std::find_if(queue_->waiting.begin(), queue_->waiting.end(),
-                                    [id](const ExecutorJob& candidate) { return candidate.id == id; });
+    const auto found =
+      std::ranges::find_if(queue_->waiting, [id](const ExecutorJob& candidate) { return candidate.id == id; });
     if (found == queue_->waiting.end()) {
       return Napi::Boolean::New(env, false);
     }
-    job = *found;
+    job = std::move(*found);
     queue_->waiting.erase(found);
   }
-  const std::unique_ptr<FFIFunction::PreparedCall> call(job.call);
   pending_--;
-  call->Reject(info.Length() > 1 ? info[1] : env.Undefined());
+  job.call->Reject(info.Length() > 1 ? info[1] : env.Undefined());
   Settled(env);
   return Napi::Boolean::New(env, true);
 }

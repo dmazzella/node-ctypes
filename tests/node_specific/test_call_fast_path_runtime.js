@@ -506,10 +506,14 @@ describe("CDLL.func conversion entry-point regressions", function () {
         libc.close();
       }
 
-      // specializeCall case 2 variadic path: primitive fast-path vs object extra args
+      // specializeCall case 2 variadic path: primitive fast-path vs object extra args,
+      // plus >32 extra variadic arguments (overflow path in AcquireExtraCall / MarshalArguments)
       const vsum = fixture.func("fixture_variadic_sum", ctypes.c_int32, [ctypes.c_void_p, ctypes.c_int32]);
       assert.strictEqual(vsum(null, 3, 7, 8, 9), 24);
       assert.strictEqual(vsum(null, 3, 7, new ctypes.c_int32(8), { _as_parameter_: 9 }), 24);
+      const many35 = Array.from({ length: 35 }, (_, i) => i + 1);
+      assert.strictEqual(vsum(null, 35, ...many35), 630);
+      assert.strictEqual(await vsum.callAsync(null, 35, ...many35), 630);
       let cbHits = 0;
       const hook = ctypes.callback(
         () => {

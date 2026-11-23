@@ -967,12 +967,9 @@ napi_value FFIFunction::AllInt32Entry(napi_env env, napi_callback_info info) {
         const Napi::Value val(env, args[i]);
         double number;
         if (napi_fast::TryDouble(val, number)) [[likely]] {
-          if (number >= -2147483648.0 && number <= 2147483647.0) [[likely]] {
-            const auto v = static_cast<int32_t>(number);
-            if (static_cast<double>(v) == number) [[likely]] {
-              StoreArgument(self->frame_plan_.At(words.data(), i), v);
-              continue;
-            }
+          if (int32_t v; TryExactInt(number, v)) [[likely]] {
+            StoreArgument(self->frame_plan_.At(words.data(), i), v);
+            continue;
           }
           try {
             StoreArgument(self->frame_plan_.At(words.data(), i), Int32FromNumber(val, number));
@@ -1120,9 +1117,8 @@ napi_value FFIFunction::DirectPointerCall(napi_env env, napi_callback_info info)
             }
             break;
           case CType::CTYPES_INT32:
-            if (double d; napi_fast::TryDouble(val, d) && d >= -2147483648.0 && d <= 2147483647.0) [[likely]] {
-              const auto v = static_cast<int32_t>(d);
-              if (static_cast<double>(v) == d) [[likely]] {
+            if (double d; napi_fast::TryDouble(val, d)) [[likely]] {
+              if (int32_t v; TryExactInt(d, v)) [[likely]] {
                 StoreArgument(slot, v);
                 break;
               }
@@ -1130,9 +1126,8 @@ napi_value FFIFunction::DirectPointerCall(napi_env env, napi_callback_info info)
             complete = false;
             break;
           case CType::CTYPES_UINT32:
-            if (double d; napi_fast::TryDouble(val, d) && d >= 0.0 && d <= 4294967295.0) [[likely]] {
-              const auto v = static_cast<uint32_t>(d);
-              if (static_cast<double>(v) == d) [[likely]] {
+            if (double d; napi_fast::TryDouble(val, d)) [[likely]] {
+              if (uint32_t v; TryExactInt(d, v)) [[likely]] {
                 StoreArgument(slot, v);
                 break;
               }
@@ -1141,10 +1136,8 @@ napi_value FFIFunction::DirectPointerCall(napi_env env, napi_callback_info info)
             break;
           case CType::CTYPES_INT64:
           case CType::CTYPES_SSIZE_T:
-            if (double d; napi_fast::TryDouble(val, d) && d >= -9007199254740991.0 && d <= 9007199254740991.0)
-              [[likely]] {
-              const auto v = static_cast<int64_t>(d);
-              if (static_cast<double>(v) == d) [[likely]] {
+            if (double d; napi_fast::TryDouble(val, d)) [[likely]] {
+              if (int64_t v; TryExactInt(d, v)) [[likely]] {
                 StoreArgument(slot, v);
                 break;
               }
@@ -1156,9 +1149,8 @@ napi_value FFIFunction::DirectPointerCall(napi_env env, napi_callback_info info)
             break;
           case CType::CTYPES_UINT64:
           case CType::CTYPES_SIZE_T:
-            if (double d; napi_fast::TryDouble(val, d) && d >= 0.0 && d <= 9007199254740991.0) [[likely]] {
-              const auto v = static_cast<uint64_t>(d);
-              if (static_cast<double>(v) == d) [[likely]] {
+            if (double d; napi_fast::TryDouble(val, d)) [[likely]] {
+              if (uint64_t v; TryExactInt(d, v)) [[likely]] {
                 StoreArgument(slot, v);
                 break;
               }

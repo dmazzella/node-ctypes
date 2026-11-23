@@ -308,6 +308,33 @@ template <typename Fn, typename Fallback>
 // "Buffer", nome del costruttore per gli altri oggetti).
 [[nodiscard]] std::string JSTypeName(const Napi::Value& value);
 
+// Converte un `double` in un intero esatto di tipo T senza UB se `d` è intero
+// e rientra nell'intervallo rappresentabile di T; false per NaN, infiniti,
+// non interi o valori fuori range (gestiti dal percorso generale).
+template <std::integral T>
+  requires(std::same_as<T, int32_t> || std::same_as<T, uint32_t> || std::same_as<T, int64_t> ||
+           std::same_as<T, uint64_t>)
+[[nodiscard]] CTYPES_ALWAYS_INLINE bool TryExactInt(double d, T& out) noexcept {
+  bool in_range = false;
+  if constexpr (std::same_as<T, int32_t>) {
+    in_range = d >= -2147483648.0 && d <= 2147483647.0;
+  } else if constexpr (std::same_as<T, uint32_t>) {
+    in_range = d >= 0.0 && d <= 4294967295.0;
+  } else if constexpr (std::same_as<T, int64_t>) {
+    in_range = d >= -9223372036854775808.0 && d < 9223372036854775808.0;
+  } else {
+    in_range = d >= 0.0 && d < 18446744073709551616.0;
+  }
+  if (in_range) [[likely]] {
+    const auto v = static_cast<T>(d);
+    if (static_cast<double>(v) == d) [[likely]] {
+      out = v;
+      return true;
+    }
+  }
+  return false;
+}
+
 // Number usato come intero C: i suoi 64 bit bassi (Python maschera gli int ai
 // bit del tipo). Un number non intero o non finito è un float, che Python
 // rifiuta per i tipi interi: TypeError.

@@ -6,7 +6,7 @@ title: Menu bar extra (macOS)
 
 A status item in the macOS menu bar with a popup menu that never blocks Node.js (icons, separators, toggles, nested submenus, keyboard, light/dark appearance). It is the macOS port of the [Windows system tray](../../windows/tray/README.md) example, with the same API, mirroring the C++ [pit-ray/fluent-tray](https://github.com/pit-ray/fluent-tray); `add_submenu()` is an extension of this port.
 
-**Platform:** macOS 11 or later (Apple Silicon and Intel) · **Library:** [tray.js](tray.js) · **Icons:** the `.ico` files of [../../windows/tray/assets](../../windows/tray/assets)
+**Platform:** macOS 11 or later (Apple Silicon and Intel) · **Library:** [tray.js](tray.js) · **Icons:** the `.ico` files in `examples/windows/tray/assets/`
 
 ## Run
 

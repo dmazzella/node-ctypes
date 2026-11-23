@@ -172,28 +172,22 @@ double DoubleArgSlow(const Napi::Value& val);
 Napi::Error ArgumentErrorFor(Napi::Env env, size_t index, const Napi::Error& cause);
 
 CTYPES_ALWAYS_INLINE int32_t Int32FromNumber(const Napi::Value& val, double d) {
-  if (d >= -2147483648.0 && d <= 2147483647.0) [[likely]] {
-    if (const auto v = static_cast<int32_t>(d); static_cast<double>(v) == d) [[likely]] {
-      return v;
-    }
+  if (int32_t v; TryExactInt(d, v)) [[likely]] {
+    return v;
   }
   return static_cast<int32_t>(static_cast<uint32_t>(IntegerBitsFromDouble(val, d)));
 }
 
 CTYPES_ALWAYS_INLINE uint32_t Uint32FromNumber(const Napi::Value& val, double d) {
-  if (d >= 0.0 && d <= 4294967295.0) [[likely]] {
-    if (const auto v = static_cast<uint32_t>(d); static_cast<double>(v) == d) [[likely]] {
-      return v;
-    }
+  if (uint32_t v; TryExactInt(d, v)) [[likely]] {
+    return v;
   }
   return static_cast<uint32_t>(IntegerBitsFromDouble(val, d));
 }
 
 CTYPES_ALWAYS_INLINE int64_t Int64FromNumber(const Napi::Value& val, double d) {
-  if (d >= -9223372036854775808.0 && d < 9223372036854775808.0) [[likely]] {
-    if (const auto v = static_cast<int64_t>(d); static_cast<double>(v) == d) [[likely]] {
-      return v;
-    }
+  if (int64_t v; TryExactInt(d, v)) [[likely]] {
+    return v;
   }
   return static_cast<int64_t>(IntegerBitsFromDouble(val, d));
 }

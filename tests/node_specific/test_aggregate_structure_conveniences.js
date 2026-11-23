@@ -330,6 +330,60 @@ describe("Node functional aggregate and object conversion APIs", function () {
     assert.strictEqual(outer.nested.int1, 12345);
     assert.strictEqual(outer.byte3, 3);
   });
+
+  it("should support nested struct setter in union.toObject and anonymous/mirrored nested views", function () {
+    const Inner = ctypes.struct({ lo: ctypes.c_uint16, hi: ctypes.c_uint16 });
+    const WithAnon = ctypes.struct({ inner: { type: Inner, anonymous: true }, tag: ctypes.c_uint32 });
+    const U = ctypes.union({
+      raw: ctypes.c_uint64,
+      pair: Inner,
+      anon: WithAnon,
+    });
+
+    // 1. toObject() setter for nested struct (plain object + Buffer/instance) refreshes view & underlying bytes
+    const buf = Buffer.alloc(U.size);
+    const obj = U.toObject(buf);
+    assert.strictEqual(obj.pair.lo, 0);
+    obj.pair = { lo: 0x1234, hi: 0x5678 };
+    assert.strictEqual(obj.pair.lo, 0x1234);
+    assert.strictEqual(obj.pair.hi, 0x5678);
+    assert.strictEqual(Number(obj.raw & 0xffffffffn), 0x56781234);
+
+    const other = Inner.create({ lo: 0x00aa, hi: 0x00bb });
+    obj.pair = other;
+    assert.strictEqual(obj.pair.lo, 0x00aa);
+    assert.strictEqual(obj.pair.hi, 0x00bb);
+    // Writing another aliased field must also invalidate cached nested snapshots
+    obj.raw = 0x0000cafe0000beefn;
+    assert.strictEqual(obj.pair.lo, 0xbeef);
+    assert.strictEqual(obj.pair.hi, 0x0000);
+
+    // 2. union.get() uses buildWrapper: nested anonymous fields and mirrored views stay synchronized
+    const u = U.create();
+    u.anon.lo = 0x1122;
+    u.anon.hi = 0x3344;
+    u.anon.tag = 0x55667788;
+    assert.strictEqual(u.pair.lo, 0x1122);
+    assert.strictEqual(u.pair.hi, 0x3344);
+    assert.strictEqual(u.anon.tag, 0x55667788);
+
+    class LiveUnion extends ctypes.Union {
+      static _fields_ = [
+        ["raw", ctypes.c_uint64],
+        ["pair", Inner],
+        ["anon", WithAnon],
+      ];
+    }
+    const addr = ctypes.addressof(u._buffer);
+    const view = LiveUnion.from_address(addr);
+    const nestedView = view.anon;
+    assert.strictEqual(nestedView.lo, 0x1122);
+    assert.strictEqual(nestedView.tag, 0x55667788);
+    nestedView.lo = 0x9988;
+    nestedView.tag = 0x11223344;
+    assert.strictEqual(u.pair.lo, 0x9988);
+    assert.strictEqual(u.anon.tag, 0x11223344);
+  });
 });
 
 describe("Node object-initialized aggregate instances", function () {

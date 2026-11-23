@@ -176,4 +176,31 @@ describe("Input Validation", () => {
     assert.throws(() => readValue(Buffer.alloc(4), P), RangeError);
     assert.throws(() => writeValue(0n, c_int32, 1), /NULL pointer/);
   });
+
+  it("StructType.create() supports nested StructType/ArrayType fields and ArrayType rejects unfinalized struct overflow", () => {
+    const Inner = new StructType();
+    Inner.addField("x", CType.INT32);
+    Inner.addField("y", CType.INT32);
+    const Arr = new ArrayType(CType.INT32, 3);
+    const Outer = new StructType();
+    Outer.addField("inner", Inner);
+    Outer.addField("nums", Arr);
+
+    const inst = Outer.create();
+    inst.inner = { x: 11, y: 22 };
+    inst.nums = [3, 4, 5];
+    assert.deepStrictEqual(inst.inner, { x: 11, y: 22 });
+    assert.deepStrictEqual(inst.nums, [3, 4, 5]);
+
+    const innerBuf = Inner.create()._buffer;
+    innerBuf.writeInt32LE(77, 0);
+    innerBuf.writeInt32LE(88, 4);
+    inst.inner = innerBuf;
+    assert.deepStrictEqual(inst.inner, { x: 77, y: 88 });
+
+    // ArrayType and StructInfo reject layout sizes that would overflow size_t
+    const BigElem = new StructType();
+    BigElem.addField("slab", new ArrayType(CType.UINT8, 1 << 20));
+    assert.throws(() => new ArrayType(BigElem, 2 ** 50), RangeError);
+  });
 });

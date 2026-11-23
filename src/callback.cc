@@ -45,15 +45,13 @@ bool StoreNumberResult(const Napi::Value& result, CType type, void* destination)
     StoreReturnValue(destination, static_cast<float>(d));
     return true;
   }
-  if (type == CType::CTYPES_INT32 && d >= -2147483648.0 && d <= 2147483647.0) [[likely]] {
-    const auto v = static_cast<int32_t>(d);
-    if (static_cast<double>(v) == d) [[likely]] {
+  if (type == CType::CTYPES_INT32) {
+    if (int32_t v; TryExactInt(d, v)) [[likely]] {
       StoreReturnValue(destination, v);
       return true;
     }
-  } else if (type == CType::CTYPES_UINT32 && d >= 0.0 && d <= 4294967295.0) {
-    const auto v = static_cast<uint32_t>(d);
-    if (static_cast<double>(v) == d) {
+  } else if (type == CType::CTYPES_UINT32) {
+    if (uint32_t v; TryExactInt(d, v)) [[likely]] {
       StoreReturnValue(destination, v);
       return true;
     }

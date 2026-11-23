@@ -139,18 +139,54 @@ Napi::Value StructType::Create(const Napi::CallbackInfo& info) {
     };
 
     // Getter
-    auto getter = [field_data, offset = field.offset, size = field.size,
-                   type = field.type](const Napi::CallbackInfo& info) -> Napi::Value {
-      return CToJS(info.Env(), field_data(info, offset, size), type);
+    auto getter = [field_data, offset = field.offset, size = field.size, type = field.type,
+                   struct_type = field.struct_type,
+                   array_type = field.array_type](const Napi::CallbackInfo& info) -> Napi::Value {
+      uint8_t* ptr = field_data(info, offset, size);
+      if (struct_type) {
+        return struct_type->StructToJS(info.Env(), ptr);
+      }
+      if (array_type) {
+        return array_type->ArrayToJS(info.Env(), ptr);
+      }
+      return CToJS(info.Env(), ptr, type);
     };
 
     // Setter
     auto setter = [field_data, offset = field.offset, size = field.size, type = field.type,
+                   struct_type = field.struct_type, array_type = field.array_type,
                    name = field.name](const Napi::CallbackInfo& info) -> Napi::Value {
-      if (info.Length() > 0 && JSToC(info[0], type, std::span(field_data(info, offset, size), size)) < 0) {
-        throw Napi::TypeError::New(info.Env(), std::format("Cannot assign field '{}'", name));
+      Napi::Env env = info.Env();
+      if (info.Length() == 0) {
+        return env.Undefined();
       }
-      return info.Env().Undefined();
+      uint8_t* ptr = field_data(info, offset, size);
+      if (struct_type) {
+        if (info[0].IsBuffer()) {
+          const auto src = info[0].As<Napi::Buffer<uint8_t>>();
+          if (src.Length() < size) {
+            throw Napi::RangeError::New(env, std::format("Buffer too small for field '{}'", name));
+          }
+          std::memcpy(ptr, src.Data(), size);
+        } else if (info[0].IsObject()) {
+          if (!struct_type->JSToStruct(env, info[0].As<Napi::Object>(), std::span(ptr, size))) {
+            return env.Undefined();
+          }
+        } else {
+          throw Napi::TypeError::New(env, std::format("Cannot assign field '{}'", name));
+        }
+        return env.Undefined();
+      }
+      if (array_type) {
+        if (!array_type->JSToArray(env, info[0], std::span(ptr, size))) {
+          return env.Undefined();
+        }
+        return env.Undefined();
+      }
+      if (JSToC(info[0], type, std::span(ptr, size)) < 0) {
+        throw Napi::TypeError::New(env, std::format("Cannot assign field '{}'", name));
+      }
+      return env.Undefined();
     };
 
     Napi::PropertyDescriptor desc =

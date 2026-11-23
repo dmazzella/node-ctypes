@@ -8,11 +8,11 @@
 
 namespace ctypes {
 
-// Una chiamata accodata su un Executor: proprietà della coda, poi del thread
-// nativo, poi del thread JS che la completa (e la distrugge).
+// Una chiamata accodata su un Executor: proprietà esclusiva della coda, poi del
+// thread nativo, poi del thread JS che la completa (e la distrugge).
 struct ExecutorJob {
   uint64_t id = 0;
-  FFIFunction::PreparedCall* call = nullptr;
+  std::unique_ptr<FFIFunction::PreparedCall> call;
 };
 
 // Stato condiviso tra l'Executor (thread JS) e il suo thread nativo. Il thread
